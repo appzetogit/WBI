@@ -43,6 +43,7 @@ export default defineConfig({
       output: {
         manualChunks: (id) => {
           if (id.includes('node_modules')) {
+            // React core — must be its own chunk, loaded first
             if (
               id.includes('node_modules/react/') ||
               id.includes('node_modules/react-dom/') ||
@@ -52,24 +53,25 @@ export default defineConfig({
             ) {
               return 'react-vendor';
             }
-            if (id.includes('firebase/')) {
+            // Firebase — very large, standalone (no React.createContext at init)
+            if (
+              id.includes('node_modules/firebase/') ||
+              id.includes('node_modules/@firebase/')
+            ) {
               return 'firebase-vendor';
             }
-            if (id.includes('framer-motion')) {
-              return 'animation-vendor';
-            }
-            if (id.includes('gsap')) {
+            // GSAP — standalone, no React dependency at init
+            if (id.includes('node_modules/gsap/')) {
               return 'gsap-vendor';
             }
-            if (id.includes('leaflet') || id.includes('react-leaflet') || id.includes('@react-google-maps')) {
-              return 'maps-vendor';
-            }
-            if (id.includes('xlsx')) {
+            // xlsx — standalone, no React dependency
+            if (id.includes('node_modules/xlsx/')) {
               return 'xlsx-vendor';
             }
-            if (id.includes('recharts')) {
-              return 'recharts-vendor';
-            }
+            // Everything else (framer-motion, leaflet, react-leaflet,
+            // @react-google-maps, recharts, react-icons, lucide-react, etc.)
+            // goes into the common vendor chunk so Rollup can guarantee
+            // react-vendor is initialized before any of them run.
             return 'vendor';
           }
         },
