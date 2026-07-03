@@ -106,7 +106,8 @@ const EditProfile = () => {
       const payload = {
         name: formData.name,
         email: formData.email,
-        status: formData.status
+        status: formData.status,
+        profilePhoto: formData.profilePhoto
       };
 
 
@@ -120,6 +121,9 @@ const EditProfile = () => {
         ...payload,
         profilePhoto: payload.profilePhoto || currentWorker.profilePhoto
       }));
+
+      queryClient.invalidateQueries(['workerProfile']);
+      queryClient.invalidateQueries(['workerProfileData']);
 
       navigate(`${window.location.pathname.startsWith('/engineer') ? '/engineer' : '/worker'}/profile`);
     } catch (error) {
@@ -153,6 +157,7 @@ const EditProfile = () => {
           onUploadSuccess={(newPhotoUrl) => {
             handleInputChange('profilePhoto', newPhotoUrl);
             queryClient.invalidateQueries(['workerProfile']);
+            queryClient.invalidateQueries(['workerProfileData']);
           }}
         />
 

@@ -80,13 +80,42 @@ const TimeSlotModal = ({
 
   if (!isOpen && !isClosing) return null;
 
-  // Filter dates for current viewing month
-  const datesInView = availableDates.filter(d => 
-    d.getMonth() === currentMonthDate.getMonth() && 
-    d.getFullYear() === currentMonthDate.getFullYear()
-  );
+  const getDaysInMonth = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const daysCount = new Date(year, month + 1, 0).getDate();
+    let firstDayIndex = new Date(year, month, 1).getDay();
+    // Adjust Sunday from 0 to 6, and Monday-Saturday from 1-6 to 0-5
+    firstDayIndex = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
+    
+    const days = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+      days.push(null);
+    }
+    for (let d = 1; d <= daysCount; d++) {
+      days.push(new Date(year, month, d));
+    }
+    return days;
+  };
+
+  const isDateAvailable = (date) => {
+    if (!date) return false;
+    return availableDates.some(availDate => 
+      availDate.getDate() === date.getDate() &&
+      availDate.getMonth() === date.getMonth() &&
+      availDate.getFullYear() === date.getFullYear()
+    );
+  };
+
+  const isDateSelected = (date) => {
+    if (!date || !localSelectedDate) return false;
+    return date.getDate() === localSelectedDate.getDate() &&
+      date.getMonth() === localSelectedDate.getMonth() &&
+      date.getFullYear() === localSelectedDate.getFullYear();
+  };
 
   const monthName = currentMonthDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const weekDays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
   return (
     <>
@@ -98,7 +127,7 @@ const TimeSlotModal = ({
       <div className="fixed bottom-0 left-0 right-0 z-50">
         <div
           className={`bg-white rounded-t-3xl ${isClosing ? 'animate-slide-down' : 'animate-slide-up'} flex flex-col`}
-          style={{ maxHeight: '90vh' }}
+          style={{ maxHeight: '95vh' }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -118,36 +147,42 @@ const TimeSlotModal = ({
           </div>
 
           <div className="px-5 overflow-y-auto pb-6 scrollbar-hide">
-            {/* Dates Row */}
+            {/* Monthly Calendar Grid */}
             {isLoading ? (
-              <div className="py-4 flex justify-center"><div className="w-6 h-6 border-2 border-gray-200 border-t-[#10AFA5] rounded-full animate-spin"></div></div>
-            ) : datesInView.length === 0 ? (
-              <div className="text-center py-4 text-sm text-gray-500">No dates available in this month</div>
+              <div className="py-4 flex justify-center">
+                <div className="w-6 h-6 border-2 border-gray-200 border-t-[#10AFA5] rounded-full animate-spin"></div>
+              </div>
             ) : (
-              <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide snap-x">
-                {datesInView.map((date, idx) => {
-                  const isSelected = localSelectedDate && date.toDateString() === localSelectedDate.toDateString();
-                  const dayName = date.toLocaleString('default', { weekday: 'short' });
-                  const dateNum = date.getDate();
+              <div className="grid grid-cols-7 gap-y-2 gap-x-1 text-center mb-4 bg-gray-50/50 p-3 rounded-2xl border border-gray-100">
+                {weekDays.map((day, idx) => (
+                  <span key={idx} className="text-[11px] font-bold text-gray-400 uppercase py-1">{day}</span>
+                ))}
+                {getDaysInMonth(currentMonthDate).map((date, idx) => {
+                  if (!date) {
+                    return <div key={`empty-${idx}`} className="aspect-square"></div>;
+                  }
+                  const isAvailable = isDateAvailable(date);
+                  const isSelected = isDateSelected(date);
+                  const isToday = date.toDateString() === new Date().toDateString();
+                  const dayNum = date.getDate();
                   
                   return (
                     <button
-                      key={idx}
+                      key={`day-${idx}-${dayNum}`}
+                      disabled={!isAvailable}
                       onClick={() => handleDateSelect(date)}
-                      className={`flex flex-col items-center justify-center shrink-0 w-[52px] snap-center transition-all ${
-                        isSelected ? 'scale-105' : 'opacity-80'
-                      }`}
-                    >
-                      <span className={`text-[13px] font-medium mb-2 ${isSelected ? 'text-[#0F172A]' : 'text-gray-400'}`}>
-                        {dayName}
-                      </span>
-                      <div className={`w-11 h-11 rounded-full flex items-center justify-center text-[15px] font-bold transition-colors ${
+                      className={`aspect-square flex flex-col items-center justify-center rounded-full text-[13px] font-bold relative transition-all ${
                         isSelected 
                           ? 'bg-[#10AFA5] text-white shadow-md' 
-                          : 'bg-transparent text-[#0F172A]'
-                      }`}>
-                        {dateNum}
-                      </div>
+                          : isAvailable
+                            ? 'bg-white text-[#0F172A] border border-gray-100/80 shadow-sm active:scale-95'
+                            : 'bg-transparent text-gray-300 cursor-not-allowed font-normal'
+                      }`}
+                    >
+                      <span>{dayNum}</span>
+                      {isToday && !isSelected && (
+                        <span className="absolute bottom-1.5 w-1 h-1 bg-[#10AFA5] rounded-full"></span>
+                      )}
                     </button>
                   );
                 })}

@@ -59,6 +59,7 @@ const BOOKING_STATUS = {
   PENDING: 'pending',
   CONFIRMED: 'confirmed',
   ACCEPTED: 'accepted',
+  SCHEDULED: 'scheduled',
   ADMIN_ACTION_REQUIRED: 'admin_action_required',
   ASSIGNED: 'assigned',
   JOURNEY_STARTED: 'journey_started',
@@ -66,11 +67,16 @@ const BOOKING_STATUS = {
   SERVICE_STARTED: 'service_started', // OTP verified, service begins
   VISITED: 'visited',
   IN_PROGRESS: 'in_progress',
+  COMPLETED_PENDING_PAYMENT: 'completed_pending_payment', // Worker completed work, awaiting payment
+  PAYMENT_INITIATED: 'payment_initiated', // User initiated payment
+  PAID: 'paid', // Payment successful
   WORK_DONE: 'work_done',
-  COMPLETED: 'completed',
+  COMPLETED: 'completed', // OTP 2 verified, booking closed
   CLOSED: 'closed', // Payment and rating done
   CANCELLED: 'cancelled',
-  REJECTED: 'rejected'
+  REJECTED: 'rejected',
+  DISPUTED: 'disputed', // Dispute raised
+  REFUNDED: 'refunded' // Refunded
 };
 
 // Payment Status

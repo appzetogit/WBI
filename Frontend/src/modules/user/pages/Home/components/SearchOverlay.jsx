@@ -2,13 +2,28 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSearch, FiArrowLeft, FiClock, FiTrendingUp, FiX, FiLayers, FiChevronRight } from 'react-icons/fi';
+import { 
+  FiSearch, FiArrowLeft, FiClock, FiTrendingUp, FiX, FiLayers, FiChevronRight,
+  FiMonitor, FiShield, FiBriefcase, FiZap, FiHeart, FiSettings, FiCpu, FiAlertCircle,
+  FiCloudSnow, FiBox, FiDroplet, FiWind, FiThermometer, FiTool, FiGrid
+} from 'react-icons/fi';
 import { publicCatalogService } from '../../../../../services/catalogService';
 import { themeColors } from '../../../../../theme';
 import ServiceIconRenderer from '../../../components/common/ServiceIconRenderer';
 
+const iconMap = {
+  FiMonitor, FiShield, FiBriefcase, FiZap, FiHeart, FiSettings, FiCpu, FiAlertCircle,
+  FiCloudSnow, FiBox, FiDroplet, FiClock, FiWind, FiThermometer, FiTool, FiGrid
+};
+
+const isReactIconName = (str) => {
+  if (!str) return false;
+  return (str.startsWith('Fi') || str.startsWith('Fa') || str.startsWith('Md') || str.startsWith('Io') || str.startsWith('Lu')) && !str.includes('/') && !str.includes('.');
+};
+
 const toAssetUrl = (url) => {
   if (!url) return '';
+  if (isReactIconName(url)) return url;
   if (url.startsWith('/assets/') || url.startsWith('/img/')) return url;
   const clean = url.replace('/api/upload', '/upload');
   if (clean.startsWith('http')) return clean;
@@ -241,7 +256,9 @@ const SearchOverlay = ({ isOpen, onClose, categories = [], onCategoryClick }) =>
                         className="flex items-center gap-4 p-4 bg-white rounded-2xl active:scale-[0.98] active:bg-gray-50 transition-all cursor-pointer border border-gray-100 hover:border-primary-100 shadow-sm group"
                       >
                         <div className="w-14 h-14 bg-gray-50 rounded-xl flex items-center justify-center overflow-hidden shrink-0 border border-gray-100 group-hover:bg-primary-50/30 transition-colors">
-                          {(item.icon || item.imageUrl || item.brandIcon) ? (
+                          {item.icon && iconMap[item.icon] ? (
+                            React.createElement(iconMap[item.icon], { className: "w-7 h-7 text-[#10AFA5]" })
+                          ) : (item.icon || item.imageUrl || item.brandIcon) ? (
                             <img fetchPriority="low" loading="lazy"                               src={toAssetUrl(item.icon || item.brandIcon || item.imageUrl)}
                               alt=""
                               className="w-10 h-10 object-contain group-hover:scale-110 transition-transform duration-300"

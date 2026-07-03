@@ -1,9 +1,4 @@
-/**
- * Push Notification Service
- * Handles FCM token registration and notification handling
- */
-
-import { messaging, getToken, onMessage } from '../firebase';
+import { getFirebaseMessaging } from '../firebase';
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
 
@@ -67,15 +62,18 @@ async function requestNotificationPermission() {
  */
 async function getFCMToken() {
   try {
-    if (!messaging) {
+    const messagingInstance = await getFirebaseMessaging();
+    if (!messagingInstance) {
       // console.error('Firebase messaging not initialized');
       return null;
     }
 
+    const { getToken } = await import('firebase/messaging');
+
     const registration = await registerServiceWorker();
     await registration.update(); // Update service worker
 
-    const token = await getToken(messaging, {
+    const token = await getToken(messagingInstance, {
       vapidKey: VAPID_KEY,
       serviceWorkerRegistration: registration
     });
@@ -269,13 +267,16 @@ async function removeFCMToken(userType = 'user') {
  * Setup foreground notification handler
  * @param {Function} handler - Custom handler function
  */
-function setupForegroundNotificationHandler(handler) {
-  if (!messaging) {
+async function setupForegroundNotificationHandler(handler) {
+  const messagingInstance = await getFirebaseMessaging();
+  if (!messagingInstance) {
     // console.error('Firebase messaging not initialized');
     return;
   }
 
-  onMessage(messaging, (payload) => {
+  const { onMessage } = await import('firebase/messaging');
+
+  onMessage(messagingInstance, (payload) => {
     // console.log('📬 Foreground message received:', payload);
 
     const data = payload.data || {};

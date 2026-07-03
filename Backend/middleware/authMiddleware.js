@@ -85,10 +85,47 @@ const authenticate = async (req, res, next) => {
       case USER_ROLES.ADMIN:
         user = await Admin.findById(decoded.userId).select('-password').lean();
         break;
-      case USER_ROLES.B2B:
+      case USER_ROLES.B2B: {
         const B2BCompany = require('../models/B2BCompany');
-        user = await B2BCompany.findById(decoded.userId).select('-passwordHash').lean();
+        const B2BUser = require('../models/B2BUser');
+        let b2bUser = await B2BUser.findById(decoded.userId).lean();
+        if (b2bUser) {
+          if (b2bUser.status !== 'active') {
+            return res.status(403).json({ success: false, message: `Access denied. Your account status is: ${b2bUser.status}.` });
+          }
+          const company = await B2BCompany.findById(b2bUser.companyId).lean();
+          if (!company || !company.isActive) {
+            return res.status(403).json({ success: false, message: 'Access denied. Your company account is inactive.' });
+          }
+          user = { 
+            ...b2bUser, 
+            id: b2bUser._id.toString(), 
+            companyId: b2bUser.companyId.toString(),
+            verificationStatus: company.verificationStatus 
+          };
+        } else {
+          const company = await B2BCompany.findById(decoded.userId).select('-passwordHash').lean();
+          if (company) {
+            user = { 
+              ...company, 
+              id: company._id.toString(), 
+              companyId: company._id.toString(),
+              role: 'Company Admin',
+              permissions: [
+                'bulk_jobs.read', 'bulk_jobs.write',
+                'jobs.read', 'jobs.write',
+                'wallet.read', 'wallet.write',
+                'invoices.read',
+                'reports.read',
+                'support.write',
+                'users.manage',
+                'company_profile.read', 'company_profile.write'
+              ]
+            };
+          }
+        }
         break;
+      }
       default:
         console.error('Role mismatch in middleware:', decoded.role);
         return res.status(401).json({
@@ -110,6 +147,12 @@ const authenticate = async (req, res, next) => {
     req.user = { ...user, id: user._id.toString() };
     req.userId = decoded.userId;
     req.userRole = decoded.role;
+    
+    // Attach companyId for B2B requests
+    const userRoleStr = decoded.role ? decoded.role.toUpperCase() : '';
+    if (userRoleStr === 'B2B') {
+      req.companyId = user.companyId ? user.companyId.toString() : user._id.toString();
+    }
 
     next();
   } catch (error) {

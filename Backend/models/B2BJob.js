@@ -99,6 +99,27 @@ const b2bJobSchema = new mongoose.Schema({
     enum: ['pending', 'searching_engineer', 'assigned', 'in_progress', 'completed', 'cancelled', 'failed'], 
     default: 'pending' 
   },
+  trackingStatus: {
+    type: String,
+    enum: ['assigned', 'accepted', 'en_route', 'reached_location', 'work_started', 'completed', 'cancelled', 'failed'],
+    default: 'assigned'
+  },
+  eta: {
+    type: Number, // Estimated Time of Arrival in minutes
+    default: null
+  },
+  assignedAt: {
+    type: Date,
+    default: null
+  },
+  startedAt: {
+    type: Date,
+    default: null
+  },
+  completedAt: {
+    type: Date,
+    default: null
+  },
   charge: { 
     type: Number, 
     default: 0 
@@ -107,6 +128,12 @@ const b2bJobSchema = new mongoose.Schema({
     type: String,
     enum: ['unpaid', 'deducted', 'pending_deduction'],
     default: 'unpaid'
+  },
+  invoiceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'B2BInvoice',
+    default: null,
+    index: true
   },
   date: { 
     type: Date, 
@@ -118,6 +145,7 @@ const b2bJobSchema = new mongoose.Schema({
 
 b2bJobSchema.index({ companyId: 1 });
 b2bJobSchema.index({ companyId: 1, date: 1 });
+b2bJobSchema.index({ invoiceId: 1 });
 b2bJobSchema.index({ 'coordinates.coordinates': '2d' }); // 2d index for standard coordinates querying if 2dsphere is too strict
 b2bJobSchema.index({ status: 1 });
 b2bJobSchema.index({ phone: 1 });

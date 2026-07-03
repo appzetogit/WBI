@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 const OneTimeServices = () => {
   const navigate = useNavigate();
   const [services, setServices] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentService, setCurrentService] = useState(null);
@@ -15,6 +16,7 @@ const OneTimeServices = () => {
     name: '',
     subtitle: '',
     image: '',
+    categoryId: '',
     isActive: true,
     sortOrder: 0,
     isBrandRequired: false,
@@ -34,7 +36,21 @@ const OneTimeServices = () => {
 
   useEffect(() => {
     fetchServices();
+    fetchCategories();
   }, []);
+
+  const fetchCategories = async () => {
+    try {
+      const res = await api.get('/admin/service-categories');
+      if (res.data.success) {
+        // filter B2C categories
+        const b2c = (res.data.data || []).filter(c => c.audience === 'b2c' || c.serviceType === 'one_time');
+        setCategories(b2c);
+      }
+    } catch (err) {
+      console.error('Failed to fetch categories', err);
+    }
+  };
 
   const fetchServices = async () => {
     try {
@@ -86,6 +102,7 @@ const OneTimeServices = () => {
         name: service.name || '',
         subtitle: service.subtitle || '',
         image: service.image || '',
+        categoryId: service.categoryId || '',
         isActive: service.isActive !== undefined ? service.isActive : true,
         sortOrder: service.sortOrder || 0,
         isBrandRequired: service.isBrandRequired || false,
@@ -108,6 +125,7 @@ const OneTimeServices = () => {
         name: '',
         subtitle: '',
         image: '',
+        categoryId: categories.length > 0 ? categories[0]._id : '',
         isActive: true,
         sortOrder: 0,
         isBrandRequired: false,
@@ -148,6 +166,7 @@ const OneTimeServices = () => {
             <tr>
               <th className="p-4 font-semibold text-gray-600 text-sm">Image</th>
               <th className="p-4 font-semibold text-gray-600 text-sm">Name</th>
+              <th className="p-4 font-semibold text-gray-600 text-sm">Category</th>
               <th className="p-4 font-semibold text-gray-600 text-sm">Status</th>
               <th className="p-4 font-semibold text-gray-600 text-sm">Order</th>
               <th className="p-4 font-semibold text-gray-600 text-sm text-right">Actions</th>
@@ -156,7 +175,7 @@ const OneTimeServices = () => {
           <tbody>
             {services.length === 0 ? (
               <tr>
-                <td colSpan="5" className="p-8 text-center text-gray-500">No services found</td>
+                <td colSpan="6" className="p-8 text-center text-gray-500">No services found</td>
               </tr>
             ) : (
               services.map((service) => (
@@ -171,6 +190,11 @@ const OneTimeServices = () => {
                   <td className="p-4">
                     <p className="font-semibold text-gray-800">{service.name}</p>
                     <p className="text-xs text-gray-500">{service.slug}</p>
+                  </td>
+                  <td className="p-4">
+                    <span className="text-sm font-semibold text-gray-700 bg-gray-50 border border-gray-200/60 px-2.5 py-1 rounded-lg">
+                      {categories.find(c => c._id === service.categoryId)?.name || 'Unassigned'}
+                    </span>
                   </td>
                   <td className="p-4">
                     <span className={`px-2 py-1 text-xs font-bold rounded-full ${service.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -221,6 +245,20 @@ const OneTimeServices = () => {
                   value={formData.subtitle}
                   onChange={e => setFormData({...formData, subtitle: e.target.value})}
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Parent Category</label>
+                <select
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-white"
+                  value={formData.categoryId}
+                  onChange={e => setFormData({...formData, categoryId: e.target.value})}
+                >
+                  <option value="" disabled>Select a Category</option>
+                  {categories.map(cat => (
+                    <option key={cat._id} value={cat._id}>{cat.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Image URL</label>

@@ -21,7 +21,10 @@ const ServiceCategories = () => {
     displayOrder: 0,
     isActive: true,
     showOnApp: true,
-    roles: ['worker']
+    roles: ['worker'],
+    serviceType: 'one_time',
+    audience: 'b2c',
+    assignedRole: 'worker'
   });
 
   const fetchCategories = async () => {
@@ -54,12 +57,27 @@ const ServiceCategories = () => {
         displayOrder: cat.displayOrder || 0,
         isActive: cat.isActive,
         showOnApp: cat.showOnApp,
-        roles: cat.roles || ['worker']
+        roles: cat.roles || ['worker'],
+        serviceType: cat.serviceType || 'one_time',
+        audience: cat.audience || 'b2c',
+        assignedRole: cat.assignedRole || 'worker'
       });
     } else {
       setCurrentCategory(null);
       setFormData({
-        name: '', description: '', shortDescription: '', icon: '', bannerImage: '', trustPoints: '', displayOrder: 0, isActive: true, showOnApp: true, roles: ['worker']
+        name: '',
+        description: '',
+        shortDescription: '',
+        icon: '',
+        bannerImage: '',
+        trustPoints: '',
+        displayOrder: 0,
+        isActive: true,
+        showOnApp: true,
+        roles: ['worker'],
+        serviceType: 'one_time',
+        audience: 'b2c',
+        assignedRole: 'worker'
       });
     }
     setIsModalOpen(true);
@@ -131,7 +149,7 @@ const ServiceCategories = () => {
               <tr>
                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Icon</th>
                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Name & Desc</th>
-                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Roles</th>
+                <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Audience</th>
                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Order</th>
                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase">Active</th>
                 <th className="p-4 text-xs font-semibold text-gray-500 uppercase text-right">Actions</th>
@@ -150,11 +168,9 @@ const ServiceCategories = () => {
                     <p className="text-xs text-gray-500 line-clamp-1">{cat.description}</p>
                   </td>
                   <td className="p-4 text-sm font-medium">
-                    <div className="flex gap-1 flex-wrap">
-                      {(cat.roles || []).map(r => (
-                        <span key={r} className="text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded uppercase">{r}</span>
-                      ))}
-                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${cat.audience === 'b2b' ? 'bg-purple-50 text-purple-600' : 'bg-green-50 text-green-600'}`}>
+                      {cat.audience === 'b2b' ? 'B2B (Enterprise)' : 'B2C (One-Time)'}
+                    </span>
                   </td>
                   <td className="p-4 text-sm font-medium">{cat.displayOrder}</td>
                   <td className="p-4">
@@ -220,38 +236,35 @@ const ServiceCategories = () => {
                   <span className="text-sm font-medium">Show on App</span>
                 </label>
               </div>
-              <div className="pt-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Available For (Roles)</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={formData.roles.includes('worker')} 
-                      onChange={e => {
-                        const newRoles = e.target.checked 
-                          ? [...formData.roles, 'worker'] 
-                          : formData.roles.filter(r => r !== 'worker');
-                        setFormData({...formData, roles: newRoles});
-                      }} 
-                      className="w-4 h-4 text-[#10AFA5]" 
-                    />
-                    <span className="text-sm font-medium">Worker</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={formData.roles.includes('engineer')} 
-                      onChange={e => {
-                        const newRoles = e.target.checked 
-                          ? [...formData.roles, 'engineer'] 
-                          : formData.roles.filter(r => r !== 'engineer');
-                        setFormData({...formData, roles: newRoles});
-                      }} 
-                      className="w-4 h-4 text-[#10AFA5]" 
-                    />
-                    <span className="text-sm font-medium">Engineer</span>
-                  </label>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Target Audience & Flow Type</label>
+                <select
+                  className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-[#10AFA5] outline-none"
+                  value={formData.audience}
+                  onChange={e => {
+                    const aud = e.target.value;
+                    if (aud === 'b2c') {
+                      setFormData({
+                        ...formData,
+                        audience: 'b2c',
+                        serviceType: 'one_time',
+                        assignedRole: 'worker',
+                        roles: ['worker']
+                      });
+                    } else {
+                      setFormData({
+                        ...formData,
+                        audience: 'b2b',
+                        serviceType: 'enterprise',
+                        assignedRole: 'engineer',
+                        roles: ['engineer']
+                      });
+                    }
+                  }}
+                >
+                  <option value="b2c">B2C Customer / User (One-Time Service Flow)</option>
+                  <option value="b2b">B2B Enterprise / Client (Engineer Enquiry Flow)</option>
+                </select>
               </div>
               <div className="pt-4 flex justify-end gap-2">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 border rounded-lg text-gray-600">Cancel</button>

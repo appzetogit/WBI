@@ -19,7 +19,7 @@ const {
   deletePackage,
   getPricingRule,
   updatePricingRule
-} = require('../../controllers/admin/oneTimeServiceAdminController');
+} = require('../../controllers/adminControllers/oneTimeServiceAdminController');
 
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isAdmin } = require('../../middleware/roleMiddleware');

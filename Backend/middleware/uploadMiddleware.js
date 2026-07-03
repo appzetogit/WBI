@@ -8,7 +8,7 @@ const cloudinaryStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'appzeto',
-    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif'],
+    allowed_formats: ['jpg', 'png', 'jpeg', 'webp', 'gif', 'avif'],
     // Apply quality-preserving optimization on upload
     transformation: [
       { quality: 'auto:good', fetch_format: 'auto' }
@@ -75,12 +75,20 @@ const documentFilter = (req, file, cb) => {
     'image/jpeg',
     'image/jpg',
     'image/png',
+    'image/webp',
+    'image/gif',
+    'image/svg+xml',
     'application/pdf',
+    'application/x-pdf',
     'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/octet-stream' // fallback for browser generic stream
   ];
 
-  if (allowedMimes.includes(file.mimetype)) {
+  const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'pdf', 'doc', 'docx'];
+  const ext = file.originalname ? file.originalname.split('.').pop().toLowerCase() : '';
+
+  if (allowedMimes.includes(file.mimetype) || allowedExtensions.includes(ext)) {
     cb(null, true);
   } else {
     cb(new Error('Only images and PDF/DOC files are allowed!'), false);

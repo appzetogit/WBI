@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { db } from '../firebase';
+import { getFirebaseDb } from '../firebase';
 import { ref, set } from 'firebase/database';
 
 /**
@@ -36,9 +36,11 @@ export const useLocationTracking = (socket, bookingId, isActive, options = {}) =
   }, []);
 
   // Sync to Firebase Realtime Database
-  const syncToFirebase = useCallback((lat, lng, heading) => {
-    if (!db || !bookingId) return;
+  const syncToFirebase = useCallback(async (lat, lng, heading) => {
+    if (!bookingId) return;
     try {
+      const db = await getFirebaseDb();
+      if (!db) return;
       const trackingRef = ref(db, `trackings/${bookingId}`);
       set(trackingRef, {
         lat,

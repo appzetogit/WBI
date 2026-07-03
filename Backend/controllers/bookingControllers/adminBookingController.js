@@ -574,13 +574,16 @@ const getBookingPayment = async (req, res) => {
       data: {
         paymentStatus: booking.paymentStatus,
         paymentMethod: booking.paymentMethod,
-        paymentId: booking.paymentId,
+        paymentId: booking.paymentId || booking.razorpayPaymentId,
         finalAmount: booking.finalAmount,
         basePrice: booking.basePrice,
         tax: booking.tax,
         visitingCharges: booking.visitingCharges,
         penalty: booking.penalty,
-        extraCharges: booking.extraCharges
+        discount: booking.discount || 0,
+        extraCharges: booking.extraCharges,
+        platformEarning: booking.platformEarning || 0,
+        workerPayout: booking.workerPayout || 0
       }
     });
   } catch (error) {

@@ -33,7 +33,7 @@ const BookingAssignmentConfig = require('../models/BookingAssignmentConfig');
 const VerificationConfig = require('../models/VerificationConfig');
 const ActiveWorkerSession = require('../models/ActiveWorkerSession');
 const matchingService = require('../services/matchingService');
-const bookingResponseController = require('../controllers/worker-controllers/bookingResponse.controller');
+const bookingResponseController = require('../controllers/workerControllers/bookingResponse.controller');
 
 const TEST_LAT = 28.704059;
 const TEST_LNG = 77.102490;

@@ -12,7 +12,8 @@ const getCompanyEngineerIds = async (companyId) => {
   
   // Merge and deduplicate
   const allIds = [...jobEngineers, ...assignmentEngineers].map(id => id.toString());
-  return [...new Set(allIds)].map(id => new mongoose.Types.ObjectId(id));
+  const validIds = allIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+  return [...new Set(validIds)].map(id => new mongoose.Types.ObjectId(id));
 };
 
 /**
@@ -22,35 +23,36 @@ const getStats = async (req, res) => {
   try {
     const engineerIds = await getCompanyEngineerIds(req.user.id);
     
-    const statsPipeline = [
+    const totalEngineers = engineerIds.length;
+    const available = await Engineer.countDocuments({ _id: { $in: engineerIds }, status: { $in: ['ONLINE', 'active'] } });
+    const busy = await Engineer.countDocuments({ _id: { $in: engineerIds }, status: 'BUSY' });
+    
+    // On job means they have an active B2B job in progress or on the way
+    const activeJobs = await B2BJob.find({
+      companyId: req.user.id,
+      assignedTo: { $in: engineerIds },
+      status: { $in: ['in_progress', 'engineer_on_way', 'assigned'] }
+    }).distinct('assignedTo');
+    const onJob = activeJobs.length;
+
+    const offline = await Engineer.countDocuments({ _id: { $in: engineerIds }, status: 'OFFLINE' });
+    const onLeave = await Engineer.countDocuments({ _id: { $in: engineerIds }, status: { $in: ['suspended', 'inactive'] } });
+    
+    // Average rating
+    const ratingResult = await Engineer.aggregate([
       { $match: { _id: { $in: engineerIds } } },
-      {
-        $facet: {
-          total: [{ $count: 'count' }],
-          available: [{ $match: { status: WORKER_STATUS.AVAILABLE } }, { $count: 'count' }],
-          busy: [{ $match: { status: { $in: [WORKER_STATUS.ON_THE_WAY, WORKER_STATUS.IN_PROGRESS, WORKER_STATUS.ASSIGNED] } } }, { $count: 'count' }],
-          onJob: [{ $match: { status: { $in: [WORKER_STATUS.ON_THE_WAY, WORKER_STATUS.IN_PROGRESS] } } }, { $count: 'count' }],
-          offline: [{ $match: { status: WORKER_STATUS.OFFLINE } }, { $count: 'count' }],
-          onLeave: [{ $match: { status: WORKER_STATUS.SUSPENDED } }, { $count: 'count' }], // Approximate mapping for on leave
-          avgRating: [{ $group: { _id: null, avg: { $avg: '$rating' } } }]
-        }
-      }
-    ];
-
-    const result = await Engineer.aggregate(statsPipeline);
-    const data = result[0] || {};
-
-    const extractCount = (arr) => (arr && arr.length > 0 ? arr[0].count : 0);
-    const extractAvg = (arr) => (arr && arr.length > 0 ? Number(arr[0].avg.toFixed(1)) : 0);
+      { $group: { _id: null, avg: { $avg: '$rating' } } }
+    ]);
+    const averageRating = ratingResult.length > 0 ? Number(ratingResult[0].avg.toFixed(1)) : 0.0;
 
     const stats = {
-      totalEngineers: extractCount(data.total),
-      available: extractCount(data.available),
-      busy: extractCount(data.busy),
-      onJob: extractCount(data.onJob),
-      offline: extractCount(data.offline),
-      onLeave: extractCount(data.onLeave),
-      averageRating: extractAvg(data.avgRating)
+      totalEngineers,
+      available,
+      busy,
+      onJob,
+      offline,
+      onLeave,
+      averageRating
     };
 
     return res.status(200).json({ success: true, stats });
@@ -83,9 +85,16 @@ const getEngineers = async (req, res) => {
     }
 
     if (status && status !== 'all') {
-      if (status === 'Available') filter.status = WORKER_STATUS.AVAILABLE;
-      if (status === 'Busy') filter.status = { $in: [WORKER_STATUS.ON_THE_WAY, WORKER_STATUS.IN_PROGRESS, WORKER_STATUS.ASSIGNED] };
-      if (status === 'Offline') filter.status = WORKER_STATUS.OFFLINE;
+      const normalized = status.toLowerCase();
+      if (normalized === 'available') {
+        filter.status = { $in: ['ONLINE', 'active'] };
+      } else if (normalized === 'busy' || normalized === 'on job' || normalized === 'onjob') {
+        filter.status = 'BUSY';
+      } else if (normalized === 'offline') {
+        filter.status = 'OFFLINE';
+      } else if (normalized === 'on leave' || normalized === 'onleave' || normalized === 'suspended') {
+        filter.status = { $in: ['suspended', 'inactive'] };
+      }
     }
     
     if (skill && skill !== 'all') filter.serviceCategories = { $in: [skill] };
@@ -99,7 +108,7 @@ const getEngineers = async (req, res) => {
 
     const [engineers, total] = await Promise.all([
       Engineer.find(filter)
-        .select('name phone status rating totalJobs completedJobs address profilePhoto experienceLevel serviceCategories primaryCategory')
+        .select('name phone status rating totalJobs completedJobs address profilePhoto experienceLevel serviceCategories primaryCategory updatedAt createdAt')
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limitNum)
@@ -113,12 +122,29 @@ const getEngineers = async (req, res) => {
         companyId: req.user.id,
         assignedTo: eng._id,
         status: { $in: ['assigned', 'searching_engineer', 'in_progress', 'engineer_on_way'] }
-      }).select('jobId service city').lean();
+      }).select('jobId service city status').lean();
+
+      // Map DB status to frontend expected status
+      let frontendStatus = 'offline';
+      if (eng.status === 'ONLINE' || eng.status === 'active') {
+        frontendStatus = 'available';
+      } else if (eng.status === 'BUSY') {
+        if (currentJob) {
+          if (currentJob.status === 'engineer_on_way') frontendStatus = 'on_the_way';
+          else if (currentJob.status === 'in_progress') frontendStatus = 'in_progress';
+          else frontendStatus = 'assigned';
+        } else {
+          frontendStatus = 'assigned';
+        }
+      } else if (eng.status === 'suspended' || eng.status === 'inactive') {
+        frontendStatus = 'suspended';
+      }
 
       return {
         ...eng,
+        status: frontendStatus,
         currentJob: currentJob || null,
-        lastActive: eng.updatedAt
+        lastActive: eng.updatedAt || eng.createdAt
       };
     }));
 
@@ -274,15 +300,30 @@ const getLiveTracking = async (req, res) => {
   try {
     const engineerIds = await getCompanyEngineerIds(req.user.id);
     
-    // Get live coordinates of engineers who are currently active/busy
+    // Get live coordinates of engineers who are currently active/busy/online
     const activeEngineers = await Engineer.find({
       _id: { $in: engineerIds },
-      status: { $in: [WORKER_STATUS.ON_THE_WAY, WORKER_STATUS.IN_PROGRESS, WORKER_STATUS.AVAILABLE] },
+      status: { $in: ['ONLINE', 'active', 'BUSY'] },
       location: { $exists: true, $ne: null }
     }).select('name location status').lean();
 
-    return res.status(200).json({ success: true, data: activeEngineers });
+    // Map DB status to frontend expected status
+    const mappedActiveEngineers = activeEngineers.map(eng => {
+      let frontendStatus = 'offline';
+      if (eng.status === 'ONLINE' || eng.status === 'active') {
+        frontendStatus = 'available';
+      } else if (eng.status === 'BUSY') {
+        frontendStatus = 'assigned';
+      }
+      return {
+        ...eng,
+        status: frontendStatus
+      };
+    });
+
+    return res.status(200).json({ success: true, data: mappedActiveEngineers });
   } catch (error) {
+    console.error('[MyEngineers getLiveTracking]', error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };

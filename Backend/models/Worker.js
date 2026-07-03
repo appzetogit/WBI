@@ -89,6 +89,10 @@ const workerSchema = new mongoose.Schema({
   serviceCategories: [{
     type: String
   }],
+  serviceCategoryRefs: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceCategory'
+  }],
   subServices: [{
     subServiceId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -228,6 +232,10 @@ const workerSchema = new mongoose.Schema({
     ifscCode: String,
     bankName: String,
     upiId: String
+  },
+  razorpayLinkedAccountId: {
+    type: String,
+    default: null
   },
   documents: {
     aadhaar: String,

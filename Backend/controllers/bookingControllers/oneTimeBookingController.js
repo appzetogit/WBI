@@ -200,15 +200,35 @@ const BookingDraft = require('../../models/BookingDraft');
 // 6. Create a Booking Draft from selected services
 exports.createDraft = async (req, res) => {
   try {
-    const { serviceId, brandId, issueIds, packageIds, quantities, priceSnapshot } = req.body;
+    const { serviceId, brandId, issueIds, packageIds, quantities, priceSnapshot, customIssueText } = req.body;
     const userId = req.user._id || req.user.id;
 
-    if (!serviceId || !packageIds || packageIds.length === 0) {
+    let finalPackageIds = packageIds || [];
+    let finalQuantities = quantities || {};
+    let finalPriceSnapshot = priceSnapshot || {};
+
+    if (finalPackageIds.length === 0 && serviceId) {
+      const ServicePackage = require('../../models/ServicePackage');
+      const defaultPkg = await ServicePackage.findOne({ serviceId, isActive: true });
+      if (defaultPkg) {
+        finalPackageIds = [defaultPkg._id];
+        finalQuantities[defaultPkg._id.toString()] = 1;
+        finalPriceSnapshot = {
+          packageTotal: defaultPkg.price || 0,
+          finalAmount: defaultPkg.price || 0,
+          itemCount: 1
+        };
+      }
+    }
+
+    if (!serviceId || finalPackageIds.length === 0) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    // You could also validate the priceSnapshot against DB here to prevent manipulation,
-    // but the final price will be recalculated upon actual checkout anyway.
+    const mongoose = require('mongoose');
+    const cleanIssueIds = Array.isArray(issueIds)
+      ? issueIds.filter(id => id && id !== 'other' && mongoose.Types.ObjectId.isValid(id))
+      : [];
 
     // Create or update existing draft for this user and service
     let draft = await BookingDraft.findOne({ userId, serviceId, status: 'draft' });
@@ -216,10 +236,11 @@ exports.createDraft = async (req, res) => {
     if (draft) {
       // Update existing draft
       draft.brandId = brandId || null;
-      draft.issueIds = issueIds || [];
-      draft.packageIds = packageIds;
-      draft.quantities = quantities || {};
-      draft.priceSnapshot = priceSnapshot;
+      draft.issueIds = cleanIssueIds;
+      draft.packageIds = finalPackageIds;
+      draft.quantities = finalQuantities;
+      draft.priceSnapshot = finalPriceSnapshot;
+      draft.specialInstructions = customIssueText || '';
       await draft.save();
     } else {
       // Create new draft
@@ -227,10 +248,11 @@ exports.createDraft = async (req, res) => {
         userId,
         serviceId,
         brandId: brandId || null,
-        issueIds: issueIds || [],
-        packageIds,
-        quantities: quantities || {},
-        priceSnapshot
+        issueIds: cleanIssueIds,
+        packageIds: finalPackageIds,
+        quantities: finalQuantities,
+        priceSnapshot: finalPriceSnapshot,
+        specialInstructions: customIssueText || ''
       });
       await draft.save();
     }
@@ -338,52 +360,131 @@ exports.reverseGeocode = async (req, res) => {
 };
 
 // 9. Generate Dynamic Available Slots
+const TimeSlotConfig = require('../../models/TimeSlotConfig');
+const WorkerAvailability = require('../../models/WorkerAvailability');
+
 exports.getAvailableSlots = async (req, res) => {
   try {
-    const { date } = req.query; // Format: YYYY-MM-DD
-    const selectedDate = date ? new Date(date) : new Date();
-    
-    // Configurable working hours (e.g. 9 AM to 7 PM)
-    const workStartHour = 9;
-    const workEndHour = 19; 
-    const slotDurationMinutes = 60;
+    const { date, serviceId, city = 'Indore', pincode } = req.query;
+    if (!date) {
+      return res.status(400).json({ success: false, message: 'Date parameter is required' });
+    }
 
-    const slots = [];
+    const selectedDate = new Date(date);
+    const dateStr = selectedDate.toISOString().split('T')[0];
+    const weekday = selectedDate.toLocaleDateString('en-US', { weekday: 'long' });
+
+    // 1. Fetch Time Slot configurations for this service and city
+    let slotConfigs = [];
+    if (serviceId) {
+      slotConfigs = await TimeSlotConfig.find({ serviceId, city, isActive: true }).sort({ slotStartTime: 1 });
+    }
+
+    // Fallback default slots if no database configurations found
+    if (slotConfigs.length === 0) {
+      const defaultHours = [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+      slotConfigs = defaultHours.map(hour => {
+        const startH = hour > 12 ? hour - 12 : hour;
+        const startAmPm = hour >= 12 ? 'PM' : 'AM';
+        const endHour = hour + 1;
+        const endH = endHour > 12 ? endHour - 12 : endHour;
+        const endAmPm = endHour >= 12 ? 'PM' : 'AM';
+        return {
+          slotStartTime: `${hour < 10 ? '0' + hour : hour}:00`,
+          slotEndTime: `${endHour < 10 ? '0' + endHour : endHour}:00`,
+          maxBookingsPerSlot: 5,
+          timeString: `${startH}:00 ${startAmPm} - ${endH}:00 ${endAmPm}`
+        };
+      });
+    }
+
+    // 2. Fetch available workers for this service on this weekday who haven't blocked this date
+    let availableWorkerIds = [];
+    if (serviceId) {
+      const activeAvailabilities = await WorkerAvailability.find({
+        serviceIds: serviceId,
+        workingDays: weekday,
+        blockedDates: { $ne: dateStr },
+        status: 'active'
+      });
+      availableWorkerIds = activeAvailabilities.map(a => a.workerId.toString());
+    }
+
     const now = new Date();
     const isToday = selectedDate.toDateString() === now.toDateString();
 
-    let currentHour = workStartHour;
-    let currentMinute = 0;
-
-    // Fast-forward if checking today
-    if (isToday) {
-      const currentRealHour = now.getHours();
-      // Only allow slots at least 2 hours from now
-      currentHour = Math.max(workStartHour, currentRealHour + 2);
-    }
-
-    while (currentHour < workEndHour) {
-      const startAmPm = currentHour >= 12 ? 'PM' : 'AM';
-      const startH = currentHour > 12 ? currentHour - 12 : currentHour;
+    const slots = [];
+    
+    for (const config of slotConfigs) {
+      const startHour = parseInt(config.slotStartTime.split(':')[0]);
+      const startMinute = parseInt(config.slotStartTime.split(':')[1] || '0');
       
-      const endHourRaw = currentHour + Math.floor(slotDurationMinutes / 60);
-      const endMinuteRaw = currentMinute + (slotDurationMinutes % 60);
-      
-      const endH = endHourRaw > 12 ? endHourRaw - 12 : endHourRaw;
-      const endAmPm = endHourRaw >= 12 ? 'PM' : 'AM';
+      // Determine timeString display format (e.g. "09:00 AM - 10:00 AM")
+      let timeString = config.timeString;
+      if (!timeString) {
+        const startH = startHour > 12 ? startHour - 12 : (startHour === 0 ? 12 : startHour);
+        const startAmPm = startHour >= 12 ? 'PM' : 'AM';
+        const endHour = parseInt(config.slotEndTime.split(':')[0]);
+        const endH = endHour > 12 ? endHour - 12 : (endHour === 0 ? 12 : endHour);
+        const endAmPm = endHour >= 12 ? 'PM' : 'AM';
+        timeString = `${startH}:00 ${startAmPm} - ${endH}:00 ${endAmPm}`;
+      }
 
-      const timeString = `${startH}:00 ${startAmPm} - ${endH}:00 ${endAmPm}`;
+      // Check if slot starts in the past (minimum 2 hours gap for today slots)
+      let isAvailable = true;
+      if (isToday) {
+        const slotStartDate = new Date(selectedDate);
+        slotStartDate.setHours(startHour, startMinute, 0, 0);
+        // Only allow bookings at least 2 hours in the future
+        const cutOffTime = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+        if (slotStartDate < cutOffTime) {
+          isAvailable = false;
+        }
+      }
 
-      // In a real app, query Booking/WorkerAvailability here to check if slot is full.
-      // For now, we simulate dynamic availability (mostly available).
-      
+      // Check if date is in the past entirely
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      if (selectedDate < startOfDay) {
+        isAvailable = false;
+      }
+
+      // Check if any workers support this slot hour
+      if (isAvailable && serviceId) {
+        // If we have worker availability config, check if any available worker covers this slot time
+        const slotWorkers = await WorkerAvailability.find({
+          workerId: { $in: availableWorkerIds },
+          startTime: { $lte: config.slotStartTime },
+          endTime: { $gte: config.slotEndTime }
+        });
+        if (slotWorkers.length === 0) {
+          isAvailable = false;
+        }
+      }
+
+      // Check capacity/double booking for this slot on this date
+      if (isAvailable && serviceId) {
+        const existingBookingsCount = await Booking.countDocuments({
+          serviceId,
+          status: { $nin: ['cancelled', 'rejected'] },
+          scheduledDate: {
+            $gte: new Date(selectedDate.getFullYear(), selectedDate.getDate()),
+            $lt: new Date(selectedDate.getFullYear(), selectedDate.getDate() + 1)
+          },
+          scheduledTime: timeString
+        });
+
+        if (existingBookingsCount >= (config.maxBookingsPerSlot || 5)) {
+          isAvailable = false;
+        }
+      }
+
       slots.push({
-        id: `slot_${currentHour}_00`,
+        id: config.id || `slot_${config.slotStartTime.replace(':', '_')}`,
         time: timeString,
-        isAvailable: true, // Dynamic boolean
+        startTime: config.slotStartTime,
+        endTime: config.slotEndTime,
+        isAvailable
       });
-
-      currentHour++;
     }
 
     res.status(200).json({ success: true, data: slots });
@@ -396,6 +497,7 @@ exports.getAvailableSlots = async (req, res) => {
 // 10. Get Available Dates
 exports.getAvailableDates = async (req, res) => {
   try {
+    const { serviceId } = req.query;
     const dates = [];
     const today = new Date();
     // Generate next 14 days dynamically
@@ -403,11 +505,27 @@ exports.getAvailableDates = async (req, res) => {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
       
-      // Mocking unavailability for demonstration (e.g. disable Sundays)
-      const isAvailable = d.getDay() !== 0; 
+      const dateStr = d.toISOString().split('T')[0];
+      const weekday = d.toLocaleDateString('en-US', { weekday: 'long' });
+      
+      let isAvailable = true;
+      
+      // If serviceId is specified, check if any workers are configured to be available on this date/day
+      if (serviceId) {
+        const activeWorkers = await WorkerAvailability.countDocuments({
+          serviceIds: serviceId,
+          workingDays: weekday,
+          blockedDates: { $ne: dateStr },
+          status: 'active'
+        });
+        isAvailable = activeWorkers > 0;
+      } else {
+        // Fallback: disable Sundays by default
+        isAvailable = d.getDay() !== 0; 
+      }
       
       dates.push({
-        date: d.toISOString().split('T')[0],
+        date: dateStr,
         isAvailable
       });
     }

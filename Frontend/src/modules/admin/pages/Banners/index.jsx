@@ -204,10 +204,12 @@ const Banners = () => {
                   <span className={`px-2 py-1 text-xs rounded-full ${
                     banner.bannerType === 'home_banner' ? 'bg-blue-100 text-blue-800' : 
                     banner.bannerType === 'promo_banner' ? 'bg-green-100 text-green-800' :
+                    banner.bannerType === 'footer_banner' ? 'bg-amber-100 text-amber-800' :
                     'bg-purple-100 text-purple-800'
                   }`}>
-                    {banner.bannerType === 'home_banner' ? 'Home Banner' : 
-                     banner.bannerType === 'promo_banner' ? 'Promo Banner' : 'Offer Banner'}
+                    {banner.bannerType === 'home_banner' ? 'Home Hero Banner' : 
+                     banner.bannerType === 'promo_banner' ? 'Promo Banner' : 
+                     banner.bannerType === 'footer_banner' ? 'Footer Banner' : 'Offer Banner'}
                   </span>
                 </td>
                 <td className="p-4">
@@ -274,6 +276,7 @@ const Banners = () => {
                     <option value="home_banner">Home Hero Banner</option>
                     <option value="offer_banner">Offer Banner (Slider)</option>
                     <option value="promo_banner">Promo Banner (Instant Booking)</option>
+                    <option value="footer_banner">Footer Banner (Bottom Banner)</option>
                   </select>
                 </div>
                 <div>
@@ -309,7 +312,11 @@ const Banners = () => {
                     <div className="text-center p-6 pointer-events-none">
                       <FiUploadCloud size={32} className="mx-auto text-gray-400 mb-3 group-hover:text-[#10AFA5] transition-colors" />
                       <p className="text-sm font-medium text-gray-700">Click or drag image to upload</p>
-                      <p className="text-xs text-gray-500 mt-1">Recommended size: 1050x500px (Aspect Ratio 21:10)</p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formData.bannerType === 'footer_banner' 
+                          ? 'Recommended size: 1200x300px (Wide Landscape)' 
+                          : 'Recommended size: 1050x500px (Aspect Ratio 21:10)'}
+                      </p>
                     </div>
                   )}
                   <input

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const bookingDraftController = require('../../controllers/user-controllers/bookingDraft.controller');
+const bookingDraftController = require('../../controllers/userControllers/bookingDraft.controller');
 // Middlewares like auth can be added here
 // const { protect } = require('../../middleware/authMiddleware');
 

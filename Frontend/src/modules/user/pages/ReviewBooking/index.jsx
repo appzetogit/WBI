@@ -71,7 +71,11 @@ const ReviewBooking = () => {
   const confirmMutation = useMutation({
     mutationFn: confirmBooking,
     onSuccess: (data) => {
-      navigate(`/user/booking/searching/${data.bookingId}`);
+      if (draft?.bookingType === 'scheduled') {
+        navigate(`/user/booking/${data.bookingId}`);
+      } else {
+        navigate(`/user/booking/searching/${data.bookingId}`);
+      }
     }
   });
 

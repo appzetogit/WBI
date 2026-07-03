@@ -55,6 +55,14 @@ const categorySchema = new mongoose.Schema({
     default: 'vendor',
     index: true
   },
+  visitCharge: {
+    type: Number,
+    default: 49
+  },
+  commissionPercent: {
+    type: Number,
+    default: 20
+  },
   // Additional backend fields
   description: {
     type: String,

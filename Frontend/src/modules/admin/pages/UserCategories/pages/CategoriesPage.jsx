@@ -501,13 +501,13 @@ const CategoriesPage = ({ catalog, setCatalog, selectedCity }) => {
                       <div className="font-bold text-gray-900">{c.title || "Untitled"}</div>
                     </td>
                     <td className="py-4 px-4">
-                      <div className="text-sm text-gray-600">{c.slug || "â€”"}</div>
+                      <div className="text-sm text-gray-600">{c.slug || "—"}</div>
                     </td>
                     <td className="py-4 px-4">
                       {c.homeBadge ? (
                         <span className="inline-block px-2 py-1 text-xs font-semibold bg-blue-100 text-blue-700 rounded">{c.homeBadge}</span>
                       ) : (
-                        <span className="text-sm text-gray-400">â€”</span>
+                        <span className="text-sm text-gray-400">—</span>
                       )}
                     </td>
                     <td className="py-4 px-4 text-sm font-medium text-gray-700 capitalize">

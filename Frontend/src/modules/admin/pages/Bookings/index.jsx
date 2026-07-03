@@ -811,6 +811,13 @@ const Bookings = () => {
                           <p><strong>Payment Method:</strong> <span className="uppercase">{modalData.paymentMethod || 'N/A'}</span></p>
                           <p><strong>Transaction/Payment ID:</strong> {modalData.paymentId || 'N/A'}</p>
                         </div>
+                        {modalData.paymentStatus === 'success' && (
+                          <div className="bg-teal-50/50 p-3 rounded-xl space-y-1.5 border border-teal-100 text-xs">
+                            <p className="text-[10px] font-bold text-teal-800 uppercase tracking-wider mb-1">Fare Splitting Summary</p>
+                            <p className="flex justify-between text-teal-900"><span>Worker Payout (Technician):</span> <strong>₹{(modalData.workerPayout || 0).toLocaleString()}</strong></p>
+                            <p className="flex justify-between text-teal-900"><span>Platform Earning (Admin Split):</span> <strong>₹{(modalData.platformEarning || 0).toLocaleString()}</strong></p>
+                          </div>
+                        )}
                       </div>
                     )}
 

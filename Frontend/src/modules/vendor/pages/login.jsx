@@ -9,7 +9,7 @@ import { sharedAuthService } from '../../../services/authService';
 import LogoLoader from '../../../components/common/LogoLoader';
 import Logo from '../../../components/common/Logo';
 import ForgotPasswordFlow from '../../../components/auth/ForgotPasswordFlow';
-import { auth, GoogleAuthProvider, OAuthProvider, signInWithPopup } from '../../../firebase';
+import { getFirebaseAuth } from '../../../firebase';
 
 const VendorLogin = () => {
   const navigate = useNavigate();
@@ -79,6 +79,11 @@ const VendorLogin = () => {
   const handleSocialLogin = async (providerName) => {
     try {
       setIsLoading(true);
+      const credentials = await getFirebaseAuth();
+      if (!credentials || !credentials.auth) {
+        throw new Error('Firebase Auth is not available');
+      }
+      const { auth, GoogleAuthProvider, OAuthProvider, signInWithPopup } = credentials;
       let provider;
       if (providerName === 'google') {
         provider = new GoogleAuthProvider();

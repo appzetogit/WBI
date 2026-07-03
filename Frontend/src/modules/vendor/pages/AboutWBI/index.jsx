@@ -196,7 +196,7 @@ const AboutWBI = () => {
         <motion.div variants={itemVariants} className="text-center pt-4 border-t border-gray-200">
           <p className="text-xs text-gray-400 mb-1">Designed & Developed by</p>
           <span className="text-sm font-bold tracking-wide" style={WBITextGradient}>WBI Team</span>
-          <p className="text-[10px] text-gray-300 mt-4">v7.6.27 â€¢ Made with â¤ï¸ in India</p>
+          <p className="text-[10px] text-gray-300 mt-4">v7.6.27 • Made with â¤ï¸ in India</p>
         </motion.div>
       </main>
 

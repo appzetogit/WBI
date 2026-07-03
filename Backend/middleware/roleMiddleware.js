@@ -120,6 +120,33 @@ const isApprovedB2B = (req, res, next) => {
   next();
 };
 
+const checkB2BPermission = (permissionKey) => {
+  return (req, res, next) => {
+    if (req.userRole !== 'B2B' && req.userRole !== 'b2b') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. B2B role required.'
+      });
+    }
+
+    const userPermissions = req.user?.permissions || [];
+    
+    // Company Admin has full access, so they automatically pass all permission checks!
+    if (req.user?.role === 'Company Admin') {
+      return next();
+    }
+
+    if (!userPermissions.includes(permissionKey)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Permission '${permissionKey}' is required.`
+      });
+    }
+
+    next();
+  };
+};
+
 module.exports = {
   isUser,
   isVendor,
@@ -129,6 +156,7 @@ module.exports = {
   isAdminOrVendor,
   isSuperAdmin,
   isB2B,
-  isApprovedB2B
+  isApprovedB2B,
+  checkB2BPermission
 };
 

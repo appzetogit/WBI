@@ -317,6 +317,437 @@ const initializeSocket = (server) => {
       }
     });
 
+    // ==========================================
+    // ENGINEER B2B LIVE TRACKING EVENTS
+    // ==========================================
+
+    socket.on('engineer:locationUpdated', async (data) => {
+      try {
+        const { engineerId, jobId, lat, lng, heading, speed, battery } = data;
+        if (!engineerId || isNaN(parseFloat(lat)) || isNaN(parseFloat(lng))) return;
+
+        const mongoose = require('mongoose');
+        const Engineer = require('../models/Engineer');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+        const B2BJob = require('../models/B2BJob');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+
+        // 1. Update latest location in session
+        const session = await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          {
+            currentLocation: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+            heading: parseFloat(heading) || 0,
+            speed: parseFloat(speed) || 0,
+            battery: parseInt(battery) || 100,
+            isOnline: true,
+            socketId: socket.id,
+            lastUpdatedAt: new Date()
+          },
+          { upsert: true, new: true }
+        );
+
+        // Update engineer collection
+        await Engineer.findByIdAndUpdate(engObjId, {
+          location: {
+            lat: parseFloat(lat),
+            lng: parseFloat(lng),
+            updatedAt: new Date()
+          },
+          geoLocation: {
+            type: 'Point',
+            coordinates: [parseFloat(lng), parseFloat(lat)]
+          }
+        });
+
+        // 2. Resolve active job & ETA
+        let resolvedJobId = jobId;
+        if (!resolvedJobId) {
+          const activeJob = await B2BJob.findOne({
+            assignedTo: engObjId,
+            status: { $in: ['assigned', 'in_progress'] }
+          }).select('_id').lean();
+          if (activeJob) {
+            resolvedJobId = activeJob._id.toString();
+          }
+        }
+
+        let companyRoom = null;
+        let eta = null;
+
+        if (resolvedJobId && mongoose.Types.ObjectId.isValid(resolvedJobId)) {
+          const job = await B2BJob.findById(resolvedJobId).select('companyId coordinates').lean();
+          if (job) {
+            companyRoom = `b2b:${job.companyId.toString()}`;
+            if (job.coordinates && job.coordinates.coordinates) {
+              const distance = calculateHaversineDistance(
+                parseFloat(lat),
+                parseFloat(lng),
+                job.coordinates.coordinates[1],
+                job.coordinates.coordinates[0]
+              );
+              eta = estimateETA(distance);
+              
+              await B2BJob.findByIdAndUpdate(job._id, { eta });
+
+              if (companyRoom) {
+                io.to(companyRoom).emit('b2b:etaUpdated', { jobId: job._id.toString(), eta });
+              }
+              io.to('admin').emit('b2b:etaUpdated', { jobId: job._id.toString(), eta });
+            }
+          }
+        }
+
+        // 3. Emit b2b:engineerLocationUpdated
+        const payload = {
+          engineerId,
+          lat: parseFloat(lat),
+          lng: parseFloat(lng),
+          heading: parseFloat(heading) || 0,
+          speed: parseFloat(speed) || 0,
+          battery: parseInt(battery) || 100,
+          status: session ? session.status : 'available',
+          eta,
+          lastUpdatedAt: new Date()
+        };
+
+        if (companyRoom) {
+          io.to(companyRoom).emit('b2b:engineerLocationUpdated', payload);
+        }
+        io.to('admin').emit('b2b:engineerLocationUpdated', payload);
+
+      } catch (error) {
+        console.error('Error handling engineer:locationUpdated:', error);
+      }
+    });
+
+    socket.on('engineer:statusChanged', async (data) => {
+      try {
+        const { engineerId, jobId, status, message } = data;
+        if (!engineerId || !status) return;
+
+        const mongoose = require('mongoose');
+        const Engineer = require('../models/Engineer');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+        const B2BJob = require('../models/B2BJob');
+        const JobStatusLog = require('../models/JobStatusLog');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+
+        await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          { status, lastUpdatedAt: new Date() },
+          { upsert: true }
+        );
+
+        let engineerStatus = 'ONLINE';
+        if (status === 'offline') engineerStatus = 'OFFLINE';
+        else if (status === 'on_break') engineerStatus = 'ONLINE';
+        else if (['assigned', 'en_route', 'at_location', 'working'].includes(status)) engineerStatus = 'BUSY';
+
+        await Engineer.findByIdAndUpdate(engObjId, { status: engineerStatus });
+
+        let companyRoom = null;
+        if (jobId && mongoose.Types.ObjectId.isValid(jobId)) {
+          const job = await B2BJob.findById(jobId).select('companyId').lean();
+          if (job) {
+            companyRoom = `b2b:${job.companyId.toString()}`;
+          }
+        }
+
+        const payload = { engineerId, status, message, lastUpdatedAt: new Date() };
+        if (companyRoom) {
+          io.to(companyRoom).emit('b2b:engineerStatusChanged', payload);
+        }
+        io.to('admin').emit('b2b:engineerStatusChanged', payload);
+
+        if (jobId && mongoose.Types.ObjectId.isValid(jobId)) {
+          await JobStatusLog.create({
+            jobId: new mongoose.Types.ObjectId(jobId),
+            engineerId: engObjId,
+            status,
+            message: message || `Status changed to ${status}`
+          });
+        }
+      } catch (error) {
+        console.error('Error handling engineer:statusChanged:', error);
+      }
+    });
+
+    socket.on('engineer:jobAccepted', async (data) => {
+      try {
+        const { engineerId, jobId } = data;
+        if (!engineerId || !jobId) return;
+
+        const mongoose = require('mongoose');
+        const B2BJob = require('../models/B2BJob');
+        const EngineerAssignment = require('../models/EngineerAssignment');
+        const JobStatusLog = require('../models/JobStatusLog');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+        const jobObjId = new mongoose.Types.ObjectId(jobId);
+
+        const job = await B2BJob.findByIdAndUpdate(
+          jobObjId,
+          { status: 'assigned', trackingStatus: 'accepted', assignedAt: new Date() },
+          { new: true }
+        );
+        if (!job) return;
+
+        await EngineerAssignment.findOneAndUpdate(
+          { jobId: jobObjId, engineerId: engObjId },
+          { status: 'accepted', acceptedAt: new Date() },
+          { upsert: true }
+        );
+
+        await JobStatusLog.create({
+          jobId: jobObjId,
+          engineerId: engObjId,
+          status: 'accepted',
+          message: 'Engineer accepted the job assignment'
+        });
+
+        const companyRoom = `b2b:${job.companyId.toString()}`;
+        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'assigned', trackingStatus: 'accepted' });
+        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'assigned', trackingStatus: 'accepted' });
+      } catch (error) {
+        console.error('Error handling engineer:jobAccepted:', error);
+      }
+    });
+
+    socket.on('engineer:enRoute', async (data) => {
+      try {
+        const { engineerId, jobId } = data;
+        if (!engineerId || !jobId) return;
+
+        const mongoose = require('mongoose');
+        const B2BJob = require('../models/B2BJob');
+        const EngineerAssignment = require('../models/EngineerAssignment');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+        const JobStatusLog = require('../models/JobStatusLog');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+        const jobObjId = new mongoose.Types.ObjectId(jobId);
+
+        const job = await B2BJob.findByIdAndUpdate(
+          jobObjId,
+          { status: 'in_progress', trackingStatus: 'en_route' },
+          { new: true }
+        );
+        if (!job) return;
+
+        await EngineerAssignment.findOneAndUpdate(
+          { jobId: jobObjId, engineerId: engObjId },
+          { status: 'en_route', enRouteAt: new Date() },
+          { upsert: true }
+        );
+
+        await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          { status: 'en_route' }
+        );
+
+        await JobStatusLog.create({
+          jobId: jobObjId,
+          engineerId: engObjId,
+          status: 'en_route',
+          message: 'Engineer started travel (En Route)'
+        });
+
+        const companyRoom = `b2b:${job.companyId.toString()}`;
+        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'en_route' });
+        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'en_route' });
+        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'en_route' });
+        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'en_route' });
+      } catch (error) {
+        console.error('Error handling engineer:enRoute:', error);
+      }
+    });
+
+    socket.on('engineer:reachedLocation', async (data) => {
+      try {
+        const { engineerId, jobId } = data;
+        if (!engineerId || !jobId) return;
+
+        const mongoose = require('mongoose');
+        const B2BJob = require('../models/B2BJob');
+        const EngineerAssignment = require('../models/EngineerAssignment');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+        const JobStatusLog = require('../models/JobStatusLog');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+        const jobObjId = new mongoose.Types.ObjectId(jobId);
+
+        const job = await B2BJob.findByIdAndUpdate(
+          jobObjId,
+          { trackingStatus: 'reached_location' },
+          { new: true }
+        );
+        if (!job) return;
+
+        await EngineerAssignment.findOneAndUpdate(
+          { jobId: jobObjId, engineerId: engObjId },
+          { status: 'reached_location', reachedAt: new Date() },
+          { upsert: true }
+        );
+
+        await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          { status: 'at_location' }
+        );
+
+        await JobStatusLog.create({
+          jobId: jobObjId,
+          engineerId: engObjId,
+          status: 'reached_location',
+          message: 'Engineer arrived at job location'
+        });
+
+        const companyRoom = `b2b:${job.companyId.toString()}`;
+        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: job.status, trackingStatus: 'reached_location' });
+        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'at_location' });
+        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: job.status, trackingStatus: 'reached_location' });
+        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'at_location' });
+      } catch (error) {
+        console.error('Error handling engineer:reachedLocation:', error);
+      }
+    });
+
+    socket.on('engineer:workStarted', async (data) => {
+      try {
+        const { engineerId, jobId } = data;
+        if (!engineerId || !jobId) return;
+
+        const mongoose = require('mongoose');
+        const B2BJob = require('../models/B2BJob');
+        const EngineerAssignment = require('../models/EngineerAssignment');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+        const JobStatusLog = require('../models/JobStatusLog');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+        const jobObjId = new mongoose.Types.ObjectId(jobId);
+
+        const job = await B2BJob.findByIdAndUpdate(
+          jobObjId,
+          { status: 'in_progress', trackingStatus: 'work_started', startedAt: new Date() },
+          { new: true }
+        );
+        if (!job) return;
+
+        await EngineerAssignment.findOneAndUpdate(
+          { jobId: jobObjId, engineerId: engObjId },
+          { status: 'work_started' },
+          { upsert: true }
+        );
+
+        await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          { status: 'working' }
+        );
+
+        await JobStatusLog.create({
+          jobId: jobObjId,
+          engineerId: engObjId,
+          status: 'work_started',
+          message: 'Engineer started service work'
+        });
+
+        const companyRoom = `b2b:${job.companyId.toString()}`;
+        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'work_started' });
+        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'working' });
+        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'work_started' });
+        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'working' });
+      } catch (error) {
+        console.error('Error handling engineer:workStarted:', error);
+      }
+    });
+
+    socket.on('engineer:jobCompleted', async (data) => {
+      try {
+        const { engineerId, jobId } = data;
+        if (!engineerId || !jobId) return;
+
+        const mongoose = require('mongoose');
+        const B2BJob = require('../models/B2BJob');
+        const Engineer = require('../models/Engineer');
+        const EngineerAssignment = require('../models/EngineerAssignment');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+        const JobStatusLog = require('../models/JobStatusLog');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+        const jobObjId = new mongoose.Types.ObjectId(jobId);
+
+        const job = await B2BJob.findByIdAndUpdate(
+          jobObjId,
+          { status: 'completed', trackingStatus: 'completed', completedAt: new Date(), eta: 0 },
+          { new: true }
+        );
+        if (!job) return;
+
+        await EngineerAssignment.findOneAndUpdate(
+          { jobId: jobObjId, engineerId: engObjId },
+          { status: 'completed', completedAt: new Date() },
+          { upsert: true }
+        );
+
+        await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          { status: 'available' }
+        );
+
+        await Engineer.findByIdAndUpdate(engObjId, { status: 'ONLINE' });
+
+        await JobStatusLog.create({
+          jobId: jobObjId,
+          engineerId: engObjId,
+          status: 'completed',
+          message: 'Engineer successfully completed the job'
+        });
+
+        const companyRoom = `b2b:${job.companyId.toString()}`;
+        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'completed', trackingStatus: 'completed' });
+        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'available' });
+        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'completed', trackingStatus: 'completed' });
+        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'available' });
+      } catch (error) {
+        console.error('Error handling engineer:jobCompleted:', error);
+      }
+    });
+
+    socket.on('engineer:batteryUpdated', async (data) => {
+      try {
+        const { engineerId, battery } = data;
+        if (!engineerId) return;
+
+        const mongoose = require('mongoose');
+        const B2BJob = require('../models/B2BJob');
+        const EngineerLocationSession = require('../models/EngineerLocationSession');
+
+        const engObjId = new mongoose.Types.ObjectId(engineerId);
+        const level = parseInt(battery) || 100;
+
+        await EngineerLocationSession.findOneAndUpdate(
+          { engineerId: engObjId },
+          { battery: level }
+        );
+
+        const activeJob = await B2BJob.findOne({
+          assignedTo: engObjId,
+          status: { $in: ['assigned', 'in_progress'] }
+        }).select('companyId').lean();
+
+        const payload = { engineerId, battery: level };
+        if (activeJob) {
+          const companyRoom = `b2b:${activeJob.companyId.toString()}`;
+          io.to(companyRoom).emit('b2b:engineerLocationUpdated', payload);
+        }
+        io.to('admin').emit('b2b:engineerLocationUpdated', payload);
+      } catch (error) {
+        console.error('Error handling engineer:batteryUpdated:', error);
+      }
+    });
+
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
       // Update online status
@@ -408,6 +839,26 @@ const updateWorkerOnlineStatus = async (workerId, isOnline, socketId) => {
 };
 
 // Get io instance for emitting notifications
+// Helpers for B2B Live Tracking
+const calculateHaversineDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const estimateETA = (distanceKm) => {
+  if (distanceKm <= 0.05) return 0;
+  const averageSpeedKmh = 25;
+  const durationMins = (distanceKm / averageSpeedKmh) * 60;
+  return Math.ceil(durationMins);
+};
+
 const getIO = () => {
   if (!io) {
     throw new Error('Socket.io not initialized');

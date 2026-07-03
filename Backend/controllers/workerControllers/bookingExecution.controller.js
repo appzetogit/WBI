@@ -4,8 +4,8 @@ const { BOOKING_STATUS } = require('../../utils/constants');
 const { getIO } = require('../../sockets');
 const crypto = require('crypto');
 
-// Generate OTP (Hardcoded to 123456 for testing)
-const generateOTP = () => '123456';
+// Generate OTP (Hardcoded to 1234 for testing)
+const generateOTP = () => '1234';
 // Original logic: const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
 
 exports.startJourney = async (req, res) => {
@@ -39,6 +39,7 @@ exports.startJourney = async (req, res) => {
 
     const io = getIO();
     io.to(`booking_${bookingId}`).emit('booking:onTheWay', { bookingId });
+    io.to(`user_${booking.userId}`).emit('booking_updated', { bookingId, status: BOOKING_STATUS.JOURNEY_STARTED });
     io.to('admin:wbi').emit('admin:bookingUpdated', { bookingId, status: BOOKING_STATUS.JOURNEY_STARTED });
 
     res.json({ success: true, message: 'Journey started successfully', booking });
@@ -85,6 +86,7 @@ exports.arrived = async (req, res) => {
 
     const io = getIO();
     io.to(`booking_${bookingId}`).emit('booking:arrived', { bookingId, otp, expiresAt });
+    io.to(`user_${booking.userId}`).emit('booking_updated', { bookingId, status: BOOKING_STATUS.ARRIVED, otp, expiresAt });
     io.to('admin:wbi').emit('admin:bookingUpdated', { bookingId, status: BOOKING_STATUS.ARRIVED });
 
     // Normally send SMS here
@@ -137,6 +139,7 @@ exports.verifyOtp = async (req, res) => {
 
     const io = getIO();
     io.to(`booking_${bookingId}`).emit('booking:serviceStarted', { bookingId });
+    io.to(`user_${booking.userId}`).emit('booking_updated', { bookingId, status: BOOKING_STATUS.SERVICE_STARTED });
     io.to('admin:wbi').emit('admin:bookingUpdated', { bookingId, status: BOOKING_STATUS.SERVICE_STARTED });
 
     res.json({ success: true, message: 'OTP Verified successfully. Service started.' });
@@ -174,6 +177,7 @@ exports.addProof = async (req, res) => {
 
     const io = getIO();
     io.to(`booking_${bookingId}`).emit('booking:proofUploaded', { bookingId, proofUrl });
+    io.to(`user_${booking.userId}`).emit('booking_updated', { bookingId, status: booking.status });
 
     res.json({ success: true, message: 'Proof uploaded successfully' });
   } catch (error) {
@@ -232,7 +236,8 @@ exports.completeService = async (req, res) => {
 
     const io = getIO();
     io.to(`booking_${bookingId}`).emit('booking:completed', { bookingId, finalAmount: booking.finalAmount });
-    io.to('admin:wbi').emit('admin:bookingUpdated', { bookingId, status: BOOKING_STATUS.WORK_DONE });
+    io.to(`user_${booking.userId}`).emit('booking_updated', { bookingId, status: booking.status, finalAmount: booking.finalAmount });
+    io.to('admin:wbi').emit('admin:bookingUpdated', { bookingId, status: booking.status });
 
     res.json({ success: true, message: 'Service marked as completed', finalAmount: booking.finalAmount });
   } catch (error) {

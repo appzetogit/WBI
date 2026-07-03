@@ -1,7 +1,86 @@
 const B2BCompany = require('../../models/B2BCompany');
 const B2BDocument = require('../../models/B2BDocument');
+const B2BUser = require('../../models/B2BUser');
+const B2BRole = require('../../models/B2BRole');
 const { generateTokenPair } = require('../../utils/tokenService');
 const bcrypt = require('bcryptjs');
+
+const ensureDefaultRoles = async (companyId) => {
+  const defaults = [
+    {
+      companyId,
+      roleName: 'Company Admin',
+      permissions: [
+        'bulk_jobs.read', 'bulk_jobs.write',
+        'jobs.read', 'jobs.write',
+        'wallet.read', 'wallet.write',
+        'invoices.read',
+        'reports.read',
+        'support.write',
+        'users.manage',
+        'company_profile.read', 'company_profile.write'
+      ],
+      isDefault: true,
+      isActive: true
+    },
+    {
+      companyId,
+      roleName: 'Operations Manager',
+      permissions: [
+        'bulk_jobs.read', 'bulk_jobs.write',
+        'jobs.read', 'jobs.write',
+        'support.write',
+        'company_profile.read'
+      ],
+      isDefault: true,
+      isActive: true
+    },
+    {
+      companyId,
+      roleName: 'Finance User',
+      permissions: [
+        'wallet.read', 'wallet.write',
+        'invoices.read',
+        'reports.read',
+        'company_profile.read'
+      ],
+      isDefault: true,
+      isActive: true
+    },
+    {
+      companyId,
+      roleName: 'Support User',
+      permissions: [
+        'support.write',
+        'jobs.read',
+        'company_profile.read'
+      ],
+      isDefault: true,
+      isActive: true
+    },
+    {
+      companyId,
+      roleName: 'Viewer',
+      permissions: [
+        'bulk_jobs.read',
+        'jobs.read',
+        'wallet.read',
+        'invoices.read',
+        'reports.read',
+        'company_profile.read'
+      ],
+      isDefault: true,
+      isActive: true
+    }
+  ];
+
+  for (const role of defaults) {
+    const exists = await B2BRole.findOne({ companyId, roleName: role.roleName });
+    if (!exists) {
+      await B2BRole.create(role);
+    }
+  }
+};
 
 /**
  * Register a new B2B Company
@@ -74,6 +153,28 @@ const registerCompany = async (req, res) => {
       walletBalance: 0
     });
 
+    // Seed default roles and create main Company Admin B2BUser profile
+    await ensureDefaultRoles(company._id);
+    await B2BUser.create({
+      companyId: company._id,
+      fullName: company.authorizedPerson.name,
+      email: company.email,
+      mobile: company.phone,
+      role: 'Company Admin',
+      permissions: [
+        'bulk_jobs.read', 'bulk_jobs.write',
+        'jobs.read', 'jobs.write',
+        'wallet.read', 'wallet.write',
+        'invoices.read',
+        'reports.read',
+        'support.write',
+        'users.manage',
+        'company_profile.read', 'company_profile.write'
+      ],
+      status: 'active',
+      passwordHash: company.passwordHash
+    });
+
     // 5. Create B2BDocument collection records for granular admin tracking
     if (documents && documents.length > 0) {
       const docRecords = documents.map(doc => ({
@@ -139,15 +240,55 @@ const loginCompany = async (req, res) => {
 
     const cleanIdentifier = emailOrMobile.trim();
 
-    // 1. Find B2B company by email or phone
-    const company = await B2BCompany.findOne({
+    // 1. Find B2B user by email or mobile
+    let user = await B2BUser.findOne({
       $or: [
         { email: cleanIdentifier.toLowerCase() },
-        { phone: cleanIdentifier }
+        { mobile: cleanIdentifier }
       ]
     });
 
-    if (!company) {
+    let company;
+    if (user) {
+      company = await B2BCompany.findById(user.companyId);
+    } else {
+      // Check B2BCompany (migration fallback)
+      company = await B2BCompany.findOne({
+        $or: [
+          { email: cleanIdentifier.toLowerCase() },
+          { phone: cleanIdentifier }
+        ]
+      });
+
+      if (company) {
+        // Seed default roles and create admin user on the fly
+        await ensureDefaultRoles(company._id);
+        user = await B2BUser.findOne({ companyId: company._id, role: 'Company Admin' });
+        if (!user) {
+          user = await B2BUser.create({
+            companyId: company._id,
+            fullName: company.authorizedPerson.name,
+            email: company.email,
+            mobile: company.phone,
+            role: 'Company Admin',
+            permissions: [
+              'bulk_jobs.read', 'bulk_jobs.write',
+              'jobs.read', 'jobs.write',
+              'wallet.read', 'wallet.write',
+              'invoices.read',
+              'reports.read',
+              'support.write',
+              'users.manage',
+              'company_profile.read', 'company_profile.write'
+            ],
+            status: 'active',
+            passwordHash: company.passwordHash
+          });
+        }
+      }
+    }
+
+    if (!user || !company) {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -155,7 +296,7 @@ const loginCompany = async (req, res) => {
     }
 
     // 2. Validate password
-    const isMatch = await company.comparePassword(password);
+    const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({
         success: false,
@@ -188,7 +329,7 @@ const loginCompany = async (req, res) => {
       });
     }
 
-    // 4. Check active state
+    // 4. Check active/blocked states
     if (!company.isActive) {
       return res.status(403).json({
         success: false,
@@ -196,14 +337,32 @@ const loginCompany = async (req, res) => {
       });
     }
 
+    if (user.status === 'blocked') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your user account has been blocked. Please contact your administrator.'
+      });
+    }
+
+    if (user.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: `Your account is currently ${user.status}. Please activate your account or contact support.`
+      });
+    }
+
+    // Update last login
+    user.lastLoginAt = new Date();
+    await user.save();
+
     // 5. Generate JWT tokens
     const loginSessionId = Date.now().toString();
     const tokens = generateTokenPair({
-      userId: company._id.toString(),
+      userId: user._id.toString(),
       role: 'B2B',
       profileId: company._id.toString(),
-      mobile: company.phone,
-      email: company.email,
+      mobile: user.mobile,
+      email: user.email,
       loginSessionId
     });
 
@@ -213,6 +372,11 @@ const loginCompany = async (req, res) => {
     companyRes.id = company._id;
     companyRes.role = 'b2b';
 
+    // Populate user profile info to the response
+    const userRes = user.toObject();
+    delete userRes.passwordHash;
+    delete userRes.__v;
+
     return res.status(200).json({
       success: true,
       message: 'Login successful',
@@ -220,6 +384,7 @@ const loginCompany = async (req, res) => {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       company: companyRes,
+      user: userRes,
       role: 'b2b',
       profileId: company._id.toString()
     });

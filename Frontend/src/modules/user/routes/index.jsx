@@ -57,19 +57,28 @@ const lazyLoad = (importFunc) => {
   });
 };
 
-// Lazy load all user pages for code splitting with error handling
+// Static imports for core flow pages to ensure instant navigation and avoid skeleton flashes
 import Home from '../pages/Home';
-// const Home = lazyLoad(() => import('../pages/Home'));
+import Services from '../pages/Services';
+import Cart from '../pages/Cart';
+import OneTimeServiceCheckout from '../pages/OneTimeServiceCheckout';
+import OneTimeServiceSchedule from '../pages/OneTimeServiceSchedule';
+import MyBookings from '../pages/MyBookings';
+import BookingDetails from '../pages/BookingDetails';
+import OneTimeServiceDetail from '../pages/OneTimeServiceDetail';
+import OneTimeServicePackages from '../pages/OneTimeServicePackages';
+import ReviewBooking from '../pages/ReviewBooking';
+import SearchingTechnician from '../pages/SearchingTechnician';
+import TechnicianFound from '../pages/TechnicianFound';
+import Login from '../pages/login';
+import Signup from '../pages/signup';
+import Account from '../pages/Account';
+
+// Lazy load minor/non-critical pages for code splitting with error handling
 const Rewards = lazyLoad(() => import('../pages/Rewards'));
-const Account = lazyLoad(() => import('../pages/Account'));
 const Native = lazyLoad(() => import('../pages/Native'));
-const Cart = lazyLoad(() => import('../pages/Cart'));
-const Services = lazyLoad(() => import('../pages/Services'));
 const CategoryDetails = lazyLoad(() => import('../pages/CategoryDetails'));
 const Checkout = lazyLoad(() => import('../pages/Checkout'));
-const OneTimeServiceCheckout = lazyLoad(() => import('../pages/OneTimeServiceCheckout'));
-const MyBookings = lazyLoad(() => import('../pages/MyBookings'));
-const BookingDetails = lazyLoad(() => import('../pages/BookingDetails'));
 const Calendar = lazyLoad(() => import('../pages/Calendar'));
 const Inbox = lazyLoad(() => import('../pages/Inbox'));
 const BookingTrack = lazyLoad(() => import('../pages/BookingTrack'));
@@ -83,8 +92,6 @@ const PlanDetails = lazyLoad(() => import('../pages/MyPlan/PlanDetails'));
 const MyRating = lazyLoad(() => import('../pages/MyRating'));
 const AboutWBI = lazyLoad(() => import('../pages/AboutWBI'));
 const UpdateProfile = lazyLoad(() => import('../pages/UpdateProfile'));
-const Login = lazyLoad(() => import('../pages/login'));
-const Signup = lazyLoad(() => import('../pages/signup'));
 const Scrap = lazyLoad(() => import('../pages/Scrap'));
 const AddScrap = lazyLoad(() => import('../pages/Scrap/AddScrap'));
 const Notifications = lazyLoad(() => import('../pages/Notifications'));
@@ -118,11 +125,6 @@ const AcPowerService = lazyLoad(() => import('../pages/AcPowerService'));
 const DcPowerService = lazyLoad(() => import('../pages/DcPowerService'));
 const PowerTestingService = lazyLoad(() => import('../pages/PowerTestingService'));
 const WorkerSelection = lazyLoad(() => import('../pages/WorkerSelection'));
-const OneTimeServiceDetail = lazyLoad(() => import('../pages/OneTimeServiceDetail'));
-const OneTimeServicePackages = lazyLoad(() => import('../pages/OneTimeServicePackages'));
-const ReviewBooking = lazyLoad(() => import('../pages/ReviewBooking'));
-const SearchingTechnician = lazyLoad(() => import('../pages/SearchingTechnician'));
-const TechnicianFound = lazyLoad(() => import('../pages/TechnicianFound'));
 
 // Healthcare Solutions
 const MedicalEquipmentEnquiry = lazyLoad(() => import('../pages/MedicalEquipmentEnquiry'));
@@ -145,7 +147,7 @@ const UserRoutes = () => {
   // useAppNotifications('user');
 
   // Pages where BottomNav should be shown
-  const bottomNavPages = ['/user', '/user/', '/user/my-bookings', '/user/scrap', '/user/services', '/user/cart', '/user/account', '/user/calendar', '/user/inbox'];
+  const bottomNavPages = ['/user', '/user/', '/user/home', '/user/my-bookings', '/user/scrap', '/user/services', '/user/cart', '/user/account', '/user/calendar', '/user/inbox'];
   const shouldShowBottomNav = bottomNavPages.includes(location.pathname);
 
   // Check if we hide the live booking card (e.g. if we are on the specific booking details or track page)
@@ -164,7 +166,7 @@ const UserRoutes = () => {
         <div className={`flex-1 ${shouldShowBottomNav ? "pb-24" : ""}`}>
           <Suspense fallback={<LoadingFallback />}>
             <AnimatePresence mode="wait">
-            <Routes location={location || undefined} key={location ? location.pathname : 'routes'}>
+            <Routes location={location || undefined}>
               {/* Public routes */}
               <Route path="/login" element={<AnimatedPage><PublicRoute userType="user"><Login /></PublicRoute></AnimatedPage>} />
               <Route path="/signup" element={<AnimatedPage><PublicRoute userType="user"><Signup /></PublicRoute></AnimatedPage>} />
@@ -176,6 +178,7 @@ const UserRoutes = () => {
               <Route path="/service/:slug" element={<AnimatedPage><ProtectedRoute userType="user"><OneTimeServiceDetail /></ProtectedRoute></AnimatedPage>} />
               <Route path="/service/:slug/packages" element={<AnimatedPage><ProtectedRoute userType="user"><OneTimeServicePackages /></ProtectedRoute></AnimatedPage>} />
               <Route path="/one-time-checkout" element={<AnimatedPage><ProtectedRoute userType="user"><OneTimeServiceCheckout /></ProtectedRoute></AnimatedPage>} />
+              <Route path="/one-time-schedule" element={<AnimatedPage><ProtectedRoute userType="user"><OneTimeServiceSchedule /></ProtectedRoute></AnimatedPage>} />
               <Route path="/checkout" element={<AnimatedPage><ProtectedRoute userType="user"><Checkout /></ProtectedRoute></AnimatedPage>} />
               <Route path="/categories/:slug" element={<AnimatedPage><ProtectedRoute userType="user"><CategoryDetails /></ProtectedRoute></AnimatedPage>} />
               <Route path="/workers/match" element={<AnimatedPage><ProtectedRoute userType="user"><WorkerSelection /></ProtectedRoute></AnimatedPage>} />

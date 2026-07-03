@@ -186,7 +186,7 @@ const register = async (req, res) => {
 
     const { 
       name, email, phone, password,
-      serviceCategories, subServices, skills, secondarySkills,
+      serviceCategories, serviceCategoryRefs, approvedOneTimeServices, subServices, skills, secondarySkills,
       uploadedDocuments,
       roleType, role,
       ...customFields // Capture all other dynamic fields here
@@ -255,6 +255,8 @@ const register = async (req, res) => {
     const worker = await Worker.create({
       name, email: email && email.trim() !== '' ? email : undefined, phone, password,
       serviceCategories: serviceCategories || [],
+      serviceCategoryRefs: serviceCategoryRefs || [],
+      approvedOneTimeServices: approvedOneTimeServices || [],
       subServices: subServices || [],
       skills: skills || [],
       secondarySkills: secondarySkills || [],

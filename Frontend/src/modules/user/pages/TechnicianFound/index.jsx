@@ -14,7 +14,7 @@ import WifiOff from 'lucide-react/dist/esm/icons/wifi-off';
 import Confetti from 'react-confetti';
 import useWindowSize from 'react-use/lib/useWindowSize';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '../../../../firebase';
+import { getFirebaseDb } from '../../../../firebase';
 import { ref, onValue } from 'firebase/database';
 import useAppNotifications from '../../../../hooks/useAppNotifications';
 import api from '../../../../services/api';
@@ -177,20 +177,28 @@ const TechnicianFound = () => {
 
   // Firebase tracking database listener
   useEffect(() => {
-    if (!db || !bookingId) return;
+    if (!bookingId) return;
 
-    const trackingRef = ref(db, `trackings/${bookingId}`);
-    const unsubscribe = onValue(trackingRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data && data.lat && data.lng) {
-        setWorkerCoords({
-          lat: parseFloat(data.lat),
-          lng: parseFloat(data.lng),
+    let unsubscribe = null;
+
+    getFirebaseDb().then((dbInstance) => {
+      if (dbInstance) {
+        const trackingRef = ref(dbInstance, `trackings/${bookingId}`);
+        unsubscribe = onValue(trackingRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data && data.lat && data.lng) {
+            setWorkerCoords({
+              lat: parseFloat(data.lat),
+              lng: parseFloat(data.lng),
+            });
+          }
         });
       }
-    });
+    }).catch(() => {});
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [bookingId]);
 
   // Live recalculate whenever customer coordinates or worker coordinates change

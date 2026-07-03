@@ -9,7 +9,7 @@ const {
   refreshToken,
   verifyLogin
 } = require('../../controllers/engineerControllers/engineerAuthController');
-const { registerCompany } = require('../../controllers/companyControllers/companyAuthController');
+const { registerCompany } = require('../../controllers/b2bControllers/companyAuthController');
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isEngineer } = require('../../middleware/roleMiddleware');
 const { getRegistrationConfig } = require('../../controllers/engineerControllers/engineerConfigController');

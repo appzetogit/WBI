@@ -1,17 +1,22 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
-const BookingDraft = require('./models/BookingDraft');
-const Booking = require('./models/Booking');
-const { confirmReview } = require('./controllers/user-controllers/bookingDraft.controller');
+const BookingDraft = require('../../models/BookingDraft');
+const Booking = require('../../models/Booking');
+const { confirmReview } = require('../../controllers/userControllers/bookingDraft.controller');
 
 mongoose.connect(process.env.MONGODB_URI).then(async () => {
   try {
-    const draftId = '6a35325785a42bea56b0bf90';
-    console.log('Testing confirm with draftId:', draftId);
+    // Find the latest draft
+    const draft = await BookingDraft.findOne({ status: 'draft' }).sort({ createdAt: -1 });
+    if (!draft) {
+      console.log('No draft found');
+      process.exit(0);
+    }
+    console.log('Testing confirm with draftId:', draft._id);
     
     // Simulate req, res
     const req = {
-      body: { draftId }
+      body: { draftId: draft._id }
     };
     const res = {
       status: function(code) {

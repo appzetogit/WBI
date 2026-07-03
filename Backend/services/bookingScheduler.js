@@ -143,7 +143,7 @@ class BookingScheduler {
 
               await Booking.findByIdAndUpdate(booking._id, {
                 $set: {
-                  status: BOOKING_STATUS.NO_VENDORS,
+                  status: BOOKING_STATUS.ADMIN_ACTION_REQUIRED,
                   cancellationReason: 'No vendor accepted within time limit'
                 }
               });

@@ -107,7 +107,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
     setLogoUploading(true);
     try {
       const res = await api.post('/b2b/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000
       });
       if (res.data.success) {
         setLogoUrl(res.data.fileUrl);
@@ -136,7 +137,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
 
     try {
       const res = await api.post('/b2b/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000
       });
       if (res.data.success) {
         setDocuments(prev => ({
@@ -365,7 +367,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
 
     try {
       const res = await api.post('/b2b/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000
       });
       if (res.data.success) {
         setRejectedDocsList(prev => prev.map(doc => 

@@ -68,7 +68,7 @@ const b2bCompanySchema = new mongoose.Schema({
   documents: [b2bCompanyDocumentSchema],
   verificationStatus: { 
     type: String, 
-    enum: ['pending', 'approved', 'rejected'], 
+    enum: ['pending', 'verified', 'approved', 'rejected'], 
     default: 'pending' 
   },
   rejectionReason: { type: String, default: null }, // Global rejection reason if applicable

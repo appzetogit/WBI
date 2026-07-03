@@ -256,7 +256,7 @@ const CategoryDetails = () => {
       else if (serviceName.includes('annual') || serviceName.includes('amc')) navigate('/user/hc-amc-enquiry');
     } else {
       // General fallback if no specific enquiry form exists
-      navigate(`/user/service/${svc._id}`);
+      navigate(`/user/service/${svc.slug || svc._id || svc.id}`);
     }
   };
 
@@ -446,13 +446,13 @@ const CategoryDetails = () => {
                       
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1">
-                          <span className="text-[13px]">â­</span>
+                          <span className="text-[13px]">⭐</span>
                           <span className="text-[12px] font-bold text-[#0F172A]">{svc.rating || 4.8}</span>
                           <span className="text-[11px] text-[#64748B]">({svc.reviewCount || svc.reviews || 128})</span>
                         </div>
                         <span className="text-gray-300">|</span>
                         <span className="text-[11px] text-[#64748B]">
-                          From <span className="font-bold text-[#0F172A]">â‚¹{(svc.startingPrice || svc.basePrice || 4999).toLocaleString('en-IN')}</span>
+                          From <span className="font-bold text-[#0F172A]">₹{(svc.startingPrice || svc.basePrice || 4999).toLocaleString('en-IN')}</span>
                         </span>
                       </div>
                     </div>

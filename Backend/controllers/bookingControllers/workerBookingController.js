@@ -121,6 +121,7 @@ const getJobById = async (req, res) => {
       .populate('vendorId', 'name businessName phone email address')
       .populate('serviceId', 'title description iconUrl images')
       .populate('categoryId', 'title slug')
+      .select('+paymentOtp')
       .lean();
 
     if (!booking) {
@@ -877,7 +878,7 @@ const respondToJob = async (req, res) => {
     req.params.bookingId = id;
     req.userId = req.user?.id || req.user?._id || req.userId;
 
-    const bookingResponseController = require('../worker-controllers/bookingResponse.controller');
+    const bookingResponseController = require('../workerControllers/bookingResponse.controller');
 
     if (status === 'ACCEPTED') {
       return bookingResponseController.acceptBooking(req, res);
@@ -1174,7 +1175,7 @@ const acceptBroadcastJob = async (req, res) => {
     req.params.bookingId = id;
     req.userId = req.user?.id || req.user?._id || req.userId;
 
-    const bookingResponseController = require('../worker-controllers/bookingResponse.controller');
+    const bookingResponseController = require('../workerControllers/bookingResponse.controller');
     return bookingResponseController.acceptBooking(req, res);
   } catch (error) {
     console.error('Accept broadcast job error:', error);

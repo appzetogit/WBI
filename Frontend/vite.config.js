@@ -15,45 +15,54 @@ export default defineConfig({
   server: {
     port: 5174, // Change port to bypass cache
     strictPort: true,
-    headers: {
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: http: https: http://localhost:* http://127.0.0.1:* http://localhost:5000 http://127.0.0.1:5000; font-src 'self' data: https:; connect-src 'self' https: ws: wss: http://localhost:* http://127.0.0.1:* http://localhost:5000 http://127.0.0.1:5000; frame-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self';",
-      // Force no caching in development
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-    },
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
         secure: false,
       },
+      '/socket.io': {
+        target: 'http://localhost:5000',
+        ws: true,
+        changeOrigin: true,
+      },
     }
   },
   build: {
+    target: 'esnext',
     minify: 'terser',
     terserOptions: {
       compress: {
         drop_console: true,
         drop_debugger: true,
-        pure_funcs: ['console.log', 'console.info'],
+        pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
       },
     },
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks: (id) => {
           if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'react-vendor';
+            }
             if (id.includes('firebase/')) {
-              return 'firebase';
+              return 'firebase-vendor';
+            }
+            if (id.includes('framer-motion')) {
+              return 'animation-vendor';
+            }
+            if (id.includes('gsap')) {
+              return 'gsap-vendor';
             }
             if (id.includes('leaflet') || id.includes('react-leaflet') || id.includes('@react-google-maps')) {
-              return 'maps';
+              return 'maps-vendor';
             }
             if (id.includes('xlsx')) {
-              return 'xlsx';
+              return 'xlsx-vendor';
             }
-            if (id.includes('framer-motion') || id.includes('gsap') || id.includes('recharts')) {
-              return 'ui-heavy';
+            if (id.includes('recharts')) {
+              return 'recharts-vendor';
             }
             return 'vendor';
           }
@@ -63,10 +72,8 @@ export default defineConfig({
         assetFileNames: 'assets/[name]-[hash].[ext]',
       },
     },
-    chunkSizeWarningLimit: 800,
     sourcemap: false,
     cssCodeSplit: true,
-    target: 'es2020',
     assetsInlineLimit: 4096,
   },
   optimizeDeps: {
@@ -76,6 +83,21 @@ export default defineConfig({
       'react-dom',
       'react-dom/client',
       'react-router-dom',
+      'react-icons/fi',
+      'react-icons/fa',
+      'react-icons/io',
+      'react-icons/md',
+      'react-icons/tb',
+      'socket.io-client',
+      'framer-motion',
+      'axios',
+      'dayjs',
+      'leaflet',
+      'react-leaflet',
+      '@react-google-maps/api',
+      'recharts',
+      'nprogress',
+      'react-hot-toast',
     ],
   },
 })

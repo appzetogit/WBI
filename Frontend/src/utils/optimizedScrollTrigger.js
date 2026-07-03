@@ -1,10 +1,3 @@
-import { gsap } from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-
-if (typeof window !== 'undefined') {
-  gsap.registerPlugin(ScrollTrigger);
-}
-
 /**
  * Optimized scroll-triggered animation that only initializes when needed
  * Uses Intersection Observer for better performance
@@ -32,21 +25,23 @@ export const createOptimizedScrollAnimation = (element, animationConfig, options
     (entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
-          gsap.fromTo(
-            entry.target,
-            from,
-            {
-              ...to,
-              duration,
-              delay,
-              ease,
-              onComplete: () => {
-                if (once) {
-                  observer.unobserve(entry.target);
-                }
-              },
-            }
-          );
+          import('gsap').then(({ gsap }) => {
+            gsap.fromTo(
+              entry.target,
+              from,
+              {
+                ...to,
+                duration,
+                delay,
+                ease,
+                onComplete: () => {
+                  if (once) {
+                    observer.unobserve(entry.target);
+                  }
+                },
+              }
+            );
+          }).catch(err => console.warn('Failed to load GSAP dynamically', err));
           
           if (once) {
             observer.unobserve(entry.target);
@@ -96,21 +91,23 @@ export const createOptimizedStaggerAnimation = (elements, animationConfig, optio
     (entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
-          gsap.fromTo(
-            elements,
-            from,
-            {
-              ...to,
-              duration,
-              stagger,
-              ease,
-              onComplete: () => {
-                if (once) {
-                  observer.unobserve(entry.target);
-                }
-              },
-            }
-          );
+          import('gsap').then(({ gsap }) => {
+            gsap.fromTo(
+              elements,
+              from,
+              {
+                ...to,
+                duration,
+                stagger,
+                ease,
+                onComplete: () => {
+                  if (once) {
+                    observer.unobserve(entry.target);
+                  }
+                },
+              }
+            );
+          }).catch(err => console.warn('Failed to load GSAP dynamically', err));
           
           if (once) {
             observer.unobserve(entry.target);
@@ -165,7 +162,9 @@ export const batchRefreshScrollTrigger = () => {
   }
   
   refreshTimeout = setTimeout(() => {
-    ScrollTrigger.refresh();
+    import('gsap/ScrollTrigger').then(({ ScrollTrigger }) => {
+      ScrollTrigger.refresh();
+    }).catch(err => console.warn('Failed to refresh ScrollTrigger dynamically', err));
   }, 100);
 };
 

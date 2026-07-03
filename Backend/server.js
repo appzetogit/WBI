@@ -80,8 +80,7 @@ app.use(cors({
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']
 }));
 
 // CORS configuration finished above
@@ -104,6 +103,24 @@ app.use(mongoSanitize());
 app.use('/api/users/bookings', (req, res, next) => {
   if (req.method === 'POST') {
     console.log('DEBUG: POST /api/users/bookings BODY:', JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
+// DEBUG: Log B2B Upload request and response to upload_debug.log
+app.use((req, res, next) => {
+  if (req.path.includes('/b2b/documents/upload')) {
+    const fs = require('fs');
+    const path = require('path');
+    const logFile = path.join(__dirname, 'upload_debug.log');
+    
+    fs.appendFileSync(logFile, `[${new Date().toISOString()}] Incoming request: method=${req.method}, headers=${JSON.stringify(req.headers)}\n`);
+
+    const originalJson = res.json;
+    res.json = function (body) {
+      fs.appendFileSync(logFile, `[${new Date().toISOString()}] Response sent: status=${res.statusCode}, body=${JSON.stringify(body)}\n`);
+      return originalJson.apply(this, arguments);
+    };
   }
   next();
 });
@@ -183,6 +200,7 @@ app.get('/api/test/redis', async (req, res) => {
 
 // API Routes
 
+app.use('/api', require('./routes/public-routes/categoriesQuery.routes'));
 app.use('/api/service-categories', require('./routes/public-routes/serviceCategory.routes'));
 app.use('/api/sub-services', require('./routes/public-routes/subServicesPublic.routes'));
 app.use('/api/skills', require('./routes/public-routes/skillsPublic.routes'));
@@ -210,11 +228,15 @@ app.use('/api/users/fcm-tokens', require('./routes/user-routes/fcmToken.routes')
 app.use('/api/users/reviews', require('./routes/user-routes/review.routes'));
 app.use('/api/users/one-time-bookings', require('./routes/user-routes/oneTimeBooking.routes'));
 app.use('/api/users/one-time-services', require('./routes/user-routes/oneTimeService.routes'));
+app.use('/api/one-time-services', require('./routes/user-routes/oneTimeService.routes'));
+app.use('/api/services', require('./routes/user-routes/oneTimeService.routes'));
+app.use('/api/users/addresses', require('./routes/user-routes/address.routes'));
 
 // Review Booking Flow routes
 app.use('/api/booking-draft', require('./routes/user-routes/bookingDraft.routes'));
 app.use('/api/coupons', require('./routes/user-routes/coupon.routes'));
 app.use('/api/bookings/availability', require('./routes/user-routes/bookingAvailability.routes'));
+app.use('/api/bookings', require('./routes/paymentFlowBooking.routes'));
 
 
 // Scrap routes
@@ -241,6 +263,7 @@ app.use('/api/worker/bookings', require('./routes/worker-routes/bookingResponse.
 app.use('/api/vendors/digital', require('./routes/vendor-routes/digital.routes'));
 
 // Worker routes
+app.use('/api/worker/services', require('./routes/worker-routes/workerServices.routes'));
 app.use('/api/workers/auth', require('./routes/worker-routes/auth.routes'));
 app.use('/api/workers', require('./routes/worker-routes/profile.routes'));
 app.use('/api/workers', require('./routes/worker-routes/job.routes'));
@@ -262,15 +285,25 @@ app.use('/api/engineers/digital', require('./routes/engineer-routes/digital.rout
 
 // B2B routes
 app.use('/api/b2b', require('./routes/b2b-routes/auth.routes'));
+app.use('/api/b2b/company-profile', require('./routes/b2b-routes/profile.routes'));
 app.use('/api/b2b/bulk-jobs', require('./routes/b2b-routes/bulkJobs.routes'));
 app.use('/api/b2b/jobs', require('./routes/b2b-routes/jobs.routes'));
 app.use('/api/b2b/engineers', require('./routes/b2b-routes/engineers.routes'));
+app.use('/api/b2b/live-tracking', require('./routes/b2b-routes/liveTracking.routes'));
+app.use('/api/b2b/invoices', require('./routes/b2b-routes/invoices.routes'));
+app.use('/api/b2b/reports', require('./routes/b2b-routes/reports.routes'));
+app.use('/api/b2b/support', require('./routes/b2b-routes/support.routes'));
+app.use('/api/b2b/users', require('./routes/b2b-routes/users.routes'));
+// Admin Auth routes (mounted first to prevent generic /api/admin middleware interception)
+app.use('/api/admin/auth', require('./routes/admin-routes/adminAuth.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bBulkJobAdmin.routes'));
 app.use('/api/admin/b2b-wallets', require('./routes/admin-routes/b2bWalletAdmin.routes'));
+app.use('/api/admin/b2b/invoices', require('./routes/admin-routes/b2bInvoiceAdmin.routes'));
+app.use('/api/admin/b2b/reports', require('./routes/admin-routes/b2bReportAdmin.routes'));
+app.use('/api/admin/b2b/support', require('./routes/admin-routes/b2bSupportAdmin.routes'));
 
 // Admin routes
-app.use('/api/admin/auth', require('./routes/admin-routes/adminAuth.routes'));
 app.use('/api/admin', require('./routes/admin-routes/cityManagement.routes.js'));
 app.use('/api/admin', require('./routes/admin-routes/dashboard.routes'));
 app.use('/api/admin', require('./routes/admin-routes/userManagement.routes'));
@@ -278,7 +311,9 @@ app.use('/api/admin', require('./routes/admin-routes/vendorManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/workerManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/engineerManagement.routes'));
 app.use('/api/admin/service-categories', require('./routes/admin-routes/serviceCategoryManagement.routes'));
+app.use('/api/admin/category', require('./routes/admin-routes/serviceCategoryManagement.routes'));
 app.use('/api/admin/sub-services', require('./routes/admin-routes/subServiceManagement.routes'));
+app.use('/api/admin/sub-service', require('./routes/admin-routes/subServiceManagement.routes'));
 app.use('/api/admin/custom-skills', require('./routes/admin-routes/customSkillManagement.routes'));
 app.use('/api/admin/skills', require('./routes/admin-routes/skillManagement.routes'));
 app.use('/api/admin/dynamic-form-configs', require('./routes/admin-routes/dynamicFormConfig.routes'));
@@ -386,7 +421,9 @@ app.use('/api/forms', require('./routes/public-routes/form.routes'));
 
 // Multiple Services Public Route
 app.use('/api/public/multiple-services-enquiries', require('./routes/public-routes/multipleServicesEnquiry.routes'));
+app.use('/api/public/multipleservices-enquiries', require('./routes/public-routes/multipleServicesEnquiry.routes'));
 app.use('/api/public/power-monitoring-enquiries', require('./routes/public-routes/automatedPowerMonitoringEnquiry.routes'));
+app.use('/api/public/powermonitoring-enquiries', require('./routes/public-routes/automatedPowerMonitoringEnquiry.routes'));
 
 // Contact and Core Service Enquiries
 app.use('/api/public/service-categories', require('./routes/public-routes/serviceCategory.routes'));
@@ -398,7 +435,9 @@ app.use('/api/public/sitetesting-enquiries', require('./routes/public-routes/sit
 
 // Banking Service Enquiries (Public)
 app.use('/api/public/atm-cassette-service-enquiries', require('./routes/public-routes/atmCassetteService.routes'));
+app.use('/api/public/atmcassette-enquiries', require('./routes/public-routes/atmCassetteService.routes'));
 app.use('/api/public/atm-service-enquiries', require('./routes/public-routes/atmServiceEnquiry.routes'));
+app.use('/api/public/atmservice-enquiries', require('./routes/public-routes/atmServiceEnquiry.routes'));
 app.use('/api/public/passbookprinter-enquiries', require('./routes/public-routes/passbookPrinterService.routes'));
 app.use('/api/public/cdmservice-enquiries', require('./routes/public-routes/cdmService.routes'));
 app.use('/api/public/posservice-enquiries', require('./routes/public-routes/posService.routes'));
@@ -461,6 +500,10 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         // Make io instance available in request
         app.set('io', getIO());
 
+        // Seed dynamic time slots & availability configs
+        const seedSchedulingConfig = require('./services/seedSchedulingConfig');
+        seedSchedulingConfig().catch(err => console.error('[Server] Seeding failed:', err));
+
         // Initialize Booking Scheduler for Wave-Based Alerting
         const { initializeScheduler } = require('./services/bookingScheduler');
         initializeScheduler(getIO());
@@ -470,6 +513,16 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const { startUrgencyScheduler } = require('./services/urgencyScheduler');
         startUrgencyScheduler();
         console.log('[Server] Urgency Scheduler initialized');
+
+        // Initialize Scheduled Booking Scheduler for upcoming slots
+        const { initializeScheduledScheduler } = require('./services/scheduledBookingScheduler');
+        initializeScheduledScheduler();
+        console.log('[Server] Scheduled Booking Scheduler initialized');
+
+        // Initialize Payment Expiry Scheduler for payment timeouts & auto-completes
+        const { startPaymentExpiryScheduler } = require('./services/paymentExpiryScheduler');
+        startPaymentExpiryScheduler();
+        console.log('[Server] Payment Expiry Scheduler initialized');
 
         // Initialize BullMQ Workers for Security Solutions Flow
         require('./jobs/vendorMatchingJob');

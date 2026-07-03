@@ -41,7 +41,7 @@ const bannerSchema = new mongoose.Schema({
   },
   bannerType: {
     type: String,
-    enum: ['home_banner', 'offer_banner', 'promo_banner'],
+    enum: ['home_banner', 'offer_banner', 'promo_banner', 'footer_banner'],
     default: 'home_banner'
   },
   isActive: {

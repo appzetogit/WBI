@@ -36,10 +36,14 @@ const designEnquirySchema = new mongoose.Schema({
   developerHandoff: { type: String, required: true },
 
   // Timeline & Budget
-  expectedDeliveryDate: { type: Date },
+    expectedDeliveryDate: { type: Date },
   urgency: { type: String, required: true },
   budgetRange: { type: String, required: true },
   source: { type: String, required: true },
+
+  // Categorization & Additional Notes
+  category: { type: String, required: true, trim: true },
+  comments: { type: String, trim: true },
 
   // Attachments
   attachments: [{

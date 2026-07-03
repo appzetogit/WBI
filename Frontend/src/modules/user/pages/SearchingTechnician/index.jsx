@@ -347,13 +347,13 @@ const SearchingTechnician = () => {
                     <strong>{requestsSent}</strong>
                  </div>
               </div>
-              <div className={styles.statBox}>
-                 <Wifi size={16} color="#8b5cf6" />
-                 <div className={styles.statBoxInfo}>
-                    <span>Radius</span>
-                    <strong>{searchRadius} KM</strong>
-                 </div>
-              </div>
+               <div className={styles.statBox}>
+                  <Wifi size={16} color="#8b5cf6" />
+                  <div className={styles.statBoxInfo}>
+                     <span>Radius</span>
+                     <strong>{searchRadius > 100 ? 'All Nearby (Auto)' : `${searchRadius} KM`}</strong>
+                  </div>
+               </div>
             </div>
           )}
 

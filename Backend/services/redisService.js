@@ -345,13 +345,19 @@ const getCache = async (key) => {
 const delCache = async (pattern) => {
   if (!isRedisConnected()) return false;
   try {
-    if (pattern.includes('*')) {
-      const keys = await redis.keys(pattern);
-      if (keys.length > 0) {
-        await redis.del(...keys);
+    const patterns = [pattern];
+    if (pattern === 'home_data:*') {
+      patterns.push('homeData:*');
+    }
+    for (const pat of patterns) {
+      if (pat.includes('*')) {
+        const keys = await redis.keys(pat);
+        if (keys.length > 0) {
+          await redis.del(...keys);
+        }
+      } else {
+        await redis.del(pat);
       }
-    } else {
-      await redis.del(pattern);
     }
     return true;
   } catch (error) {

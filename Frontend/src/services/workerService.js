@@ -84,8 +84,13 @@ const workerService = {
   },
 
   verifyVisit: async (id, otp, location) => {
-    const response = await api.post(`/workers/jobs/${id}/visit/verify`, { otp, location });
-    return response.data;
+    try {
+      const response = await api.post(`/bookings/${id}/verify-start-otp`, { otp });
+      return response.data;
+    } catch (err) {
+      const response = await api.post(`/workers/jobs/${id}/visit/verify`, { otp, location });
+      return response.data;
+    }
   },
 
   initiateCashCollection: async (id, totalAmount, extraItems = []) => {

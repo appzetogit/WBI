@@ -84,6 +84,12 @@ const BillingPage = () => {
     fetchData();
   }, [id]);
 
+  useEffect(() => {
+    if (job && job.status === 'completed') {
+      setCurrentStep(5);
+    }
+  }, [job]);
+
   // Scroll to top on mount or view change or loading complete
   useLayoutEffect(() => {
     const scrollToTop = () => {
@@ -673,43 +679,47 @@ const BillingPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-0 flex flex-col">
-      <div className="sticky top-0 z-50 bg-white">
+      <div className="sticky top-0 z-50 bg-white print:hidden">
         <div className="px-4 py-4 shadow-sm border-b border-gray-100 flex items-center gap-3">
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-full">
             <FiArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-lg font-bold text-gray-800">Generate Bill</h1>
+            <h1 className="text-lg font-bold text-gray-800">
+              {job.status === 'completed' ? 'Service Invoice & Report' : 'Generate Bill'}
+            </h1>
             <p className="text-xs text-gray-500">Job #{job.bookingNumber}</p>
           </div>
         </div>
 
-        <div className="px-4 py-4 border-b border-gray-50 flex justify-between relative overflow-hidden shadow-sm">
-          {[
-            { id: 1, label: 'Services', icon: FiTool },
-            { id: 2, label: 'Parts', icon: FiPackage },
-            { id: 3, label: 'Extras', icon: FiPlus },
-            { id: 4, label: 'Transport', icon: FiPackage },
-            { id: 5, label: 'Review', icon: FiFileText }
-          ].map((step) => {
-            const isCompleted = step.id < currentStep;
-            const isActive = step.id === currentStep;
-            const isReached = step.id <= maxStep;
+        {job.status !== 'completed' && (
+          <div className="px-4 py-4 border-b border-gray-50 flex justify-between relative overflow-hidden shadow-sm">
+            {[
+              { id: 1, label: 'Services', icon: FiTool },
+              { id: 2, label: 'Parts', icon: FiPackage },
+              { id: 3, label: 'Extras', icon: FiPlus },
+              { id: 4, label: 'Transport', icon: FiPackage },
+              { id: 5, label: 'Review', icon: FiFileText }
+            ].map((step) => {
+              const isCompleted = step.id < currentStep;
+              const isActive = step.id === currentStep;
+              const isReached = step.id <= maxStep;
 
-            return (
-              <button key={step.id} onClick={() => isReached && setCurrentStep(step.id)}
-                className={`flex flex-col items-center gap-1 z-10 relative transition-all ${isActive ? 'opacity-100 scale-105' : isReached ? 'opacity-80' : 'opacity-40'}`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${(isActive || isCompleted) ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-gray-100 text-gray-400'} ${isActive ? 'ring-4 ring-blue-50' : ''}`}>
-                  {isCompleted ? <FiCheck className="w-4 h-4" /> : <step.icon />}
-                </div>
-                <span className={`text-[10px] font-bold ${isReached ? 'text-gray-800' : 'text-gray-400'}`}>{step.label}</span>
-              </button>
-            );
-          })}
-          <div className="absolute top-8 left-0 right-0 h-0.5 bg-gray-200 -z-0 mx-8">
-            <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${((maxStep - 1) / 4) * 100}%` }}></div>
+              return (
+                <button key={step.id} onClick={() => isReached && setCurrentStep(step.id)}
+                  className={`flex flex-col items-center gap-1 z-10 relative transition-all ${isActive ? 'opacity-100 scale-105' : isReached ? 'opacity-80' : 'opacity-40'}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${(isActive || isCompleted) ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : 'bg-gray-100 text-gray-400'} ${isActive ? 'ring-4 ring-blue-50' : ''}`}>
+                    {isCompleted ? <FiCheck className="w-4 h-4" /> : <step.icon />}
+                  </div>
+                  <span className={`text-[10px] font-bold ${isReached ? 'text-gray-800' : 'text-gray-400'}`}>{step.label}</span>
+                </button>
+              );
+            })}
+            <div className="absolute top-8 left-0 right-0 h-0.5 bg-gray-200 -z-0 mx-8">
+              <div className="h-full bg-blue-600 transition-all duration-300" style={{ width: `${((maxStep - 1) / 4) * 100}%` }}></div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="p-4 space-y-6 pb-48">
@@ -891,9 +901,9 @@ const BillingPage = () => {
                       <span className="w-6 h-6 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center text-xs"><FiPackage /></span>
                       Parts
                     </h4>
-                    <label className="flex items-center gap-2.5 cursor-pointer mb-3 p-2.5 rounded-xl border border-dashed border-orange-200 bg-orange-50/50 hover:bg-orange-50 transition-colors">
+                    <label className={`flex items-center gap-2.5 mb-3 p-2.5 rounded-xl border border-dashed border-orange-200 bg-orange-50/50 transition-colors ${job.status === 'completed' ? 'cursor-default' : 'cursor-pointer hover:bg-orange-50'}`}>
                       <div className="relative">
-                        <input type="checkbox" checked={applyPartsGST} onChange={e => setApplyPartsGST(e.target.checked)} className="sr-only" />
+                        <input type="checkbox" checked={applyPartsGST} onChange={e => job.status !== 'completed' && setApplyPartsGST(e.target.checked)} disabled={job.status === 'completed'} className="sr-only" />
                         <div className={`w-10 h-5 rounded-full transition-colors duration-200 ${applyPartsGST ? 'bg-orange-500' : 'bg-gray-300'}`}>
                           <div className={`w-4 h-4 bg-white rounded-full shadow-sm absolute top-0.5 transition-all duration-200 ${applyPartsGST ? 'left-5' : 'left-0.5'}`} />
                         </div>
@@ -999,47 +1009,60 @@ const BillingPage = () => {
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 flex gap-3">
-        {currentStep === 1 && (
-          <button onClick={() => setCurrentStep(2)} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">
-            Next: Parts <FiArrowRight />
-          </button>
-        )}
-        {currentStep === 2 && (
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-gray-100 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 flex gap-3 print:hidden">
+        {job.status === 'completed' ? (
           <>
-            <button onClick={() => setCurrentStep(1)} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl">Back</button>
-            <button onClick={() => setCurrentStep(3)} className="flex-[2] py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">Next: Extras <FiArrowRight /></button>
+            <button onClick={() => navigate(-1)} className="flex-1 py-3.5 bg-gray-100 text-gray-700 font-bold rounded-xl active:scale-95 transition-all text-sm">
+              Back to Job
+            </button>
+            <button onClick={() => window.print()} className="flex-[2] py-3.5 bg-[#10AFA5] text-white font-bold rounded-xl active:scale-95 transition-all text-sm flex items-center justify-center gap-2 shadow-lg shadow-[#10AFA5]/20">
+              <FiFileText className="w-4 h-4" /> Print Report & Invoice
+            </button>
           </>
-        )}
-        {currentStep === 3 && (
+        ) : (
           <>
-            <button onClick={() => setCurrentStep(2)} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl">Back</button>
-            <button onClick={() => setCurrentStep(4)} className="flex-[2] py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">Next: Transport <FiArrowRight /></button>
-          </>
-        )}
-        {currentStep === 4 && (
-          <>
-            <button onClick={() => setCurrentStep(3)} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl">Back</button>
-            <button onClick={() => setCurrentStep(5)} className="flex-[2] py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">Next: Final Review <FiArrowRight /></button>
-          </>
-        )}
-        {currentStep === 5 && (
-          <>
-            <button onClick={() => setCurrentStep(4)} disabled={submitting || otpLoading} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl disabled:opacity-50">Back</button>
-            <div className="flex-[2] grid grid-cols-2 gap-2">
-              {(isOtpSent && paymentMode === 'cash') ? (
-                <button onClick={() => setShowOtpModal(true)} disabled={otpLoading || qrLoading} className="py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-all text-[10px]">
-                  <FiKey className="w-4 h-4" /><span>Enter OTP</span>
-                </button>
-              ) : (
-                <button onClick={handleSendOTP} disabled={otpLoading || qrLoading} className="py-3 bg-emerald-600 text-white font-bold rounded-xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-all disabled:opacity-50 text-[10px]">
-                  <FiDollarSign className="w-4 h-4" /><span>Pay in Cash</span>
-                </button>
-              )}
-              <button onClick={handleOnlinePayment} disabled={otpLoading || qrLoading} className="py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-all disabled:opacity-50 text-[10px]">
-                <MdQrCode className="w-4 h-4" /><span>{qrLoading ? '...' : 'Online (QR)'}</span>
+            {currentStep === 1 && (
+              <button onClick={() => setCurrentStep(2)} className="w-full py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">
+                Next: Parts <FiArrowRight />
               </button>
-            </div>
+            )}
+            {currentStep === 2 && (
+              <>
+                <button onClick={() => setCurrentStep(1)} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl">Back</button>
+                <button onClick={() => setCurrentStep(3)} className="flex-[2] py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">Next: Extras <FiArrowRight /></button>
+              </>
+            )}
+            {currentStep === 3 && (
+              <>
+                <button onClick={() => setCurrentStep(2)} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl">Back</button>
+                <button onClick={() => setCurrentStep(4)} className="flex-[2] py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">Next: Transport <FiArrowRight /></button>
+              </>
+            )}
+            {currentStep === 4 && (
+              <>
+                <button onClick={() => setCurrentStep(3)} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl">Back</button>
+                <button onClick={() => setCurrentStep(5)} className="flex-[2] py-3.5 bg-gray-900 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg">Next: Final Review <FiArrowRight /></button>
+              </>
+            )}
+            {currentStep === 5 && (
+              <>
+                <button onClick={() => setCurrentStep(4)} disabled={submitting || otpLoading} className="flex-1 py-3 text-gray-600 font-bold bg-white border border-gray-200 rounded-xl disabled:opacity-50">Back</button>
+                <div className="flex-[2] grid grid-cols-2 gap-2">
+                  {(isOtpSent && paymentMode === 'cash') ? (
+                    <button onClick={() => setShowOtpModal(true)} disabled={otpLoading || qrLoading} className="py-3 bg-gray-900 text-white font-bold rounded-xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-all text-[10px]">
+                      <FiKey className="w-4 h-4" /><span>Enter OTP</span>
+                    </button>
+                  ) : (
+                    <button onClick={handleSendOTP} disabled={otpLoading || qrLoading} className="py-3 bg-emerald-600 text-white font-bold rounded-xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-all disabled:opacity-50 text-[10px]">
+                      <FiDollarSign className="w-4 h-4" /><span>Pay in Cash</span>
+                    </button>
+                  )}
+                  <button onClick={handleOnlinePayment} disabled={otpLoading || qrLoading} className="py-3 bg-blue-600 text-white font-bold rounded-xl shadow-lg flex flex-col items-center justify-center gap-1 active:scale-95 transition-all disabled:opacity-50 text-[10px]">
+                    <MdQrCode className="w-4 h-4" /><span>{qrLoading ? '...' : 'Online (QR)'}</span>
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>

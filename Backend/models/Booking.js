@@ -198,6 +198,30 @@ const bookingSchema = new mongoose.Schema({
     ref: 'VendorBill',
     default: null
   },
+  subTotal: {
+    type: Number,
+    default: 0
+  },
+  platformFee: {
+    type: Number,
+    default: 29
+  },
+  workerPayout: {
+    type: Number,
+    default: 0
+  },
+  platformEarning: {
+    type: Number,
+    default: 0
+  },
+  workerCommissionRate: {
+    type: Number,
+    default: 0
+  },
+  totalAmount: {
+    type: Number,
+    default: 0
+  },
 
   // ==========================================
   // 4. PAYMENT INFORMATION
@@ -283,6 +307,15 @@ const bookingSchema = new mongoose.Schema({
     date: { type: String }, // redundant but kept for frontend convenience format
     time: { type: String }  // redundant but kept for frontend convenience format
   },
+  scheduledStartAt: {
+    type: Date,
+    default: null,
+    index: true
+  },
+  scheduledEndAt: {
+    type: Date,
+    default: null
+  },
 
   // ==========================================
   // 7. STATUS & TRACKING
@@ -307,10 +340,12 @@ const bookingSchema = new mongoose.Schema({
   // Timestamps
   acceptedAt: { type: Date, default: null },
   assignedAt: { type: Date, default: null },
-  startedAt: { type: Date, default: null },
   journeyStartedAt: { type: Date, default: null },
+  arrivedAt: { type: Date, default: null },
+  startedAt: { type: Date, default: null },
   visitedAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },
+  paidAt: { type: Date, default: null },
 
   // ==========================================
   // 8. SECURITY & OTPs

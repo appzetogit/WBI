@@ -48,13 +48,26 @@ const OurServicesSection = () => {
   const displayCategories = [...categories];
   const showMoreTab = true; 
 
-  const activeServices = services[activeTab] || [];
+  // Dynamically resolve the active tab if it's currently 'one_time' or not present in categories list
+  const activeTabToUse = (activeTab === 'one_time' || !categories.some(c => c.id === activeTab)) && categories.length > 0
+    ? categories[0].id
+    : activeTab;
+
+  const activeServices = services[activeTabToUse] || [];
 
   const handleServiceClick = (service) => {
-    if (service.type === 'one_time') {
-      navigate(`/user/service/${service.slug}`);
-    } else {
-      navigate(`/user/services/${service.slug}/details`);
+    console.log('[SUB_SERVICE_CLICKED]', service);
+    const slug = service.slug || service.serviceId;
+    if (slug) {
+      console.log('[NAVIGATING_TO_SERVICE]', slug);
+      console.log('[SELECTED_SERVICE_ID]', service.serviceId);
+      console.log('[SELECTED_SERVICE_SLUG]', service.slug);
+      
+      if (service.type === 'one_time') {
+        navigate(`/user/service/${slug}`);
+      } else {
+        navigate(`/user/services/${slug}/details`);
+      }
     }
   };
 
@@ -73,11 +86,14 @@ const OurServicesSection = () => {
       {/* Tabs */}
       <div className="flex overflow-x-auto gap-2 pb-2 px-4 scrollbar-hide snap-x mb-1">
         {displayCategories.map((category) => {
-          const isActive = activeTab === category.id;
+          const isActive = activeTabToUse === category.id;
           return (
             <button
               key={category.id}
-              onClick={() => setActiveTab(category.id)}
+              onClick={() => {
+                console.log('[SERVICE_CATEGORY_CLICKED]', category);
+                setActiveTab(category.id);
+              }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold whitespace-nowrap snap-start flex-shrink-0 transition-all ${
                 isActive
                   ? 'border-[#10AFA5] text-[#10AFA5] bg-[#F8FCFC]'

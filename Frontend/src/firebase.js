@@ -1,12 +1,4 @@
-/**
- * Firebase Configuration
- * Initialize Firebase for push notifications
- */
-
 import { initializeApp } from 'firebase/app';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-import { getDatabase } from 'firebase/database';
-import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup } from 'firebase/auth';
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -22,18 +14,54 @@ const firebaseConfig = {
 
 // Initialize Firebase
 let app;
-let messaging;
-let db;
-let auth;
-
 try {
   app = initializeApp(firebaseConfig);
-  messaging = getMessaging(app);
-  db = getDatabase(app);
-  auth = getAuth(app);
-  console.log('✅ Firebase initialized successfully');
+  console.log('✅ Firebase app initialized successfully');
 } catch (error) {
-  console.error('❌ Firebase initialization failed:', error);
+  console.error('❌ Firebase app initialization failed:', error);
 }
 
-export { app, messaging, db, auth, getToken, onMessage, GoogleAuthProvider, OAuthProvider, signInWithPopup };
+export { app };
+
+// Lazy Firebase Services Getters to avoid startup delays
+let messaging = null;
+let db = null;
+let auth = null;
+
+export const getFirebaseMessaging = async () => {
+  if (!messaging && app) {
+    try {
+      const { getMessaging } = await import('firebase/messaging');
+      messaging = getMessaging(app);
+    } catch (error) {
+      console.warn('⚠️ Firebase Messaging not supported in this environment:', error);
+    }
+  }
+  return messaging;
+};
+
+export const getFirebaseDb = async () => {
+  if (!db && app) {
+    try {
+      const { getDatabase } = await import('firebase/database');
+      db = getDatabase(app);
+    } catch (error) {
+      console.error('Failed to initialize Firebase Database:', error);
+    }
+  }
+  return db;
+};
+
+export const getFirebaseAuth = async () => {
+  if (!auth && app) {
+    try {
+      const { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup } = await import('firebase/auth');
+      auth = getAuth(app);
+      return { auth, GoogleAuthProvider, OAuthProvider, signInWithPopup };
+    } catch (error) {
+      console.error('Failed to initialize Firebase Auth:', error);
+    }
+  }
+  // Fallback if failed/unsupported
+  return { auth: null, GoogleAuthProvider: null, OAuthProvider: null, signInWithPopup: null };
+};

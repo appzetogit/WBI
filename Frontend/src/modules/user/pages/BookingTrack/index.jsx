@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { db } from '../../../../firebase';
+import { getFirebaseDb } from '../../../../firebase';
 import { ref, onValue, off } from 'firebase/database';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -322,27 +322,35 @@ const BookingTrack = () => {
 
   // Firebase Realtime Tracking Listener
   useEffect(() => {
-    if (!db || !id) return;
+    if (!id) return;
 
-    const trackingRef = ref(db, `trackings/${id}`);
-    
-    const unsubscribe = onValue(trackingRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data && data.lat && data.lng) {
-        // Firebase is now the primary source for real-time smoothness
-        locationFromSocketRef.current = true;
-        setCurrentLocation({ 
-          lat: parseFloat(data.lat), 
-          lng: parseFloat(data.lng) 
-        });
+    let unsubscribe = null;
+
+    getFirebaseDb().then((dbInstance) => {
+      if (dbInstance) {
+        const trackingRef = ref(dbInstance, `trackings/${id}`);
         
-        if (data.heading !== undefined && data.heading !== null) {
-          setHeading(parseFloat(data.heading));
-        }
+        unsubscribe = onValue(trackingRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data && data.lat && data.lng) {
+            // Firebase is now the primary source for real-time smoothness
+            locationFromSocketRef.current = true;
+            setCurrentLocation({ 
+              lat: parseFloat(data.lat), 
+              lng: parseFloat(data.lng) 
+            });
+            
+            if (data.heading !== undefined && data.heading !== null) {
+              setHeading(parseFloat(data.heading));
+            }
+          }
+        });
       }
-    });
+    }).catch(() => {});
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [id]);
 
   // Animated location for smooth marker movement

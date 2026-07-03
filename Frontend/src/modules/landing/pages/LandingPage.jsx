@@ -270,7 +270,7 @@ const LandingPage = () => {
                 <span className="text-brand">Expert Repairs.</span>
               </h1>
               <p className="text-base sm:text-xl leading-relaxed text-gray-500 mb-8 sm:mb-10 max-w-xl font-normal">
-                "Our parts. Our warranty. Your peace of mind." â€” WBI uses only platform-certified genuine electronics parts for every repair.
+                "Our parts. Our warranty. Your peace of mind." — WBI uses only platform-certified genuine electronics parts for every repair.
               </p>
               
               <div className="flex flex-col sm:flex-row gap-5 sm:gap-6 justify-center lg:justify-start items-center">
@@ -535,7 +535,7 @@ const LandingPage = () => {
                 <img fetchPriority="low" loading="lazy" src="/WBI-logo.png" alt="WBI Logo" className="h-8 sm:h-10 w-auto" />
               </Link>
               <p className="text-gray-400 font-normal leading-[1.8] text-base sm:text-lg max-w-md whitespace-normal">
-                {settings?.companyName || 'WBI'} â€” Real-time tracking and doorstep billing across Indore. Exclusive genuine spare part ecosystem.
+                {settings?.companyName || 'WBI'} — Real-time tracking and doorstep billing across Indore. Exclusive genuine spare part ecosystem.
               </p>
             </div>
             

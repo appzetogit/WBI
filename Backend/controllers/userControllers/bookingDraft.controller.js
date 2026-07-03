@@ -13,12 +13,24 @@ const calculatePricing = async (draft) => {
   // Simulate pricing calculation dynamically
   if (draft.packageIds && draft.packageIds.length > 0) {
     const packageIds = draft.packageIds.map(p => p._id || p);
+    
+    // Find packages
     const packages = await ServicePackage.find({ _id: { $in: packageIds } });
     packages.forEach(pkg => {
       const qty = (draft.quantities && typeof draft.quantities.get === 'function') 
         ? (draft.quantities.get(pkg._id.toString()) || 1) 
         : 1;
       packageTotal += (pkg.price || 0) * qty;
+    });
+
+    // Find sub-services
+    const OneTimeSubService = require('../../models/OneTimeSubService');
+    const subServices = await OneTimeSubService.find({ _id: { $in: packageIds } });
+    subServices.forEach(sub => {
+      const qty = (draft.quantities && typeof draft.quantities.get === 'function') 
+        ? (draft.quantities.get(sub._id.toString()) || 1) 
+        : 1;
+      packageTotal += (sub.price || 0) * qty;
     });
   }
 
@@ -83,22 +95,36 @@ exports.getReviewDraft = async (req, res) => {
       .populate('serviceId', 'name description icon')
       .populate('brandId', 'brandName icon')
       .populate('issueIds', 'title')
-      .populate('packageIds', 'name price')
       .populate('couponId', 'code discountType discountValue');
 
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
 
+    // Query populated packages and sub-services manually
+    const rawDraft = await BookingDraft.findById(draftId).lean();
+    const rawPackageIds = rawDraft.packageIds || [];
+
+    const packages = await ServicePackage.find({ _id: { $in: rawPackageIds } }).select('name price').lean();
+    const OneTimeSubService = require('../../models/OneTimeSubService');
+    const subServices = await OneTimeSubService.find({ _id: { $in: rawPackageIds } }).select('name price').lean();
+
+    const populatedItems = [
+      ...packages.map(p => ({ _id: p._id, name: p.name, price: p.price })),
+      ...subServices.map(s => ({ _id: s._id, name: s.name, price: s.price }))
+    ];
+
     // Ensure pricing is up to date before returning
     const pricing = await calculatePricing(draft);
     draft.priceSnapshot = pricing;
     await draft.save();
 
+    const draftObj = draft.toObject();
+    draftObj.packageIds = populatedItems;
+
     // Mock vendor data for demonstration
-    // If a service has vendors, populate vendorInfo
-    if (!draft.vendorInfo || !draft.vendorInfo.vendorId) {
-       draft.vendorInfo = {
+    if (!draftObj.vendorInfo || !draftObj.vendorInfo.vendorId) {
+       draftObj.vendorInfo = {
          name: "Acme Services",
          rating: 4.8,
          jobsCompleted: 154,
@@ -109,7 +135,7 @@ exports.getReviewDraft = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: draft
+      data: draftObj
     });
   } catch (error) {
     console.error('Error fetching review draft:', error);
@@ -150,6 +176,40 @@ exports.updateDraft = async (req, res) => {
   }
 };
 
+const parseSlotTimes = (dateObj, timeSlotStr) => {
+  if (!timeSlotStr) return { start: null, end: null };
+  const parts = timeSlotStr.split(' - ');
+  const startStr = parts[0];
+  const endStr = parts[1] || parts[0];
+
+  const parseSingleTime = (timeStr) => {
+    const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    let hours = 9;
+    let minutes = 0;
+    if (match) {
+      hours = parseInt(match[1]);
+      minutes = parseInt(match[2]);
+      const ampm = match[3].toUpperCase();
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+    } else {
+      const simple = timeStr.match(/(\d+):(\d+)/);
+      if (simple) {
+        hours = parseInt(simple[1]);
+        minutes = parseInt(simple[2]);
+      }
+    }
+    const d = new Date(dateObj);
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+  };
+
+  return {
+    start: parseSingleTime(startStr),
+    end: parseSingleTime(endStr)
+  };
+};
+
 /**
  * Confirm and Prepare Booking
  */
@@ -188,12 +248,34 @@ exports.confirmReview = async (req, res) => {
     const Booking = require('../../models/Booking');
     const pricing = await calculatePricing(draft);
 
+    const isScheduled = draft.bookingType === 'scheduled';
+    let scheduledStartAt = null;
+    let scheduledEndAt = null;
+
+    if (isScheduled && draft.scheduledDate && draft.scheduledTime) {
+      try {
+        const parsed = parseSlotTimes(draft.scheduledDate, draft.scheduledTime);
+        scheduledStartAt = parsed.start;
+        scheduledEndAt = parsed.end;
+      } catch (err) {
+        console.error('Error parsing scheduled slot times:', err);
+      }
+    }
+
+    // Calculate splits
+    const Category = require('../../models/Category');
+    const category = await Category.findOne({ title: draft.serviceId.category });
+    const commissionPercent = category?.commissionPercent || 20;
+    const workerCommission = pricing.packageTotal * (commissionPercent / 100);
+    const workerPayout = pricing.packageTotal - workerCommission;
+    const platformEarning = workerCommission + (pricing.platformFee || 29) + (pricing.visitCharge || 49);
+
     const booking = new Booking({
       userId: draft.userId,
       serviceId: draft.serviceId._id,
       serviceName: draft.serviceId.name || 'Service',
       serviceCategory: draft.serviceId.category || 'Category',
-      brandName: draft.brandId ? 'Selected Brand' : null, // ideally fetch actual brand
+      brandName: draft.brandId ? 'Selected Brand' : null,
       basePrice: pricing.packageTotal,
       finalAmount: pricing.finalAmount,
       address: {
@@ -209,16 +291,82 @@ exports.confirmReview = async (req, res) => {
       scheduledDate: draft.scheduledDate,
       scheduledTime: draft.scheduledTime,
       timeSlot: draft.timeSlot || { start: draft.scheduledTime, end: 'TBD' },
+      scheduledStartAt,
+      scheduledEndAt,
       bookingType: draft.bookingType || 'scheduled',
-      status: 'pending', // Will be updated by matching service
+      status: isScheduled ? 'scheduled' : 'pending',
       paymentStatus: 'pending',
+      paymentMethod: 'razorpay',
+      subTotal: pricing.packageTotal,
+      platformFee: pricing.platformFee || 29,
+      workerPayout: workerPayout,
+      platformEarning: platformEarning,
+      workerCommissionRate: commissionPercent,
+      totalAmount: pricing.finalAmount,
+      visitingCharges: pricing.visitCharge || 49,
+      tax: pricing.gst,
+      userPayableAmount: pricing.finalAmount
     });
+
+    // Create Razorpay Order
+    try {
+      const crypto = require('crypto');
+      const Razorpay = require('razorpay');
+      const razorpay = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_mock',
+        key_secret: process.env.RAZORPAY_KEY_SECRET || 'mock_secret'
+      });
+      const options = {
+        amount: Math.round(pricing.finalAmount * 100),
+        currency: 'INR',
+        receipt: booking._id.toString(),
+        notes: {
+          bookingId: booking._id.toString(),
+          userId: draft.userId.toString()
+        }
+      };
+      const order = await razorpay.orders.create(options);
+      booking.razorpayOrderId = order.id;
+    } catch (rzpErr) {
+      console.warn('[Razorpay] Order creation failed in confirmation, using sandbox placeholder:', rzpErr.message);
+      const crypto = require('crypto');
+      booking.razorpayOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
+    }
 
     await booking.save();
 
     // Convert draft status
     draft.status = 'converted';
     await draft.save();
+
+    // Trigger Socket.io real-time events for dynamic UI sync
+    try {
+      const io = require('../../sockets').getIO();
+      if (io) {
+        if (isScheduled) {
+          io.to(`user_${booking.userId}`).emit('booking:scheduledCreated', {
+            bookingId: booking._id,
+            bookingNumber: booking.bookingNumber,
+            scheduledDate: booking.scheduledDate,
+            scheduledTime: booking.scheduledTime
+          });
+          io.to('admin:wbi').emit('admin:bookingUpdated', {
+            bookingId: booking._id,
+            status: 'scheduled'
+          });
+        }
+      }
+    } catch (sockErr) {
+      console.warn('Socket emit error on booking confirm:', sockErr.message);
+    }
+
+    if (isScheduled) {
+      return res.status(200).json({
+        success: true,
+        bookingId: booking._id,
+        message: 'Your booking has been scheduled successfully.'
+      });
+    }
 
     // Instead of old matchingService, use the new WaveManagerService (Urban Company style)
     const WaveManagerService = require('../../services/WaveManagerService');

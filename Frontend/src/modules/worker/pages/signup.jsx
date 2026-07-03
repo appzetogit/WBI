@@ -86,12 +86,12 @@ export default function WorkerSignup() {
       if (isSelected) {
         return {
           ...prev,
-          subServices: []
+          subServices: prev.subServices.filter(id => id !== subServiceId)
         };
       } else {
         return {
           ...prev,
-          subServices: [subServiceId]
+          subServices: [...prev.subServices, subServiceId]
         };
       }
     });

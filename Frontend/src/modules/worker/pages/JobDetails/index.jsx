@@ -157,14 +157,25 @@ const JobDetails = () => {
         }
       };
 
+      const handleBookingUpdated = (data) => {
+        if (data.bookingId === id || data.id === id) {
+          console.log('[Socket] Booking updated, refreshing job details...');
+          fetchJobDetails();
+        }
+      };
+
       socket.on('chat:message_received', handleMessageReceived);
       socket.on('chat:typing', handleTyping);
       socket.on('chat:stop_typing', handleStopTyping);
+      socket.on('booking_updated', handleBookingUpdated);
+      socket.on('booking:statusUpdated', handleBookingUpdated);
 
       return () => {
         socket.off('chat:message_received', handleMessageReceived);
         socket.off('chat:typing', handleTyping);
         socket.off('chat:stop_typing', handleStopTyping);
+        socket.off('booking_updated', handleBookingUpdated);
+        socket.off('booking:statusUpdated', handleBookingUpdated);
       };
     }
   }, [socket, id, isChatOpen]);
@@ -303,20 +314,18 @@ const JobDetails = () => {
         toast.success('Job Rejected');
         navigate('/worker/jobs');
       } else if (actionType === 'MARK_ARRIVED') {
-        await workerService.startJob(id);
-        toast.success('Journey Started! Please verify OTP with customer upon arrival.');
+        await api.post(`/bookings/${id}/worker-arrived`);
+        toast.success('Arrived at location! Please verify OTP with customer to start.');
         fetchJobDetails();
       } else if (actionType === 'START_WORK') {
-        if (job.status === 'journey_started') {
-           setIsVisitModalOpen(true);
-        } else {
-           await workerService.updateJobStatus(id, 'in_progress');
-           toast.success('Work Started!');
-           fetchJobDetails();
-        }
+        setIsVisitModalOpen(true);
       } else if (actionType === 'COMPLETE_WORK') {
-        await workerService.completeJob(id, { workPhotos: mediaFiles.photos });
-        toast.success('Work Completed!');
+        if (!job.workPhotos || job.workPhotos.length === 0) {
+          toast.error('Please upload at least one progress photo before completing.');
+          return;
+        }
+        await api.post(`/bookings/${id}/worker-completed`);
+        toast.success('Work completed! Awaiting customer online payment.');
         fetchJobDetails();
       }
     } catch (error) {
@@ -442,8 +451,13 @@ const JobDetails = () => {
             </span>
           </div>
           <p className="text-sm text-gray-500 font-medium mb-4">Booking ID: <span className="text-gray-800">#{job.bookingNumber}</span></p>
-          <div className="flex justify-end border-t border-gray-100 pt-3 mt-1">
-            <span className="text-2xl font-black text-[#0F172A]">₹{job.finalAmount?.toFixed(2) || '0.00'}</span>
+          <div className="flex justify-between items-center border-t border-gray-100 pt-3 mt-1 text-sm font-semibold">
+            <span className="text-gray-500">Service Price:</span>
+            <span className="text-base font-bold text-gray-800">₹{job.basePrice?.toFixed(2) || '0.00'}</span>
+          </div>
+          <div className="flex justify-between items-center pt-2 text-sm font-bold bg-[#10AFA5]/5 p-2.5 rounded-xl mt-2 border border-[#10AFA5]/10">
+            <span className="text-teal-800">Your Earning (Payout):</span>
+            <span className="text-lg font-black text-[#10AFA5]">₹{job.workerPayout?.toFixed(2) || '0.00'}</span>
           </div>
         </div>
 
@@ -501,6 +515,37 @@ const JobDetails = () => {
             </div>
           </div>
         </div>
+
+        {/* Earnings Summary Section (Visible when paid or completed) */}
+        {['paid', 'completed'].includes(job.status?.toLowerCase()) && (
+          <div className="mb-6 animate-in fade-in slide-in-from-bottom-4">
+            <h3 className="text-sm font-bold text-gray-800 mb-3 px-1">Earnings Summary</h3>
+            <div className="bg-white rounded-2xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-50">
+              <div className="space-y-4 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Customer Paid (Incl. Tax)</span>
+                  <span className="font-semibold text-gray-800">₹{(job.finalAmount || 0).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Platform Convenience & Safety</span>
+                  <span className="font-semibold text-gray-800">₹{((job.visitingCharges || 0) + (job.platformFee || 0)).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">GST (18%) Collected</span>
+                  <span className="font-semibold text-gray-800">₹{(job.tax || 0).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between pt-3 border-t border-dashed border-gray-100">
+                  <span className="text-gray-500 font-bold">Platform Earning (Admin Split)</span>
+                  <span className="font-bold text-gray-800">₹{(job.platformEarning || 0).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between pt-3 border-t border-teal-100 bg-teal-50/30 p-2.5 rounded-xl">
+                  <span className="text-teal-800 font-bold">Your Payout (Worker Split)</span>
+                  <span className="font-black text-teal-700 text-base">₹{(job.workerPayout || 0).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Work Progress Section (Visible when In Progress) */}
         {(job.status === 'visited' || job.status === 'in_progress') && (
@@ -661,7 +706,7 @@ const JobDetails = () => {
           )}
 
           {/* Case 2: Accepted (Assigned/Confirmed) */}
-          {job.workerResponse === 'ACCEPTED' && (job.status === 'assigned' || job.status === 'confirmed') && (
+          {job.workerResponse === 'ACCEPTED' && (job.status === 'assigned' || job.status === 'confirmed' || job.status === 'worker_assigned' || job.status === 'accepted') && (
             <button 
               onClick={() => handleAction('MARK_ARRIVED')}
               disabled={actionLoading}
@@ -671,19 +716,19 @@ const JobDetails = () => {
             </button>
           )}
 
-          {/* Case 3: Arrived (Journey Started) -> Need to verify OTP to start work */}
-          {job.status === 'journey_started' && (
+          {/* Case 3: Arrived -> Need to verify OTP to start work */}
+          {job.status === 'arrived' && (
             <button 
               onClick={() => handleAction('START_WORK')}
               disabled={actionLoading}
               className="w-full py-4 rounded-xl font-bold text-white bg-[#10AFA5] shadow-lg shadow-[#10AFA5]/30 active:scale-95 transition-all text-sm"
             >
-              Start Work
+              Verify OTP to Start Work
             </button>
           )}
 
-          {/* Case 4: In Progress (Visited / In Progress) */}
-          {(job.status === 'visited' || job.status === 'in_progress') && (
+          {/* Case 4: In Progress */}
+          {job.status === 'in_progress' && (
             <button 
               onClick={() => handleAction('COMPLETE_WORK')}
               disabled={actionLoading}
@@ -693,8 +738,35 @@ const JobDetails = () => {
             </button>
           )}
 
-          {/* Case 5: Completed */}
-          {(job.status === 'work_done' || job.status === 'completed') && (
+          {/* Case 4.5: Completed work, awaiting customer payment */}
+          {['completed_pending_payment', 'payment_initiated'].includes(job.status?.toLowerCase()) && (
+            <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5 text-center text-orange-850 font-bold text-xs uppercase tracking-wider animate-pulse">
+              ⌛ Awaiting customer online payment...
+            </div>
+          )}
+
+          {/* Case 5: Paid -> Show OTP 2 to customer */}
+          {job.status === 'paid' && (
+            <div className="bg-teal-50 border border-teal-200 rounded-2xl p-6 text-center space-y-4">
+              <h3 className="text-sm font-bold text-teal-800 uppercase tracking-wider">Payment Received ✅</h3>
+              <p className="text-xs text-gray-500 font-medium">Show this code to customer to complete the service:</p>
+              
+              <div className="flex justify-center gap-2.5">
+                {String(job.paymentOtp || '0000').split('').map((digit, idx) => (
+                  <div key={idx} className="w-12 h-14 bg-teal-600 text-white rounded-xl flex items-center justify-center font-black text-2xl shadow-md">
+                    {digit}
+                  </div>
+                ))}
+              </div>
+              
+              <p className="text-[10px] text-gray-400 font-semibold leading-normal">
+                Ask the customer to enter this code in their app to close the job.
+              </p>
+            </div>
+          )}
+
+          {/* Case 6: Fully Completed */}
+          {job.status === 'completed' && (
             <div className="flex gap-3">
                <button 
                 onClick={() => navigate(`/worker/job/${id}/billing`)}
@@ -703,6 +775,7 @@ const JobDetails = () => {
                 <FiFileText /> View Report
               </button>
               <button 
+                onClick={() => navigate(`/worker/job/${id}/billing`)}
                 className="flex-1 py-4 rounded-xl font-bold text-white bg-[#10AFA5] shadow-lg shadow-[#10AFA5]/30 active:scale-95 transition-all text-sm flex items-center justify-center gap-2"
               >
                 <FiDownload /> Invoice

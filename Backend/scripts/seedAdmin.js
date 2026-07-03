@@ -1,4 +1,5 @@
 const dotenv = require('dotenv');
+const mongoose = require('mongoose');
 const connectDB = require('../config/db');
 const Admin = require('../models/Admin');
 const bcrypt = require('bcryptjs');
@@ -8,7 +9,14 @@ dotenv.config();
 const seedAdmin = async () => {
   try {
     console.log('🔌 Connecting to MongoDB...');
-    await connectDB();
+    const mongoUri = process.env.MONGODB_URI;
+    if (!mongoUri) {
+      throw new Error('MONGODB_URI is not set in .env');
+    }
+    await mongoose.connect(mongoUri, {
+      family: 4,
+      serverSelectionTimeoutMS: 5000
+    });
     console.log('✅ Connected to MongoDB\n');
 
     // Check if admin already exists

@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const bookingResponseController = require('../../controllers/worker-controllers/bookingResponse.controller');
+const bookingResponseController = require('../../controllers/workerControllers/bookingResponse.controller');
 const { authenticate } = require('../../middleware/authMiddleware');
-const bookingExecutionController = require('../../controllers/worker-controllers/bookingExecution.controller');
+const bookingExecutionController = require('../../controllers/workerControllers/bookingExecution.controller');
 
 router.patch('/:bookingId/accept', authenticate, bookingResponseController.acceptBooking);
 router.patch('/:bookingId/reject', authenticate, bookingResponseController.rejectBooking);

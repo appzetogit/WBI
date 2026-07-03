@@ -1,15 +1,16 @@
 import React, { useEffect } from 'react'; // Updated index to .jsx
 import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import toast from 'react-hot-toast';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from './routes';
 import { SocketProvider } from './context/SocketContext';
 import { CartProvider } from './context/CartContext';
 import { CityProvider } from './context/CityContext';
-import { initializePushNotifications, setupForegroundNotificationHandler } from './services/pushNotificationService';
-import { LocationPermissionChecker } from './components/common';
+import { LocationPermissionChecker } from './components/common/LocationPermissionChecker';
 import NavigationProgress from './components/common/NavigationProgress';
+import { useJsApiLoader } from '@react-google-maps/api';
+
+const libraries = ['places', 'geometry'];
 
 // Configure a global QueryClient with aggressive caching for speed
 const queryClient = new QueryClient({
@@ -25,20 +26,32 @@ const queryClient = new QueryClient({
 });
 
 function App() {
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
+    libraries
+  });
+
   // Initialize push notifications on app load
   useEffect(() => {
-    // Note: push notifications initialization is now handled in ProtectedRoute
-    // setupForegroundNotificationHandler remains global to catch incoming messages if token exists
-    setupForegroundNotificationHandler((payload) => {
-      // Dispatch update events for listening components to refresh UI
-      window.dispatchEvent(new Event('vendorJobsUpdated'));
-      window.dispatchEvent(new Event('vendorStatsUpdated'));
-      window.dispatchEvent(new Event('workerJobsUpdated'));
-      window.dispatchEvent(new Event('userBookingsUpdated'));
+    // Check if user has any active token before loading notification services
+    const tokenExists = ['accessToken', 'vendorAccessToken', 'workerAccessToken', 'engineerAccessToken', 'adminAccessToken', 'b2bAccessToken'].some(
+      key => localStorage.getItem(key) || sessionStorage.getItem(key)
+    );
 
-      // Also dispatch generic one if needed
-      window.dispatchEvent(new Event('appNotificationReceived'));
-    });
+    if (tokenExists) {
+      // Lazy load service to keep startup bundle tiny
+      import('./services/pushNotificationService').then((module) => {
+        module.setupForegroundNotificationHandler((payload) => {
+          // Dispatch update events for listening components to refresh UI
+          window.dispatchEvent(new Event('vendorJobsUpdated'));
+          window.dispatchEvent(new Event('vendorStatsUpdated'));
+          window.dispatchEvent(new Event('workerJobsUpdated'));
+          window.dispatchEvent(new Event('userBookingsUpdated'));
+          window.dispatchEvent(new Event('appNotificationReceived'));
+        });
+      }).catch(err => console.warn('Deferred push notifications setup failed:', err));
+    }
   }, []);
 
   return (

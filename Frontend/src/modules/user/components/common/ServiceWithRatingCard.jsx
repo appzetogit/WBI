@@ -53,10 +53,10 @@ const ServiceWithRatingCard = memo(({ image, title, rating, reviews, price, orig
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
               <span className="text-[15px] font-bold text-gray-900">
-                {price && !isNaN(price.toString().replace(/[,]/g, '')) ? `â‚¹${price}` : (price || 'Contact for price')}
+                {price && !isNaN(price.toString().replace(/[,]/g, '')) ? `₹${price}` : (price || 'Contact for price')}
               </span>
               {originalPrice && (
-                <span className="text-[11px] text-gray-400 line-through decoration-gray-400/60">â‚¹{originalPrice}</span>
+                <span className="text-[11px] text-gray-400 line-through decoration-gray-400/60">₹{originalPrice}</span>
               )}
             </div>
           </div>

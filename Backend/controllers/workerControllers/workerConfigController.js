@@ -1,4 +1,4 @@
-const SubService = require('../../models/SubService');
+const OneTimeService = require('../../models/OneTimeService');
 const WorkerDocumentConfig = require('../../models/WorkerDocumentConfig');
 const WorkerRegistrationConfig = require('../../models/WorkerRegistrationConfig');
 const ServiceCategory = require('../../models/ServiceCategory');
@@ -9,12 +9,12 @@ const ServiceCategory = require('../../models/ServiceCategory');
  */
 const getRegistrationConfig = async (req, res) => {
   try {
-    // 1. Fetch Categories (where workers can register)
-    const categories = await ServiceCategory.find({ isActive: true, roles: 'worker' }).select('name icon').lean();
+    // 1. Fetch Categories (where workers can register, audience: b2c)
+    const categories = await ServiceCategory.find({ isActive: true, audience: 'b2c' }).select('name icon').lean();
 
-    // 2. Fetch SubServices (with their specific required skills and tools)
-    const subServices = await SubService.find({ isActive: true })
-      .select('name categoryId icon requiredSkills suggestedTools suggestedBrands')
+    // 2. Fetch B2C One-Time Services
+    const subServices = await OneTimeService.find({ isActive: true })
+      .select('name categoryId image')
       .lean();
 
     // 3. Fetch Document Requirements

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const couponController = require('../../controllers/user-controllers/coupon.controller');
+const couponController = require('../../controllers/userControllers/coupon.controller');
 
 router.post('/validate', couponController.validateCoupon);
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { db } from '../../../../firebase';
+import { getFirebaseDb } from '../../../../firebase';
 import { ref as dbRef, set as dbSet } from 'firebase/database';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -242,14 +242,16 @@ const JobMap = () => {
       });
 
       // Sync to Firebase
-      if (db) {
-        dbSet(dbRef(db, `trackings/${id}`), {
-          lat: point.lat,
-          lng: point.lng,
-          heading: simHeading,
-          updatedAt: Date.now()
-        });
-      }
+      getFirebaseDb().then((dbInstance) => {
+        if (dbInstance) {
+          dbSet(dbRef(dbInstance, `trackings/${id}`), {
+            lat: point.lat,
+            lng: point.lng,
+            heading: simHeading,
+            updatedAt: Date.now()
+          });
+        }
+      }).catch(() => {});
 
       // Update local display
       setCurrentLocation(point);

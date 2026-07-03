@@ -50,6 +50,7 @@ const Profile = lazyLoad(() => import('../pages/Profile'));
 const Settings = lazyLoad(() => import('../pages/Settings'));
 const Engineers = lazyLoad(() => import('../pages/Engineers'));
 const Users = lazyLoad(() => import('../pages/Users'));
+const AcceptInvite = lazyLoad(() => import('../pages/AcceptInvite'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F0FDFA]" />
@@ -66,6 +67,7 @@ const B2BRoutes = () => {
             {/* Public routes */}
             <Route path="/login" element={<AnimatedPage><PublicRoute userType="b2b"><LoginRegister defaultTab="login" /></PublicRoute></AnimatedPage>} />
             <Route path="/register" element={<AnimatedPage><PublicRoute userType="b2b"><LoginRegister defaultTab="register" /></PublicRoute></AnimatedPage>} />
+            <Route path="/accept-invite" element={<AnimatedPage><PublicRoute userType="b2b"><AcceptInvite /></PublicRoute></AnimatedPage>} />
 
             {/* Base Redirect */}
             <Route path="/" element={<Navigate to="dashboard" replace />} />

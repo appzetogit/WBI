@@ -9,7 +9,10 @@ const getProfile = async (req, res) => {
   try {
     const workerId = req.user.id;
 
-    const worker = await Worker.findById(workerId).select('-password -__v');
+    const worker = await Worker.findById(workerId)
+      .select('-password -__v')
+      .populate('serviceCategoryRefs', 'name slug icon')
+      .populate('approvedOneTimeServices', 'name slug iconUrl');
 
     if (!worker) {
       return res.status(404).json({
@@ -26,6 +29,8 @@ const getProfile = async (req, res) => {
         email: worker.email,
         phone: worker.phone,
         serviceCategories: worker.serviceCategories || [],
+        serviceCategoryRefs: worker.serviceCategoryRefs || [],
+        approvedOneTimeServices: worker.approvedOneTimeServices || [],
         serviceCategory: worker.serviceCategories?.[0] || '', // Legacy support
         skills: worker.skills || [],
         secondarySkills: worker.secondarySkills || [],
@@ -71,7 +76,7 @@ const updateProfile = async (req, res) => {
 
     const workerId = req.user.id;
     const { 
-      name, serviceCategories, serviceCategory, skills, secondarySkills, address, status, profilePhoto,
+      name, serviceCategories, serviceCategoryRefs, approvedOneTimeServices, serviceCategory, skills, secondarySkills, address, status, profilePhoto,
       dob, gender, bankDetails, documents, workLocations, uploadedDocuments, aadhar 
     } = req.body;
 
@@ -97,6 +102,14 @@ const updateProfile = async (req, res) => {
       worker.serviceCategories = serviceCategories;
     } else if (serviceCategory) {
       worker.serviceCategories = [serviceCategory.trim()];
+    }
+
+    if (serviceCategoryRefs && Array.isArray(serviceCategoryRefs)) {
+      worker.serviceCategoryRefs = serviceCategoryRefs;
+    }
+    
+    if (approvedOneTimeServices && Array.isArray(approvedOneTimeServices)) {
+      worker.approvedOneTimeServices = approvedOneTimeServices;
     }
 
     if (skills && Array.isArray(skills)) worker.skills = skills;
@@ -176,6 +189,8 @@ const updateProfile = async (req, res) => {
         email: worker.email,
         phone: worker.phone,
         serviceCategories: worker.serviceCategories,
+        serviceCategoryRefs: worker.serviceCategoryRefs,
+        approvedOneTimeServices: worker.approvedOneTimeServices,
         serviceCategory: worker.serviceCategories?.[0] || '',
         skills: worker.skills,
         secondarySkills: worker.secondarySkills || [],

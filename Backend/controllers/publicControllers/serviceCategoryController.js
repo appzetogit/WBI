@@ -39,15 +39,39 @@ exports.getCategorySubServices = catchAsync(async (req, res) => {
     return res.status(404).json({ success: false, message: 'Category not found' });
   }
 
-  const SubService = require('../../models/SubService');
-  const services = await SubService.find({
-    categoryId: category._id,
-    isActive: true
-  }).sort({ displayOrder: 1 }).lean();
+  const isB2C = category.audience === 'b2c' || category.serviceType === 'one_time';
 
-  res.status(200).json({
-    success: true,
-    count: services.length,
-    data: services
-  });
+  if (isB2C) {
+    const OneTimeService = require('../../models/OneTimeService');
+    const services = await OneTimeService.find({
+      categoryId: category._id,
+      isActive: true
+    }).sort({ sortOrder: 1 }).lean();
+
+    const mappedServices = services.map(s => ({
+      ...s,
+      title: s.name,
+      basePrice: s.startingPrice,
+      price: s.startingPrice,
+      reviews: s.totalReviews || 0
+    }));
+
+    return res.status(200).json({
+      success: true,
+      count: mappedServices.length,
+      data: mappedServices
+    });
+  } else {
+    const SubService = require('../../models/SubService');
+    const services = await SubService.find({
+      categoryId: category._id,
+      isActive: true
+    }).sort({ displayOrder: 1 }).lean();
+
+    return res.status(200).json({
+      success: true,
+      count: services.length,
+      data: services
+    });
+  }
 });

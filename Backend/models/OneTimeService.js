@@ -13,6 +13,12 @@ const oneTimeServiceSchema = new mongoose.Schema({
     lowercase: true,
     index: true
   },
+  categoryId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceCategory',
+    default: null,
+    index: true
+  },
   subtitle: {
     type: String,
     trim: true,
@@ -57,7 +63,21 @@ const oneTimeServiceSchema = new mongoose.Schema({
   requiresLiveTracking: { type: Boolean, default: true },
   estimatedDuration: { type: String, default: '60 mins' },
   defaultRadiusKm: { type: Number, default: 10 },
-  assignmentMode: { type: String, enum: ['auto_wave', 'manual'], default: 'auto_wave' }
+  assignmentMode: { type: String, enum: ['auto_wave', 'manual'], default: 'auto_wave' },
+  
+  // --- Enhanced Dynamic Fields ---
+  startingPrice: { type: Number, default: 0 },
+  description: { type: String, default: '' },
+  iconUrl: { type: String, default: '' },
+  imageUrl: { type: String, default: '' },
+  requiresBrand: { type: Boolean, default: false },
+  requiresProblem: { type: Boolean, default: false },
+  requiresPackage: { type: Boolean, default: true },
+  allowsOtherProblem: { type: Boolean, default: true },
+  estimatedTime: { type: String, default: '60 mins' },
+  problemIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ServiceIssue' }],
+  brandIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ServiceBrand' }],
+  packageIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ServicePackage' }]
 }, {
   timestamps: true
 });
@@ -71,6 +91,56 @@ oneTimeServiceSchema.pre('validate', function(next) {
       .replace(/-+/g, '-')
       .replace(/(^-|-$)/g, '');
   }
+
+  // Synchronize new styles and old styles with isModified protection
+  if (this.isModified('isBrandRequired')) {
+    this.requiresBrand = this.isBrandRequired;
+  } else if (this.isModified('requiresBrand')) {
+    this.isBrandRequired = this.requiresBrand;
+  } else {
+    this.requiresBrand = this.isBrandRequired;
+  }
+
+  if (this.isModified('isIssueRequired')) {
+    this.requiresProblem = this.isIssueRequired;
+  } else if (this.isModified('requiresProblem')) {
+    this.isIssueRequired = this.requiresProblem;
+  } else {
+    this.requiresProblem = this.isIssueRequired;
+  }
+
+  if (this.isModified('isPackageRequired')) {
+    this.requiresPackage = this.isPackageRequired;
+  } else if (this.isModified('requiresPackage')) {
+    this.isPackageRequired = this.requiresPackage;
+  } else {
+    this.requiresPackage = this.isPackageRequired;
+  }
+
+  if (this.isModified('estimatedDuration')) {
+    this.estimatedTime = this.estimatedDuration;
+  } else if (this.isModified('estimatedTime')) {
+    this.estimatedDuration = this.estimatedTime;
+  } else {
+    this.estimatedTime = this.estimatedDuration;
+  }
+
+  if (this.isModified('image')) {
+    this.imageUrl = this.image;
+  } else if (this.isModified('imageUrl')) {
+    this.image = this.imageUrl;
+  } else {
+    this.imageUrl = this.image;
+  }
+
+  if (this.isModified('subtitle')) {
+    this.description = this.subtitle;
+  } else if (this.isModified('description')) {
+    this.subtitle = this.description;
+  } else {
+    this.description = this.subtitle;
+  }
+
   next();
 });
 

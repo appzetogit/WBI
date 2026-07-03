@@ -3,7 +3,6 @@ import { motion, useScroll, useMotionValueEvent } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import { HiLocationMarker, HiChevronDown } from 'react-icons/hi';
 import { FiBell, FiShoppingCart, FiBookmark } from 'react-icons/fi';
-import { gsap } from 'gsap';
 import LocationSelector from '../common/LocationSelector';
 import { animateLogo } from '../../../../utils/gsapAnimations';
 import { useCity } from '../../../../context/CityContext';

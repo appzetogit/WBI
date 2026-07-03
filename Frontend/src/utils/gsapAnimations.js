@@ -1,37 +1,25 @@
-import { gsap } from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-
-// Register ScrollTrigger plugin
-if (typeof window !== 'undefined') {
-  gsap.registerPlugin(ScrollTrigger);
-  
-  // Optimize GSAP for better performance
-  gsap.config({
-    nullTargetWarn: false,
-    trialWarn: false,
-  });
-}
-
 /**
  * Page transition animation - slide from bottom
  */
 export const animatePageIn = (element, onComplete) => {
   if (!element) return;
   
-  gsap.fromTo(
-    element,
-    {
-      y: '100%',
-      opacity: 0,
-    },
-    {
-      y: 0,
-      opacity: 1,
-      duration: 0.35,
-      ease: 'power2.out',
-      onComplete,
-    }
-  );
+  import('gsap').then(({ gsap }) => {
+    gsap.fromTo(
+      element,
+      {
+        y: '100%',
+        opacity: 0,
+      },
+      {
+        y: 0,
+        opacity: 1,
+        duration: 0.35,
+        ease: 'power2.out',
+        onComplete,
+      }
+    );
+  });
 };
 
 /**
@@ -40,12 +28,14 @@ export const animatePageIn = (element, onComplete) => {
 export const animatePageOut = (element, onComplete) => {
   if (!element) return;
   
-  gsap.to(element, {
-    y: '100%',
-    opacity: 0.8,
-    duration: 0.3,
-    ease: 'power2.in',
-    onComplete,
+  import('gsap').then(({ gsap }) => {
+    gsap.to(element, {
+      y: '100%',
+      opacity: 0.8,
+      duration: 0.3,
+      ease: 'power2.in',
+      onComplete,
+    });
   });
 };
 
@@ -55,16 +45,18 @@ export const animatePageOut = (element, onComplete) => {
 export const fadeIn = (element, delay = 0, duration = 0.5) => {
   if (!element) return;
   
-  gsap.fromTo(
-    element,
-    { opacity: 0 },
-    {
-      opacity: 1,
-      duration,
-      delay,
-      ease: 'power2.out',
-    }
-  );
+  import('gsap').then(({ gsap }) => {
+    gsap.fromTo(
+      element,
+      { opacity: 0 },
+      {
+        opacity: 1,
+        duration,
+        delay,
+        ease: 'power2.out',
+      }
+    );
+  });
 };
 
 /**
@@ -73,20 +65,22 @@ export const fadeIn = (element, delay = 0, duration = 0.5) => {
 export const slideInLeft = (element, delay = 0) => {
   if (!element) return;
   
-  gsap.fromTo(
-    element,
-    {
-      x: -50,
-      opacity: 0,
-    },
-    {
-      x: 0,
-      opacity: 1,
-      duration: 0.6,
-      delay,
-      ease: 'power2.out',
-    }
-  );
+  import('gsap').then(({ gsap }) => {
+    gsap.fromTo(
+      element,
+      {
+        x: -50,
+        opacity: 0,
+      },
+      {
+        x: 0,
+        opacity: 1,
+        duration: 0.6,
+        delay,
+        ease: 'power2.out',
+      }
+    );
+  });
 };
 
 /**
@@ -95,20 +89,22 @@ export const slideInLeft = (element, delay = 0) => {
 export const scaleIn = (element, delay = 0) => {
   if (!element) return;
   
-  gsap.fromTo(
-    element,
-    {
-      scale: 0.8,
-      opacity: 0,
-    },
-    {
-      scale: 1,
-      opacity: 1,
-      duration: 0.5,
-      delay,
-      ease: 'back.out(1.7)',
-    }
-  );
+  import('gsap').then(({ gsap }) => {
+    gsap.fromTo(
+      element,
+      {
+        scale: 0.8,
+        opacity: 0,
+      },
+      {
+        scale: 1,
+        opacity: 1,
+        duration: 0.5,
+        delay,
+        ease: 'back.out(1.7)',
+      }
+    );
+  });
 };
 
 /**
@@ -117,20 +113,22 @@ export const scaleIn = (element, delay = 0) => {
 export const staggerFadeIn = (elements, delay = 0.1) => {
   if (!elements || elements.length === 0) return;
   
-  gsap.fromTo(
-    elements,
-    {
-      y: 30,
-      opacity: 0,
-    },
-    {
-      y: 0,
-      opacity: 1,
-      duration: 0.5,
-      stagger: delay,
-      ease: 'power2.out',
-    }
-  );
+  import('gsap').then(({ gsap }) => {
+    gsap.fromTo(
+      elements,
+      {
+        y: 30,
+        opacity: 0,
+      },
+      {
+        y: 0,
+        opacity: 1,
+        duration: 0.5,
+        stagger: delay,
+        ease: 'power2.out',
+      }
+    );
+  });
 };
 
 /**
@@ -139,28 +137,34 @@ export const staggerFadeIn = (elements, delay = 0.1) => {
 export const setupHoverScale = (element, scale = 1.05) => {
   if (!element) return;
   
-  const handleMouseEnter = () => {
-    gsap.to(element, {
-      scale,
-      duration: 0.3,
-      ease: 'power2.out',
-    });
-  };
+  let hoverIn, hoverOut;
   
-  const handleMouseLeave = () => {
-    gsap.to(element, {
-      scale: 1,
-      duration: 0.3,
-      ease: 'power2.out',
-    });
-  };
-  
-  element.addEventListener('mouseenter', handleMouseEnter);
-  element.addEventListener('mouseleave', handleMouseLeave);
+  import('gsap').then(({ gsap }) => {
+    hoverIn = () => {
+      gsap.to(element, {
+        scale,
+        duration: 0.3,
+        ease: 'power2.out',
+      });
+    };
+    
+    hoverOut = () => {
+      gsap.to(element, {
+        scale: 1,
+        duration: 0.3,
+        ease: 'power2.out',
+      });
+    };
+    
+    element.addEventListener('mouseenter', hoverIn);
+    element.addEventListener('mouseleave', hoverOut);
+  });
   
   return () => {
-    element.removeEventListener('mouseenter', handleMouseEnter);
-    element.removeEventListener('mouseleave', handleMouseLeave);
+    if (hoverIn && hoverOut) {
+      element.removeEventListener('mouseenter', hoverIn);
+      element.removeEventListener('mouseleave', hoverOut);
+    }
   };
 };
 
@@ -170,12 +174,14 @@ export const setupHoverScale = (element, scale = 1.05) => {
 export const pulse = (element, repeat = -1) => {
   if (!element) return;
   
-  gsap.to(element, {
-    scale: 1.03,
-    duration: 1.5,
-    repeat,
-    yoyo: true,
-    ease: 'power1.inOut',
+  import('gsap').then(({ gsap }) => {
+    gsap.to(element, {
+      scale: 1.03,
+      duration: 1.5,
+      repeat,
+      yoyo: true,
+      ease: 'power1.inOut',
+    });
   });
 };
 
@@ -185,24 +191,27 @@ export const pulse = (element, repeat = -1) => {
 export const scrollFadeIn = (element, offset = 100) => {
   if (!element) return;
   
-  gsap.fromTo(
-    element,
-    {
-      y: offset,
-      opacity: 0,
-    },
-    {
-      y: 0,
-      opacity: 1,
-      duration: 0.8,
-      ease: 'power2.out',
-      scrollTrigger: {
-        trigger: element,
-        start: 'top 85%',
-        toggleActions: 'play none none none',
+  Promise.all([import('gsap'), import('gsap/ScrollTrigger')]).then(([{ gsap }, { ScrollTrigger }]) => {
+    gsap.registerPlugin(ScrollTrigger);
+    gsap.fromTo(
+      element,
+      {
+        y: offset,
+        opacity: 0,
       },
-    }
-  );
+      {
+        y: 0,
+        opacity: 1,
+        duration: 0.8,
+        ease: 'power2.out',
+        scrollTrigger: {
+          trigger: element,
+          start: 'top 85%',
+          toggleActions: 'play none none none',
+        },
+      }
+    );
+  });
 };
 
 /**
@@ -228,15 +237,17 @@ export const createRipple = (element, x, y) => {
   element.style.position = 'relative';
   element.appendChild(ripple);
   
-  gsap.to(ripple, {
-    width: 100,
-    height: 100,
-    opacity: 0,
-    duration: 0.6,
-    ease: 'power2.out',
-    onComplete: () => {
-      ripple.remove();
-    },
+  import('gsap').then(({ gsap }) => {
+    gsap.to(ripple, {
+      width: 100,
+      height: 100,
+      opacity: 0,
+      duration: 0.6,
+      ease: 'power2.out',
+      onComplete: () => {
+        ripple.remove();
+      },
+    });
   });
 };
 
@@ -246,17 +257,19 @@ export const createRipple = (element, x, y) => {
 export const animateModalIn = (element) => {
   if (!element) return;
   
-  gsap.fromTo(
-    element,
-    {
-      y: '100%',
-    },
-    {
-      y: 0,
-      duration: 0.3,
-      ease: 'power2.out',
-    }
-  );
+  import('gsap').then(({ gsap }) => {
+    gsap.fromTo(
+      element,
+      {
+        y: '100%',
+      },
+      {
+        y: 0,
+        duration: 0.3,
+        ease: 'power2.out',
+      }
+    );
+  });
 };
 
 /**
@@ -265,11 +278,13 @@ export const animateModalIn = (element) => {
 export const animateModalOut = (element, onComplete) => {
   if (!element) return;
   
-  gsap.to(element, {
-    y: '100%',
-    duration: 0.2,
-    ease: 'power2.in',
-    onComplete,
+  import('gsap').then(({ gsap }) => {
+    gsap.to(element, {
+      y: '100%',
+      duration: 0.2,
+      ease: 'power2.in',
+      onComplete,
+    });
   });
 };
 
@@ -279,26 +294,28 @@ export const animateModalOut = (element, onComplete) => {
 export const animateLogo = (element) => {
   if (!element) return;
   
-  const tl = gsap.timeline();
-  
-  tl.fromTo(
-    element,
-    {
-      x: -20,
-      opacity: 0,
-    },
-    {
-      x: 0,
-      opacity: 1,
-      duration: 0.6,
-      ease: 'power2.out',
-    }
-  ).to(element, {
-    scale: 1.03,
-    duration: 1.5,
-    repeat: -1,
-    yoyo: true,
-    ease: 'power1.inOut',
+  import('gsap').then(({ gsap }) => {
+    const tl = gsap.timeline();
+    
+    tl.fromTo(
+      element,
+      {
+        x: -20,
+        opacity: 0,
+      },
+      {
+        x: 0,
+        opacity: 1,
+        duration: 0.6,
+        ease: 'power2.out',
+      }
+    ).to(element, {
+      scale: 1.03,
+      duration: 1.5,
+      repeat: -1,
+      yoyo: true,
+      ease: 'power1.inOut',
+    });
   });
 };
 
@@ -306,6 +323,8 @@ export const animateLogo = (element) => {
  * Cleanup function for ScrollTrigger
  */
 export const cleanupScrollTriggers = () => {
-  ScrollTrigger.getAll().forEach(trigger => trigger.kill());
+  import('gsap/ScrollTrigger').then(({ ScrollTrigger }) => {
+    ScrollTrigger.getAll().forEach(trigger => trigger.kill());
+  });
 };
 

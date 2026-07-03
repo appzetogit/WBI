@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import ServiceIconRenderer from '../../../components/common/ServiceIconRenderer';
+import { 
+  FiMonitor, FiShield, FiBriefcase, FiZap, FiHeart, FiSettings, FiCpu, FiAlertCircle,
+  FiCloudSnow, FiBox, FiDroplet, FiClock, FiWind, FiThermometer, FiTool, FiGrid
+} from 'react-icons/fi';
+
+const iconMap = {
+  FiMonitor, FiShield, FiBriefcase, FiZap, FiHeart, FiSettings, FiCpu, FiAlertCircle,
+  FiCloudSnow, FiBox, FiDroplet, FiClock, FiWind, FiThermometer, FiTool, FiGrid
+};
 
 const THEME = {
   brand: '#4F46E5', // Indigo
@@ -45,7 +54,9 @@ const ServiceCategories = React.memo(({ categories = [], onCategoryClick, onSeeA
                   </div>
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-[#10AFA5]">
-                    {category.icon ? (
+                    {category.icon && iconMap[category.icon] ? (
+                      React.createElement(iconMap[category.icon], { className: "w-6 h-6 sm:w-7 sm:h-7" })
+                    ) : category.icon && (category.icon.startsWith('http') || category.icon.startsWith('/') || category.icon.includes('.')) ? (
                       <img src={category.icon} className="w-full h-full object-contain" alt={category.title} />
                     ) : (
                       <ServiceIconRenderer categoryName={category.title} className="w-full h-full object-cover" />

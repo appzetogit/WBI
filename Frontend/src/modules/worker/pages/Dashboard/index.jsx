@@ -140,6 +140,7 @@ const Dashboard = () => {
                 className="w-full h-full object-cover"
                 width={48}
                 height={48}
+                priority={true}
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-teal-600 text-white font-bold text-lg">

@@ -23,7 +23,7 @@ const categories = [
   {
     name: 'Digital Solutions',
     slug: 'digital-solutions',
-    description: 'We provide end-to-end digital solutions to help your business grow online.',
+    description: 'IT services, computer repair, networking & more',
     icon: 'FiMonitor',
     trustPoints: ['Expert Team', 'On-time Delivery', 'Quality Service'],
     displayOrder: 1,
@@ -37,13 +37,30 @@ const categories = [
     ]
   },
   {
+    name: 'Security Solutions',
+    slug: 'security-solutions',
+    description: 'CCTV installation, access control, security systems',
+    icon: 'FiShield',
+    trustPoints: ['Security Experts', '24/7 Monitoring', 'Trusted Service'],
+    displayOrder: 2,
+    roles: ['engineer'],
+    subServices: [
+      { name: 'CCTV Installation', description: 'CCTV camera installation & configuration', startingPrice: 4999, icon: 'FiVideo', rating: 4.8, reviewCount: 128, requiredSkills: ['IP Camera', 'Analog Camera', 'NVR Configuration', 'DVR Configuration', 'Cabling (Cat6/Coaxial)'], suggestedTools: ['BNC/RJ45 Crimping Tool', 'CCTV Tester', 'Ladder', 'Drill Machine', 'Cable Puller'] },
+      { name: 'Access Control System', description: 'Access control installation & management', startingPrice: 3999, icon: 'FiLock', rating: 4.7, reviewCount: 96, requiredSkills: ['EM Lock', 'Biometric Lock', 'RFID Reader', 'Access Controller', 'Matrix System'], suggestedTools: ['Multimeter', 'Wire Stripper', 'Figma (for layouts)', 'Door Punch Tool'] },
+      { name: 'Biometric Attendance', description: 'Biometric system installation & support', startingPrice: 2599, icon: 'FiUserCheck', rating: 4.8, reviewCount: 74, requiredSkills: ['Fingerprint Scanner', 'Facial Recognition', 'Time & Attendance Software', 'SDK Integration'], suggestedTools: ['Config Utility', 'USB Cable', 'Screwdriver'] },
+      { name: 'Alarm System', description: 'Security alarm installation & maintenance', startingPrice: 2499, icon: 'FiBell', rating: 4.8, reviewCount: 64, requiredSkills: ['Intrusion Alarm', 'Motion Sensor', 'Glassbreak Sensor', 'GSM Dialer', 'Panic Button'], suggestedTools: ['Wire Stripper', 'RF Signal Detector', 'Screwdriver Set', 'Double Sided Tape'] },
+      { name: 'Video Monitoring', description: 'Remote video monitoring & management', startingPrice: 3499, icon: 'FiMonitor', rating: 4.7, reviewCount: 53, requiredSkills: ['CMS Software', 'Remote Viewing Setup', 'Port Forwarding', 'Cloud Storage Setup'], suggestedTools: ['IP Finder', 'Bandwidth Calculator', 'Laptop'] },
+      { name: 'Security Audit', description: 'Security assessment & audit service', startingPrice: 4999, icon: 'FiFileText', rating: 4.8, reviewCount: 45, requiredSkills: ['Vulnerability Check', 'Risk Assessment', 'Compliance Audit', 'Physical Security Audit'], suggestedTools: ['Audit Checksheets', 'Decibel Meter', 'Light Meter'] }
+    ]
+  },
+  {
     name: 'Banking Solutions',
     slug: 'banking-solutions',
-    description: 'Secure ATM, cash management & banking infrastructure services',
-    icon: 'FiCreditCard',
+    description: 'ATM installation, maintenance, cash handling',
+    icon: 'FiBriefcase',
     trustPoints: ['Certified Experts', '24/7 Support', 'PAN India Service'],
-    displayOrder: 2,
-    roles: ['worker', 'engineer'],
+    displayOrder: 3,
+    roles: ['engineer'],
     subServices: [
       { name: 'ATM Service', description: 'ATM installation & maintenance support', startingPrice: 4999, icon: 'FiServer', rating: 4.8, reviewCount: 128, requiredSkills: ['ATM Hardware', 'NCR Maintenance', 'Wincor Maintenance', 'Diebold Maintenance', 'Troubleshooting'], suggestedTools: ['NCR Toolkit', 'Multimeter', 'Diebold Diagnostic Key', 'Screwdriver Set', 'Wrench Set'] },
       { name: 'ATM Cassette Service', description: 'Cash cassette repair & replacement service', startingPrice: 2999, icon: 'FiArchive', rating: 4.7, reviewCount: 96, requiredSkills: ['Cassette Calibration', 'Cassette Repair', 'NCR Cassettes', 'Wincor Cassettes'], suggestedTools: ['Cassette Key', 'Calibration Template', 'Precision Screwdriver', 'Cleaning Cloth'] },
@@ -56,11 +73,11 @@ const categories = [
   {
     name: 'Energy Solutions',
     slug: 'energy-solutions',
-    description: 'Reliable power & energy infrastructure services for every need',
+    description: 'Solar installation, power backup, energy audit',
     icon: 'FiZap',
     trustPoints: ['Energy Experts', 'Fast Response', 'Industry Certified'],
-    displayOrder: 3,
-    roles: ['worker', 'engineer'],
+    displayOrder: 4,
+    roles: ['engineer'],
     subServices: [
       { name: 'Diesel Generator Service', description: 'DG installation, repair & maintenance', startingPrice: 7999, icon: 'FiSettings', rating: 4.9, reviewCount: 128, requiredSkills: ['DG Maintenance', 'Cummins Engines', 'Kirloskar Engines', 'Alternator Repair', 'Control Panel Panel'], suggestedTools: ['Load Bank Tester', 'Engine Diagnostic Tool', 'Oil Filter Wrench', 'Multimeter', 'Pressure Gauge'] },
       { name: 'Battery Service', description: 'Industrial battery maintenance & replacement', startingPrice: 2999, icon: 'FiBatteryCharging', rating: 4.8, reviewCount: 112, requiredSkills: ['Lead Acid Batteries', 'SMF Batteries', 'Lithium-ion Batteries', 'Battery Testing'], suggestedTools: ['Battery Hydrometer', 'Battery Load Tester', 'Digital Multimeter', 'Terminal Cleaning Brush', 'Insulated Wrench'] },
@@ -73,10 +90,10 @@ const categories = [
   {
     name: 'Healthcare Solutions',
     slug: 'healthcare-solutions',
-    description: 'Medical equipment & healthcare infrastructure support services',
+    description: 'Medical equipment, maintenance, support',
     icon: 'FiHeart',
     trustPoints: ['Certified Technicians', 'Healthcare Compliance', 'Fast Resolution'],
-    displayOrder: 4,
+    displayOrder: 5,
     roles: ['engineer'],
     subServices: [
       { name: 'Medical Equipment Services', description: 'Equipment installation & repair service', startingPrice: 6999, icon: 'FiActivity', rating: 4.9, reviewCount: 128, requiredSkills: ['X-Ray Machine', 'ECG Monitor', 'Ultrasound Scanner', 'Ventilator Repair', 'Defibrillator'], suggestedTools: ['Patient Simulator', 'Electrical Safety Analyzer', 'Oscilloscope', 'Multimeter', 'Calibration Phantoms'] },
@@ -87,30 +104,23 @@ const categories = [
     ]
   },
   {
-    name: 'Security Solutions',
-    slug: 'security-solutions',
-    description: 'Advanced security & surveillance systems you can trust',
-    icon: 'FiShield',
-    trustPoints: ['Security Experts', '24/7 Monitoring', 'Trusted Service'],
-    displayOrder: 5,
-    roles: ['worker', 'engineer'],
-    subServices: [
-      { name: 'CCTV Installation', description: 'CCTV camera installation & configuration', startingPrice: 4999, icon: 'FiVideo', rating: 4.8, reviewCount: 128, requiredSkills: ['IP Camera', 'Analog Camera', 'NVR Configuration', 'DVR Configuration', 'Cabling (Cat6/Coaxial)'], suggestedTools: ['BNC/RJ45 Crimping Tool', 'CCTV Tester', 'Ladder', 'Drill Machine', 'Cable Puller'] },
-      { name: 'Access Control System', description: 'Access control installation & management', startingPrice: 3999, icon: 'FiLock', rating: 4.7, reviewCount: 96, requiredSkills: ['EM Lock', 'Biometric Lock', 'RFID Reader', 'Access Controller', 'Matrix System'], suggestedTools: ['Multimeter', 'Wire Stripper', 'Figma (for layouts)', 'Door Punch Tool'] },
-      { name: 'Biometric Attendance', description: 'Biometric system installation & support', startingPrice: 2599, icon: 'FiUserCheck', rating: 4.8, reviewCount: 74, requiredSkills: ['Fingerprint Scanner', 'Facial Recognition', 'Time & Attendance Software', 'SDK Integration'], suggestedTools: ['Config Utility', 'USB Cable', 'Screwdriver'] },
-      { name: 'Alarm System', description: 'Security alarm installation & maintenance', startingPrice: 2499, icon: 'FiBell', rating: 4.8, reviewCount: 64, requiredSkills: ['Intrusion Alarm', 'Motion Sensor', 'Glassbreak Sensor', 'GSM Dialer', 'Panic Button'], suggestedTools: ['Wire Stripper', 'RF Signal Detector', 'Screwdriver Set', 'Double Sided Tape'] },
-      { name: 'Video Monitoring', description: 'Remote video monitoring & management', startingPrice: 3499, icon: 'FiMonitor', rating: 4.7, reviewCount: 53, requiredSkills: ['CMS Software', 'Remote Viewing Setup', 'Port Forwarding', 'Cloud Storage Setup'], suggestedTools: ['IP Finder', 'Bandwidth Calculator', 'Laptop'] },
-      { name: 'Security Audit', description: 'Security assessment & audit service', startingPrice: 4999, icon: 'FiFileText', rating: 4.8, reviewCount: 45, requiredSkills: ['Vulnerability Check', 'Risk Assessment', 'Compliance Audit', 'Physical Security Audit'], suggestedTools: ['Audit Checksheets', 'Decibel Meter', 'Light Meter'] }
-    ]
+    name: 'Appliance Solutions',
+    slug: 'appliance-solutions',
+    description: 'Home appliance repair, installation & service',
+    icon: 'FiSettings',
+    trustPoints: ['Certified Experts', 'Fast Service', 'Best Price'],
+    displayOrder: 6,
+    roles: ['engineer'],
+    subServices: []
   },
   {
     name: 'Automation Solutions',
     slug: 'automation-solutions',
-    description: 'Smart automation for homes & industries to simplify operations',
+    description: 'Smart home, industrial automation, IoT',
     icon: 'FiCpu',
     trustPoints: ['Smart Technology', 'Expert Team', 'Reliable Support'],
-    displayOrder: 6,
-    roles: ['worker', 'engineer'],
+    displayOrder: 7,
+    roles: ['engineer'],
     subServices: [
       { name: 'Smart Home Automation', description: 'Smart home automation solutions', startingPrice: 6999, icon: 'FiHome', rating: 4.8, reviewCount: 128, requiredSkills: ['Smart Lighting', 'Alexa/Google Home Integration', 'Zigbee Devices', 'Z-Wave Devices', 'Smart Locks'], suggestedTools: ['Hub App', 'Multimeter', 'Screwdriver Set', 'RJ45 Crimper'] },
       { name: 'Industrial Automation', description: 'Industrial automation systems & solutions', startingPrice: 12999, icon: 'FiSettings', rating: 4.9, reviewCount: 96, requiredSkills: ['PLC Programming', 'SCADA Design', 'HMI Configuration', 'VFD Commissioning'], suggestedTools: ['PLC Programming Cable', 'Laptop', 'VFD Software', 'Modbus Tester'] },
@@ -123,11 +133,11 @@ const categories = [
   {
     name: 'Fire and Safety',
     slug: 'fire-and-safety',
-    description: 'Complete fire safety solutions for protection & compliance',
-    icon: 'FiAlertTriangle',
+    description: 'Fire extinguisher, alarm systems, safety audits',
+    icon: 'FiAlertCircle',
     trustPoints: ['Safety First', 'Certified Experts', 'Quick Support'],
-    displayOrder: 7,
-    roles: ['worker', 'engineer'],
+    displayOrder: 8,
+    roles: ['engineer'],
     subServices: [
       { name: 'Fire Alarm System', description: 'Fire alarm installation & maintenance', startingPrice: 4999, icon: 'FiBell', rating: 4.8, reviewCount: 128, requiredSkills: ['Smoke Detector', 'Heat Detector', 'Manual Call Point (MCP)', 'Fire Panel Programming', 'Repeater Panel'], suggestedTools: ['Smoke Detector Tester (Aerosol)', 'Heat Gun', 'Multimeter', 'Panel Key', 'Resistor Kit'] },
       { name: 'Fire Extinguisher Service', description: 'Fire extinguisher installation & servicing', startingPrice: 1999, icon: 'FiCrosshair', rating: 4.9, reviewCount: 96, requiredSkills: ['Refilling Service', 'Hydraulic Testing', 'CO2 Extinguisher', 'DCP Extinguisher', 'Foam Extinguisher'], suggestedTools: ['Hydrotesting Pump', 'Refilling Machine', 'Pressure Gauge', 'CO2 Transfer Hose', 'Extinguisher Seals'] },

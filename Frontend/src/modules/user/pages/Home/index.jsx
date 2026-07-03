@@ -11,35 +11,36 @@ import { userHomeService } from '../../../../services/userHomeService';
 import { useCart } from '../../../../context/CartContext';
 import { useCity } from '../../../../context/CityContext';
 import { toast } from 'react-hot-toast';
-import { registerFCMToken } from '../../../../services/pushNotificationService';
 import { motion } from 'framer-motion';
 
 // Lazy load heavy components for better initial load performance
 import PromoCarousel from './components/PromoCarousel';
-// Lazy load OTHER heavy components
 import NewAndNoteworthy from './components/NewAndNoteworthy';
-import MostBookedServices from './components/MostBookedServices';
 import OurServicesSection from './components/OurServicesSection';
 import CuratedServices from './components/CuratedServices';
 import ServiceSectionWithRating from './components/ServiceSectionWithRating';
 import Banner from './components/Banner';
 import ReferEarnSection from './components/ReferEarnSection';
-import TrustVideosSection from './components/TrustVideosSection';
-import HowItWorks from './components/HowItWorks';
-import CustomerReviews from '../../components/reviews/CustomerReviews';
-import ExtendedServiceCategories from './components/ExtendedServiceCategories';
-import OfferBannerSlider from './components/OfferBannerSlider';
 import TrustStrip from './components/TrustStrip';
-import CategoryModal from './components/CategoryModal';
-import SearchOverlay from './components/SearchOverlay';
-import PopularBrandsWeService from './components/PopularBrandsWeService';
-import RecentBookings from './components/RecentBookings';
-import InstantBookingBanner from './components/InstantBookingBanner';
 import LogoLoader from '../../../../components/common/LogoLoader';
 import { SkeletonLine, SkeletonCircle, SkeletonCard } from '../../../../components/common/SkeletonLoaders';
 import ScrapPromotionCard from './components/ScrapPromotionCard';
 import DebugConsole from '../../components/common/DebugConsole';
 import { optimizeCloudinaryUrl } from '../../../../utils/cloudinaryOptimize';
+import HelpAndSubscribe from './components/HelpAndSubscribe';
+
+// Lazy load below-the-fold and conditional/modal components
+const OfferBannerSlider = lazy(() => import('./components/OfferBannerSlider'));
+const MostBookedServices = lazy(() => import('./components/MostBookedServices'));
+const TrustVideosSection = lazy(() => import('./components/TrustVideosSection'));
+const HowItWorks = lazy(() => import('./components/HowItWorks'));
+const CustomerReviews = lazy(() => import('../../components/reviews/CustomerReviews'));
+const ExtendedServiceCategories = lazy(() => import('./components/ExtendedServiceCategories'));
+const PopularBrandsWeService = lazy(() => import('./components/PopularBrandsWeService'));
+const RecentBookings = lazy(() => import('./components/RecentBookings'));
+const InstantBookingBanner = lazy(() => import('./components/InstantBookingBanner'));
+const CategoryModal = lazy(() => import('./components/CategoryModal'));
+const SearchOverlay = lazy(() => import('./components/SearchOverlay'));
 
 const AddressSelectionModal = lazy(() => import('../Checkout/components/AddressSelectionModal'));
 const CarePlanBanner = lazy(() => import('./components/CarePlanBanner'));
@@ -64,6 +65,11 @@ const toAssetUrl = (url, width) => {
   finalUrl = `${finalUrl}${separator}v=${version}`;
 
   return optimizeCloudinaryUrl(finalUrl, { width: width || 800, quality: 'auto:good', format: 'webp' });
+};
+
+const isReactIconName = (str) => {
+  if (!str) return false;
+  return (str.startsWith('Fi') || str.startsWith('Fa') || str.startsWith('Md') || str.startsWith('Io') || str.startsWith('Lu')) && !str.includes('/') && !str.includes('.');
 };
 
 const Home = () => {
@@ -256,14 +262,18 @@ const Home = () => {
     autoDetectLocation();
 
     // Defer FCM token registration to avoid blocking the critical render path
+    const triggerFCM = () => {
+      import('../../../../services/pushNotificationService')
+        .then((module) => {
+          module.registerFCMToken('user', true).catch(err => {/* Silent fail */ });
+        })
+        .catch(err => {/* Silent fail */ });
+    };
+
     if ('requestIdleCallback' in window) {
-      window.requestIdleCallback(() => {
-        registerFCMToken('user', true).catch(err => {/* Silent fail */ });
-      });
+      window.requestIdleCallback(triggerFCM);
     } else {
-      setTimeout(() => {
-        registerFCMToken('user', true).catch(err => {/* Silent fail */ });
-      }, 3000);
+      setTimeout(triggerFCM, 3000);
     }
   }, []);
 
@@ -276,7 +286,7 @@ const Home = () => {
       const res = await userHomeService.getHomeData(cityId);
       return res || {};
     },
-    staleTime: 5 * 60 * 1000, // Keep fresh for 5 mins
+    staleTime: 0, // Set to 0 to instantly fetch updates in background on mount (no reload needed!)
     gcTime: 30 * 60 * 1000, // Keep in cache for 30 mins
     placeholderData: (previousData) => previousData, // keepPreviousData replacement in react-query v5
     refetchOnWindowFocus: false
@@ -294,22 +304,22 @@ const Home = () => {
     let categoriesToSet = [];
     let homeContentToSet = {};
 
-    // 1. Categories
+    // 1. Categories (Prioritize B2C ServiceCategories)
     if (homeData.categories && homeData.categories.length > 0) {
       categoriesToSet = homeData.categories.map(cat => ({
-        id: cat.id,
-        title: cat.title,
+        id: cat.id || cat._id,
+        title: cat.title || cat.name,
         slug: cat.slug,
-        icon: toAssetUrl(cat.icon),
-        hasSaleBadge: cat.hasSaleBadge,
-        badge: cat.badge
+        icon: isReactIconName(cat.icon) ? cat.icon : toAssetUrl(cat.icon),
+        hasSaleBadge: cat.hasSaleBadge || false,
+        badge: cat.badge || null
       }));
     } else if (homeData.quickServices && homeData.quickServices.length > 0) {
       categoriesToSet = homeData.quickServices.map(qs => ({
         id: qs._id,
         title: qs.name,
         slug: qs.slug,
-        icon: toAssetUrl(qs.image || qs.icon, 150),
+        icon: isReactIconName(qs.image || qs.icon) ? (qs.image || qs.icon) : toAssetUrl(qs.image || qs.icon, 150),
         hasSaleBadge: false,
         badge: null
       }));
@@ -387,14 +397,28 @@ const Home = () => {
       }));
     }
 
+    let footersToSet = [];
+    if (homeData.footers && homeData.footers.length > 0) {
+      footersToSet = homeData.footers.map(b => ({
+        id: b._id || b.id,
+        imageUrl: toAssetUrl(b.imageUrl || b.mobileImageUrl, 1600),
+        redirectType: b.redirectType || 'none',
+        redirectValue: b.redirectValue || '',
+        title: b.title || '',
+        subtitle: b.subtitle || '',
+        order: b.sortOrder || 0
+      })).sort((a, b) => a.order - b.order);
+    }
+
     return {
       categories: categoriesToSet,
       homeContent: homeContentToSet,
-      popularBrands: popularBrandsToSet
+      popularBrands: popularBrandsToSet,
+      footers: footersToSet
     };
   }, [homeData]);
 
-  const { categories, homeContent, popularBrands } = mappedData;
+  const { categories, homeContent, popularBrands, footers } = mappedData;
   const loading = homeQueryLoading;
 
   // Handle scroll separately (only when needed)
@@ -432,10 +456,12 @@ const Home = () => {
   };
 
   const handleCategoryClick = (category) => {
-    // Route to new dynamic One-Time Service flow for ALL categories
+    // Route to categories sub-services page
+    console.log('[SERVICE_CATEGORY_CLICKED]', category);
     const targetSlug = category.slug || category.id;
     if (targetSlug) {
-      navigate(`/user/service/${targetSlug}`);
+      console.log('[NAVIGATING_TO_CATEGORY]', targetSlug);
+      navigate(`/user/categories/${targetSlug}`);
     } else {
       toast.error('Service not found');
     }
@@ -461,6 +487,7 @@ const Home = () => {
   };
 
   const handleServiceClick = (service) => {
+    console.log('[SUB_SERVICE_CLICKED]', service);
     if (!service) return;
     if (service.targetCategoryId) {
       const cat = categories.find(c => (c.id === service.targetCategoryId || c._id === service.targetCategoryId));
@@ -469,7 +496,13 @@ const Home = () => {
         return;
       }
     }
-    // Fallback if no targetCategoryId but has slug/title, we no longer navigate to slug
+    const slug = service.slug || service.id || service._id;
+    if (slug) {
+      console.log('[NAVIGATING_TO_SERVICE]', slug);
+      console.log('[SELECTED_SERVICE_ID]', service.id || service._id || service.serviceId);
+      console.log('[SELECTED_SERVICE_SLUG]', service.slug);
+      navigate(`/user/service/${slug}`);
+    }
   };
 
   const handleAddClick = async (service) => {
@@ -559,7 +592,7 @@ const Home = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen pb-20 relative bg-[#F8FCFC]">
+      <div className="min-h-screen relative bg-[#F8FCFC]">
         <div className="absolute top-0 left-0 w-full h-[300px] bg-gradient-to-b from-[#ebfae6]/20 to-transparent pointer-events-none z-0"></div>
         <div className="relative z-10">
           <div className="sticky top-0 z-50">
@@ -575,7 +608,7 @@ const Home = () => {
             </div>
           </div>
           
-          <main className="pt-2 space-y-6 pb-24 max-w-screen-xl mx-auto w-full px-4">
+          <main className="pt-2 space-y-6 max-w-screen-xl mx-auto w-full px-4">
             {/* Categories Skeleton */}
             <div className="grid grid-cols-4 gap-4 mt-2">
               {[1,2,3,4,5,6,7,8].map(i => (
@@ -604,7 +637,7 @@ const Home = () => {
   }
 
   return (
-    <div className="min-h-screen pb-20 relative bg-[#F8FCFC]">
+    <div className="min-h-screen relative bg-[#F8FCFC]">
       
       {/* Absolute clear background mapping the new scheme */}
       <div className="absolute top-0 left-0 w-full h-[300px] bg-gradient-to-b from-[#ebfae6]/20 to-transparent pointer-events-none z-0"></div>
@@ -624,7 +657,7 @@ const Home = () => {
           </div>
         </div>
 
-        <main className="pt-2 space-y-6 pb-24 max-w-screen-xl mx-auto w-full">
+        <main className="pt-2 space-y-6 max-w-screen-xl mx-auto w-full">
           {!isLocationSupported ? (
             <div className="flex flex-col items-center justify-center pt-20 pb-10 px-6 text-center min-h-[60vh]">
               <div className="w-24 h-24 bg-red-50 rounded-full flex items-center justify-center mb-6">
@@ -681,13 +714,15 @@ const Home = () => {
               {/* 2. Offer Banner */}
               {homeContent?.isPromosVisible !== false && (
                 <section className="relative z-10">
-                  <InstantBookingBanner 
-                    promos={(homeContent?.promos || []).sort((a,b) => (a.order||0) - (b.order||0)).map(p => ({
-                      ...p,
-                      imageUrl: p.imageUrl ? toAssetUrl(p.imageUrl) : null
-                    }))}
-                    onPromoClick={handlePromoClick}
-                  />
+                  <Suspense fallback={<div className="h-40 bg-gray-50 animate-pulse rounded-2xl mx-4" />}>
+                    <InstantBookingBanner 
+                      promos={(homeContent?.promos || []).sort((a,b) => (a.order||0) - (b.order||0)).map(p => ({
+                        ...p,
+                        imageUrl: p.imageUrl ? toAssetUrl(p.imageUrl) : null
+                      }))}
+                      onPromoClick={handlePromoClick}
+                    />
+                  </Suspense>
                 </section>
               )}
 
@@ -704,7 +739,7 @@ const Home = () => {
                         price: item.price,
                         originalPrice: item.originalPrice,
                         discount: item.discount,
-                        image: item.image,
+                        image: item.image || (item.imageUrl ? toAssetUrl(item.imageUrl, 400) : null),
                         targetCategoryId: item.targetCategoryId,
                         slug: item.slug
                       }))}
@@ -783,36 +818,59 @@ const Home = () => {
 
               {/* Popular Brands We Service (Moved to bottom) */}
               <section className="relative z-10 mt-6 mb-4">
-                <PopularBrandsWeService 
-                  brands={popularBrands} 
-                  isLoading={loading}
-                  error={null}
-                  onSeeAllClick={() => setIsSearchOpen(true)} 
-                />
+                <Suspense fallback={<div className="h-24 bg-gray-50 animate-pulse rounded-xl mx-4" />}>
+                  <PopularBrandsWeService 
+                    brands={popularBrands} 
+                    isLoading={loading}
+                    error={null}
+                    onSeeAllClick={() => setIsSearchOpen(true)} 
+                  />
+                </Suspense>
               </section>
 
               {/* Recent Bookings for Authenticated Users */}
               {localStorage.getItem('token') && (
                 <section className="relative z-10 mt-2 mb-6">
-                  <RecentBookings />
+                  <Suspense fallback={null}>
+                    <RecentBookings />
+                  </Suspense>
                 </section>
               )}
 
               {/* End of Home - Our Services Section */}
               <OurServicesSection />
-              
-              {/* Care Plan Banner */}
-              {homeContent?.carePlan?.isActive !== false && (
-                <div className="relative z-10 mt-6 mb-6">
-                  <Suspense fallback={<div className="h-40 bg-slate-50 animate-pulse rounded-3xl mx-4" />}>
-                    <CarePlanBanner 
-                      data={{
-                        ...homeContent?.carePlan,
-                        imageUrl: homeContent?.carePlan?.imageUrl ? toAssetUrl(homeContent.carePlan.imageUrl) : null
-                      }} 
-                    />
-                  </Suspense>
+
+              {/* Help & Subscription Section (Dynamic Footer Banners) */}
+              {footers && footers.length > 0 ? (
+                <div className="w-full px-4 pb-8 space-y-4 max-w-screen-xl mx-auto relative z-10 -mt-4">
+                  {footers.map((banner) => (
+                    <div 
+                      key={banner.id}
+                      onClick={() => {
+                        if (banner.redirectType === 'category' || banner.redirectType === 'service') {
+                          const val = banner.redirectValue;
+                          if (val) {
+                            navigate(val.startsWith('/') ? val : `/user/service/${val}`);
+                          }
+                        } else if (banner.redirectType === 'external' && banner.redirectValue) {
+                          window.open(banner.redirectValue, '_blank');
+                        } else if (banner.redirectValue) {
+                          navigate(banner.redirectValue);
+                        }
+                      }}
+                      className="w-full rounded-2xl overflow-hidden shadow-sm border border-gray-100 active:scale-[0.99] transition-all cursor-pointer relative group aspect-[21/6.5]"
+                    >
+                      <img 
+                        src={banner.imageUrl} 
+                        alt={banner.title || 'Footer Banner'} 
+                        className="w-full h-full object-cover block transition-transform duration-500 group-hover:scale-[1.005]" 
+                        loading="lazy" 
+                      />
+                    </div>
+                  ))}
                 </div>
+              ) : (
+                <HelpAndSubscribe />
               )}
             </>
           )}
@@ -823,25 +881,33 @@ const Home = () => {
       {!isAddressModalOpen && <BottomNav />}
 
       {/* Category Modal */}
-      <CategoryModal
-        isOpen={isCategoryModalOpen}
-        onClose={() => {
-          setIsCategoryModalOpen(false);
-          setSelectedCategory(null);
-        }}
-        category={selectedCategory}
-        location={address}
-        cartCount={cartCount}
-        currentCity={currentCity}
-      />
+      <Suspense fallback={null}>
+        {isCategoryModalOpen && (
+          <CategoryModal
+            isOpen={isCategoryModalOpen}
+            onClose={() => {
+              setIsCategoryModalOpen(false);
+              setSelectedCategory(null);
+            }}
+            category={selectedCategory}
+            location={address}
+            cartCount={cartCount}
+            currentCity={currentCity}
+          />
+        )}
+      </Suspense>
 
       {/* Search Overlay */}
-      <SearchOverlay
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        categories={categories}
-        onCategoryClick={handleCategoryClick}
-      />
+      <Suspense fallback={null}>
+        {isSearchOpen && (
+          <SearchOverlay
+            isOpen={isSearchOpen}
+            onClose={() => setIsSearchOpen(false)}
+            categories={categories}
+            onCategoryClick={handleCategoryClick}
+          />
+        )}
+      </Suspense>
 
       {/* Address Selection Modal */}
       <Suspense fallback={null}>

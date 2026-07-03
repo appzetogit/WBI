@@ -3,6 +3,24 @@ const DesignEnquiry = require('../models/DesignEnquiry');
 // Submit new enquiry (Public)
 exports.submitEnquiry = async (req, res) => {
   try {
+    const { category, comments } = req.body;
+
+    // Validate required category field
+    if (!category || typeof category !== 'string' || category.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Category is required and must be a non-empty string'
+      });
+    }
+
+    // Validate optional comments field
+    if (comments !== undefined && typeof comments !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Comments must be a string'
+      });
+    }
+
     const newEnquiry = new DesignEnquiry(req.body);
     await newEnquiry.save();
 

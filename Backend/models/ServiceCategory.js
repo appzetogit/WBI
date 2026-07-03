@@ -64,7 +64,25 @@ const serviceCategorySchema = new mongoose.Schema({
     type: String,
     enum: ['worker', 'engineer'],
     default: 'worker'
-  }]
+  }],
+  serviceType: {
+    type: String,
+    enum: ['one_time', 'enterprise'],
+    default: 'one_time',
+    index: true
+  },
+  audience: {
+    type: String,
+    enum: ['b2c', 'b2b'],
+    default: 'b2c',
+    index: true
+  },
+  assignedRole: {
+    type: String,
+    enum: ['worker', 'engineer'],
+    default: 'worker',
+    index: true
+  }
 }, {
   timestamps: true
 });

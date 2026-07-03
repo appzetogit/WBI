@@ -212,8 +212,248 @@ const rejectCompany = async (req, res) => {
   }
 };
 
+/**
+ * Get B2B Company Details by ID
+ */
+const getCompanyById = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+
+    const company = await B2BCompany.findById(companyId).select('-passwordHash');
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'B2B Company not found' });
+    }
+
+    const branches = await B2BBranch.find({ companyId });
+    const documents = await B2BDocument.find({ companyId });
+    const bankAccount = await B2BBankAccount.findOne({ companyId });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...company.toObject(),
+        branches,
+        documents,
+        bankAccount
+      }
+    });
+  } catch (error) {
+    console.error('getCompanyById error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve company details', error: error.message });
+  }
+};
+
+/**
+ * Verify / Approve a B2B Company
+ */
+const verifyCompany = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+
+    const company = await B2BCompany.findById(companyId);
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'B2B Company not found' });
+    }
+
+    company.verificationStatus = 'verified'; // or approved
+    company.rejectionReason = null;
+    company.verifiedOn = new Date();
+    company.verifiedBy = req.user?.email || 'Admin Team';
+
+    // Verify all documents
+    company.documents.forEach(doc => {
+      doc.status = 'verified';
+      doc.verifiedAt = new Date();
+      doc.rejectionReason = null;
+    });
+
+    await company.save();
+
+    await B2BDocument.updateMany(
+      { companyId: company._id },
+      { 
+        $set: { 
+          status: 'verified',
+          rejectionReason: null,
+          verifiedAt: new Date()
+        } 
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'B2B Company verified successfully',
+      company
+    });
+  } catch (error) {
+    console.error('verifyCompany error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to verify company', error: error.message });
+  }
+};
+
+/**
+ * Verify B2B Company Document
+ */
+const verifyCompanyDocument = async (req, res) => {
+  try {
+    const { companyId, documentId } = req.params;
+
+    const doc = await B2BDocument.findOne({ _id: documentId, companyId });
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
+    doc.status = 'verified';
+    doc.verifiedAt = new Date();
+    doc.rejectionReason = null;
+    await doc.save();
+
+    // Sync with company embedded documents list
+    const company = await B2BCompany.findById(companyId);
+    if (company) {
+      const companyDoc = company.documents.find(d => d.documentType === doc.documentType);
+      if (companyDoc) {
+        companyDoc.status = 'verified';
+        companyDoc.verifiedAt = new Date();
+        companyDoc.rejectionReason = null;
+        await company.save();
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Document verified successfully',
+      document: doc
+    });
+  } catch (error) {
+    console.error('verifyCompanyDocument error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to verify document', error: error.message });
+  }
+};
+
+/**
+ * Reject B2B Company Document
+ */
+const rejectCompanyDocument = async (req, res) => {
+  try {
+    const { companyId, documentId } = req.params;
+    const { rejectionReason } = req.body;
+
+    if (!rejectionReason) {
+      return res.status(400).json({ success: false, message: 'Rejection reason is required' });
+    }
+
+    const doc = await B2BDocument.findOne({ _id: documentId, companyId });
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
+    doc.status = 'rejected';
+    doc.rejectionReason = rejectionReason;
+    await doc.save();
+
+    // Sync with company embedded documents list
+    const company = await B2BCompany.findById(companyId);
+    if (company) {
+      const companyDoc = company.documents.find(d => d.documentType === doc.documentType);
+      if (companyDoc) {
+        companyDoc.status = 'rejected';
+        companyDoc.rejectionReason = rejectionReason;
+        await company.save();
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Document rejected successfully',
+      document: doc
+    });
+  } catch (error) {
+    console.error('rejectCompanyDocument error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to reject document', error: error.message });
+  }
+};
+
+/**
+ * Verify B2B Company Bank Details
+ */
+const verifyCompanyBank = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+
+    const bankAccount = await B2BBankAccount.findOne({ companyId });
+    if (!bankAccount) {
+      return res.status(404).json({ success: false, message: 'Bank account not found' });
+    }
+
+    bankAccount.verificationStatus = 'verified';
+    bankAccount.verifiedAt = new Date();
+    await bankAccount.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Bank account verified successfully',
+      bankAccount
+    });
+  } catch (error) {
+    console.error('verifyCompanyBank error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to verify bank details', error: error.message });
+  }
+};
+
+const getCompanyUsers = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    const B2BUser = require('../../models/B2BUser');
+    const users = await B2BUser.find({ companyId }).select('-passwordHash -inviteTokenHash');
+    return res.status(200).json({
+      success: true,
+      data: users
+    });
+  } catch (error) {
+    console.error('getCompanyUsers error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to retrieve company users', error: error.message });
+  }
+};
+
+const updateCompanyUserStatus = async (req, res) => {
+  try {
+    const { companyId, userId } = req.params;
+    const { status } = req.body;
+    const B2BUser = require('../../models/B2BUser');
+
+    if (!['blocked', 'active', 'inactive'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status. Choose active, inactive, or blocked.' });
+    }
+
+    const user = await B2BUser.findOne({ _id: userId, companyId });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'B2B User not found for this company.' });
+    }
+
+    user.status = status;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `User status updated to ${status} successfully`,
+      data: user
+    });
+  } catch (error) {
+    console.error('updateCompanyUserStatus error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update company user status', error: error.message });
+  }
+};
+
 module.exports = {
   getAllCompanies,
   approveCompany,
-  rejectCompany
+  rejectCompany,
+  getCompanyById,
+  verifyCompany,
+  verifyCompanyDocument,
+  rejectCompanyDocument,
+  verifyCompanyBank,
+  getCompanyUsers,
+  updateCompanyUserStatus
 };
