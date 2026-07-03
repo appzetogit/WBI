@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vite.dev/config/
 export default defineConfig({
   resolve: {
-    // Ensure only one React instance
+    // Ensure only one React instance across all chunks
     dedupe: ['react', 'react-dom', 'react/jsx-runtime'],
   },
   plugins: [
@@ -13,7 +13,7 @@ export default defineConfig({
     tailwindcss(),
   ],
   server: {
-    port: 5174, // Change port to bypass cache
+    port: 5174,
     strictPort: true,
     proxy: {
       '/api': {
@@ -38,42 +38,39 @@ export default defineConfig({
         pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
       },
     },
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            // React core — must be its own chunk, loaded first
-            if (
-              id.includes('node_modules/react/') ||
-              id.includes('node_modules/react-dom/') ||
-              id.includes('node_modules/react-router/') ||
-              id.includes('node_modules/react-router-dom/') ||
-              id.includes('node_modules/@remix-run/router/')
-            ) {
-              return 'react-vendor';
-            }
-            // Firebase — very large, standalone (no React.createContext at init)
-            if (
-              id.includes('node_modules/firebase/') ||
-              id.includes('node_modules/@firebase/')
-            ) {
-              return 'firebase-vendor';
-            }
-            // GSAP — standalone, no React dependency at init
-            if (id.includes('node_modules/gsap/')) {
-              return 'gsap-vendor';
-            }
-            // xlsx — standalone, no React dependency
-            if (id.includes('node_modules/xlsx/')) {
-              return 'xlsx-vendor';
-            }
-            // Everything else (framer-motion, leaflet, react-leaflet,
-            // @react-google-maps, recharts, react-icons, lucide-react, etc.)
-            // goes into the common vendor chunk so Rollup can guarantee
-            // react-vendor is initialized before any of them run.
-            return 'vendor';
+          if (!id.includes('node_modules')) return;
+
+          // Firebase — very large (~367 KB), completely standalone, zero React deps at init
+          if (
+            id.includes('node_modules/firebase/') ||
+            id.includes('node_modules/@firebase/')
+          ) {
+            return 'firebase-vendor';
           }
+
+          // GSAP — standalone animation engine, zero React dependency
+          if (id.includes('node_modules/gsap/')) {
+            return 'gsap-vendor';
+          }
+
+          // ALL other node_modules go into ONE vendor chunk.
+          // This includes React, react-dom, react-router, @tanstack/react-query,
+          // framer-motion, leaflet, react-leaflet, @react-google-maps, recharts,
+          // react-icons, lucide-react, axios, socket.io-client, dayjs, zod, etc.
+          //
+          // WHY: libraries like @tanstack/react-query, framer-motion, react-leaflet
+          // and recharts call React.createContext() at MODULE EVALUATION TIME.
+          // When React is in a separate chunk, there is a race: if the browser
+          // evaluates the vendor chunk before react-vendor finishes, React is
+          // undefined → "Cannot read properties of undefined (reading 'createContext')".
+          //
+          // Keeping everything in one chunk guarantees Rollup initialises React
+          // first (it appears at the top of the file) before any dependent lib runs.
+          return 'vendor';
         },
         chunkFileNames: 'assets/[name]-[hash].js',
         entryFileNames: 'assets/[name]-[hash].js',
