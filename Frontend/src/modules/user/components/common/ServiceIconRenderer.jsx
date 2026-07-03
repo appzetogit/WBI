@@ -1,6 +1,5 @@
 import React from 'react';
-import Wrench from 'lucide-react/dist/esm/icons/wrench';
-import Cog from 'lucide-react/dist/esm/icons/cog';
+import { Wrench, Cog } from 'lucide-react';
 
 // Local generated vector icons (from grid)
 import homeCleaningIcon from '../../../../assets/images/icons/services/vector/home-cleaning.png';
