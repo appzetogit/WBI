@@ -268,14 +268,9 @@ const initializeSocket = (server) => {
 
         const updateData = {
           location: {
-            lat,
-            lng,
-            heading,
-            updatedAt: new Date()
-          },
-          geoLocation: {
             type: 'Point',
-            coordinates: [lng, lat]
+            coordinates: [lng, lat],
+            updatedAt: new Date()
           }
         };
 

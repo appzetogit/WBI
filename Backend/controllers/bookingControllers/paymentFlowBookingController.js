@@ -198,7 +198,7 @@ exports.createBooking = async (req, res) => {
     // 5. Trigger wave-assignment asynchronously
     if (bookingType === 'instant') {
       const WaveManagerService = require('../../services/WaveManagerService');
-      WaveManagerService.dispatchWave(booking._id.toString(), 1).catch(err => {
+      WaveManagerService.dispatchWave(booking._id.toString(), 0).catch(err => {
         console.error('[WaveManagerService Error]', err);
       });
     }

@@ -138,10 +138,7 @@ const LocationPicker = ({ onLocationSelect, initialPosition = null }) => {
       clearTimeout(slowLocationTimer);
       setLoading(false);
       loadingRef.current = false;
-      console.error("Geolocation error:", error);
-      
-      // Trigger the specialized "Allow GPS" popup
-      window.dispatchEvent(new CustomEvent('requestLocationPrompt'));
+      console.warn("Geolocation warning (User denied or no GPS):", error.message || error);
       
       let errorMessage = 'Unable to get location.';
       if (error.code === 1) errorMessage = 'Location permission denied.';

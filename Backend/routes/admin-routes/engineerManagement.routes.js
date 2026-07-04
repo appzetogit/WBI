@@ -15,7 +15,10 @@ const {
   getAllEngineerJobs,
   getEngineerPaymentsSummary,
   toggleEngineerStatus,
-  deleteEngineer
+  deleteEngineer,
+  updateSelfieStatus,
+  updateIntroVideoStatus,
+  updateVehicleStatus
 } = require('../../controllers/adminControllers/adminEngineerController');
 
 // Validation rules
@@ -39,6 +42,9 @@ router.post('/engineers/:id/reject', authenticate, isAdmin, rejectEngineerValida
 router.post('/engineers/:id/suspend', authenticate, isAdmin, suspendEngineer);
 router.post('/engineers/:id/pay', authenticate, isAdmin, payEngineerValidation, payEngineer);
 router.patch('/engineers/:id/status', authenticate, isAdmin, toggleEngineerStatus); // New
+router.patch('/engineers/:id/selfie/status', authenticate, isAdmin, updateSelfieStatus);
+router.patch('/engineers/:id/video/status', authenticate, isAdmin, updateIntroVideoStatus);
+router.patch('/engineers/:id/vehicle/status', authenticate, isAdmin, updateVehicleStatus);
 router.delete('/engineers/:id', authenticate, isAdmin, deleteEngineer); // New
 router.get('/engineers/:id/jobs', authenticate, isAdmin, getEngineerJobs);
 router.get('/engineers/:id/earnings', authenticate, isAdmin, getEngineerEarnings);

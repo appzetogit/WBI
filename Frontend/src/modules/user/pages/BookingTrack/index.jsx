@@ -223,8 +223,15 @@ const BookingTrack = () => {
           // 2. Source (Provider Location) - ONLY on first load if no socket location received yet
           if (isFirstLoad && !locationFromSocketRef.current) {
             const provider = response.data.workerId || response.data.assignedTo || response.data.vendorId || {};
-            if (provider.location && provider.location.lat && provider.location.lng) {
-              setCurrentLocation({ lat: parseFloat(provider.location.lat), lng: parseFloat(provider.location.lng) });
+            if (provider.location) {
+              if (Array.isArray(provider.location.coordinates)) {
+                setCurrentLocation({
+                  lat: parseFloat(provider.location.coordinates[1]),
+                  lng: parseFloat(provider.location.coordinates[0])
+                });
+              } else if (provider.location.lat && provider.location.lng) {
+                setCurrentLocation({ lat: parseFloat(provider.location.lat), lng: parseFloat(provider.location.lng) });
+              }
             } else if (response.data.vendorId && provider.address && provider.address.lat && provider.address.lng) {
               // Fallback to vendor address
               setCurrentLocation({ lat: parseFloat(provider.address.lat), lng: parseFloat(provider.address.lng) });

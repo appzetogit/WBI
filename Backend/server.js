@@ -274,6 +274,7 @@ app.use('/api/workers/projects', require('./routes/worker-routes/project.routes'
 
 // Engineer routes
 app.use('/api/engineers/auth', require('./routes/engineer-routes/auth.routes'));
+app.use('/api/engineer', require('./routes/engineer-routes/joiningFee.routes'));
 app.use('/api/engineers', require('./routes/engineer-routes/profile.routes'));
 app.use('/api/engineers', require('./routes/engineer-routes/job.routes'));
 app.use('/api/engineers', require('./routes/engineer-routes/dashboard.routes'));
@@ -309,6 +310,7 @@ app.use('/api/admin', require('./routes/admin-routes/dashboard.routes'));
 app.use('/api/admin', require('./routes/admin-routes/userManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/vendorManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/workerManagement.routes'));
+app.use('/api/admin', require('./routes/admin-routes/adminEngineerConfig.routes'));
 app.use('/api/admin', require('./routes/admin-routes/engineerManagement.routes'));
 app.use('/api/admin/service-categories', require('./routes/admin-routes/serviceCategoryManagement.routes'));
 app.use('/api/admin/category', require('./routes/admin-routes/serviceCategoryManagement.routes'));

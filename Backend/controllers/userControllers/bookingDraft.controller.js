@@ -402,7 +402,7 @@ exports.confirmReview = async (req, res) => {
       await booking.save();
 
       // Dispatch Wave 1 asynchronously so we don't block the response
-      WaveManagerService.dispatchWave(booking._id.toString(), 1).catch(err => {
+      WaveManagerService.dispatchWave(booking._id.toString(), 0).catch(err => {
         console.error('[WaveManagerService Error]', err);
       });
     }

@@ -107,38 +107,14 @@ exports.createBooking = async (req, res) => {
       await booking.save();
       
       // Start auto-assignment fallback timer (re-using dispatchWave logic for queueing)
-      await WaveManagerService.dispatchWave(booking._id.toString(), 1);
-    } else {
-      // Trigger WaveManagerService to find and group nearby workers
+      await WaveManagerService.dispatchWave(booking._id.toString(), 0);
+      // Trigger new Dispatch Engine directly
       if (!address.lat || !address.lng) {
         return res.status(400).json({ success: false, message: 'Address must contain lat and lng for auto-assignment' });
       }
 
-      const waves = await WaveManagerService.findAndGroupWorkers(
-        address.lat,
-        address.lng,
-        10 // default 10km radius
-      );
-      
-      if (waves.length === 0) {
-        // No workers found
-        booking.status = 'admin_action_required';
-        booking.adminLog.push({
-          action: 'No Workers Found',
-          reason: 'No online workers found within radius upon creation.',
-          timestamp: new Date()
-        });
-        await booking.save();
-        return res.status(201).json({ success: true, data: booking, message: 'Booking created but no workers available. Admin notified.' });
-      }
-
-      // Flatten waves into potentialWorkers array
-      const flatPotentialWorkers = waves.flat();
-      booking.potentialWorkers = flatPotentialWorkers;
-      await booking.save();
-
-      // Dispatch Wave 1
-      await WaveManagerService.dispatchWave(booking._id.toString(), 1);
+      // Dispatch Wave 1 (index 0)
+      await WaveManagerService.dispatchWave(booking._id.toString(), 0);
     }
 
     res.status(201).json({ success: true, data: booking, message: 'Booking created and worker assignment started' });

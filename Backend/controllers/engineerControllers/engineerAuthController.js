@@ -198,6 +198,9 @@ const register = async (req, res) => {
       skillCertificates,
       roleType, role,
       experience, qualification, specialization, city, pincode,
+      tshirtSize, toolsAvailable, otherTools, hasBike, vehicleNumber, 
+      drivingLicenseUrl, rcUrl, selfieUrl, introVideoUrl,
+      registrationDraftId,
       ...customFields // Capture all other dynamic fields here
     } = req.body;
 
@@ -225,6 +228,30 @@ const register = async (req, res) => {
         success: false,
         message: 'This mobile number is already registered as a Worker. Duplicate roles with the same number are not allowed.'
       });
+    }
+
+    // Process Draft
+    const EngineerRegistrationDraft = require('../../models/EngineerRegistrationDraft');
+    const Vendor = require('../../models/Vendor');
+    
+    let draft = null;
+    let vendorId = null;
+    
+    if (registrationDraftId) {
+      draft = await EngineerRegistrationDraft.findById(registrationDraftId);
+      if (!draft) {
+        return res.status(400).json({ success: false, message: 'Invalid registration draft ID' });
+      }
+      if (draft.joiningFeeStatus !== 'paid' && draft.joiningFeeStatus !== 'skipped') {
+        return res.status(400).json({ success: false, message: 'Joining fee payment is not completed' });
+      }
+
+      if (draft.engineerType === 'vendor_engineer' && draft.vendorCode) {
+        const vendor = await Vendor.findOne({ $or: [{ vendorCode: draft.vendorCode }, { email: draft.vendorCode }, { phone: draft.vendorCode }] });
+        if (vendor) {
+           vendorId = vendor._id;
+        }
+      }
     }
 
     // Process Documents to Cloudinary
@@ -264,6 +291,20 @@ const register = async (req, res) => {
       }
     }
 
+    // Process New Media Fields
+    const processMedia = async (urlStr, folder) => {
+      if (urlStr && urlStr.startsWith('data:')) {
+        const uploadRes = await cloudinaryService.uploadFile(urlStr, { folder });
+        if (uploadRes.success) return uploadRes.url;
+      }
+      return urlStr;
+    };
+
+    const selfieUrlProcessed = await processMedia(selfieUrl, 'engineers/selfies');
+    const introVideoUrlProcessed = await processMedia(introVideoUrl, 'engineers/videos');
+    const drivingLicenseUrlProcessed = await processMedia(drivingLicenseUrl, 'engineers/documents');
+    const rcUrlProcessed = await processMedia(rcUrl, 'engineers/documents');
+
     // Extract Aadhaar/PAN
     const aadhaarDoc = processedDocuments.find(d => d.key === 'aadhaar' || d.key === 'aadhar' || d.key === 'Aadhaar Card Front');
     const panDoc = processedDocuments.find(d => d.key === 'pan' || d.key === 'PAN Card Photo');
@@ -284,8 +325,6 @@ const register = async (req, res) => {
         city: city || '',
         pincode: pincode || ''
       },
-      customFields: customFields || {},
-      
       // Documents fallback
       pan: {
         number: customFields?.panNumber || '',
@@ -298,6 +337,21 @@ const register = async (req, res) => {
         status: 'Pending'
       },
       
+      tshirtSize, toolsAvailable, otherTools, hasBike, vehicleNumber,
+      drivingLicenseUrl: drivingLicenseUrlProcessed, rcUrl: rcUrlProcessed, 
+      selfieUrl: selfieUrlProcessed, introVideoUrl: introVideoUrlProcessed,
+      customFields: customFields || {},
+      
+      engineerType: draft ? draft.engineerType : 'freelancer',
+      vendorId: vendorId,
+      joiningFeePaid: draft ? (draft.joiningFeeStatus === 'paid' || draft.joiningFeeStatus === 'skipped') : false,
+      joiningFeeAmount: draft ? draft.joiningFeeAmount : 0,
+      joiningFeeDiscount: draft ? draft.joiningFeeDiscount : 0,
+      joiningFeeFinalAmount: draft ? draft.joiningFeeFinalAmount : 0,
+      couponCode: draft ? draft.couponCode : '',
+      razorpayOrderId: draft ? draft.razorpayOrderId : '',
+      razorpayPaymentId: draft ? draft.razorpayPaymentId : '',
+
       status: ENGINEER_STATUS.OFFLINE,
       approvalStatus: 'pending' // Admin needs to approve
     });

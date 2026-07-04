@@ -85,7 +85,7 @@ const Profile = () => {
   if (!profile) return null;
 
   return (
-    <div className="min-h-screen flex flex-col  font-sans text-[#0F172A] bg-[#F8FCFC]">
+    <div className="flex flex-col font-sans text-[#0F172A] bg-[#F8FCFC]">
       {/* Header */}
       <div className="sticky top-0 z-40 bg-[#F8FCFC] border-b border-gray-100 px-4 py-4 flex items-center justify-between">
         <div className="w-10">
@@ -101,7 +101,7 @@ const Profile = () => {
         </button>
       </div>
 
-      <main className="flex-1 flex flex-col px-4 pt-6 pb-6">
+      <main className="flex flex-col px-4 pt-6 pb-6">
         {/* Profile Card */}
         <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 mb-6 flex items-center gap-5 relative overflow-hidden">
           <div className="w-20 h-20 rounded-full bg-gray-100 border-4 border-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -165,7 +165,7 @@ const Profile = () => {
         </div>
 
         {/* Logout */}
-        <div className="mt-auto pt-6">
+        <div className="pt-6">
           <button
             onClick={handleLogout}
             className="w-full bg-white rounded-2xl p-4 flex items-center justify-between shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-gray-50 active:scale-[0.98] transition-transform"

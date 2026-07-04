@@ -144,6 +144,7 @@ const approveEngineer = async (req, res) => {
     }
 
     engineer.approvalStatus = 'approved';
+    engineer.verificationStatus = 'approved';
     engineer.isActive = true;
     await engineer.save();
 
@@ -192,8 +193,9 @@ const rejectEngineer = async (req, res) => {
     }
 
     engineer.approvalStatus = 'rejected';
+    engineer.verificationStatus = 'rejected';
     engineer.isActive = false;
-    // engineer.rejectedReason = reason; // If we want to store reason
+    engineer.rejectionReason = reason || '';
     await engineer.save();
 
     res.status(200).json({
@@ -497,6 +499,33 @@ const deleteEngineer = async (req, res) => {
   }
 };
 
+const updateMediaStatus = async (req, res, mediaType) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!['pending', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'Invalid status' });
+    }
+    const engineer = await Engineer.findById(id);
+    if (!engineer) {
+      return res.status(404).json({ success: false, message: 'Engineer not found' });
+    }
+    if (mediaType === 'selfie') engineer.selfieStatus = status;
+    if (mediaType === 'video') engineer.introVideoStatus = status;
+    if (mediaType === 'vehicle') engineer.vehicleVerificationStatus = status;
+    
+    await engineer.save();
+    res.status(200).json({ success: true, message: `${mediaType} status updated`, data: engineer });
+  } catch (error) {
+    console.error(`Update ${mediaType} status error:`, error);
+    res.status(500).json({ success: false, message: 'Failed to update status' });
+  }
+};
+
+const updateSelfieStatus = (req, res) => updateMediaStatus(req, res, 'selfie');
+const updateIntroVideoStatus = (req, res) => updateMediaStatus(req, res, 'video');
+const updateVehicleStatus = (req, res) => updateMediaStatus(req, res, 'vehicle');
+
 module.exports = {
   getAllEngineers,
   getEngineerDetails,
@@ -509,5 +538,8 @@ module.exports = {
   getAllEngineerJobs,
   getEngineerPaymentsSummary,
   toggleEngineerStatus,
-  deleteEngineer
+  deleteEngineer,
+  updateSelfieStatus,
+  updateIntroVideoStatus,
+  updateVehicleStatus
 };

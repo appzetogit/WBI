@@ -44,8 +44,13 @@ const engineerSchema = new mongoose.Schema({
   },
   roleType: {
     type: String,
-    enum: ['Engineer', 'Engineer', 'Both'],
+    enum: ['Engineer', 'Both'],
     default: 'Engineer'
+  },
+  engineerType: {
+    type: String,
+    enum: ['freelancer', 'vendor_engineer'],
+    default: 'freelancer'
   },
   registrationType: {
     type: String,
@@ -416,6 +421,101 @@ const engineerSchema = new mongoose.Schema({
   heardAboutWbi: {
     type: String,
     enum: ['Social Media', 'Company / Employer referred', 'Friend / Colleague', 'Google Search', 'Other', ''],
+    default: ''
+  },
+  
+  // New Fields for Upgraded Registration
+  tshirtSize: {
+    type: String,
+    enum: ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', ''],
+    default: ''
+  },
+  toolsAvailable: [{
+    type: String
+  }],
+  otherTools: {
+    type: String,
+    default: ''
+  },
+  hasBike: {
+    type: Boolean,
+    default: false
+  },
+  vehicleNumber: {
+    type: String,
+    default: ''
+  },
+  drivingLicenseUrl: {
+    type: String,
+    default: null
+  },
+  rcUrl: {
+    type: String,
+    default: null
+  },
+  vehicleVerificationStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  selfieUrl: {
+    type: String,
+    default: null
+  },
+  selfieStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  introVideoUrl: {
+    type: String,
+    default: null
+  },
+  introVideoStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  mediaVerificationStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  joiningFeePaid: {
+    type: Boolean,
+    default: false
+  },
+  joiningFeeAmount: {
+    type: Number,
+    default: 0
+  },
+  joiningFeeDiscount: {
+    type: Number,
+    default: 0
+  },
+  joiningFeeFinalAmount: {
+    type: Number,
+    default: 0
+  },
+  couponCode: {
+    type: String,
+    default: ''
+  },
+  razorpayOrderId: {
+    type: String,
+    default: ''
+  },
+  razorpayPaymentId: {
+    type: String,
+    default: ''
+  },
+  verificationStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  rejectionReason: {
+    type: String,
     default: ''
   }
 }, {

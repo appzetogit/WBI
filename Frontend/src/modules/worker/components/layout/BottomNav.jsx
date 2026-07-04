@@ -8,6 +8,7 @@ import { FiBell } from 'react-icons/fi';
 import { gsap } from 'gsap';
 import { workerTheme as themeColors } from '../../../../theme';
 import api from '../../../../services/api';
+import workerService from '../../../../services/workerService';
 
 const BottomNav = memo(() => {
   const { scrollY } = useScroll();
@@ -64,8 +65,8 @@ const BottomNav = memo(() => {
     // Background Prefetching for Sub-1-second loading
     const prefetchTabs = async () => {
       try {
-        const workerService = (await import('../../../../services/workerService')).default;
         
+
         // Prefetch Dashboard
         queryClient.prefetchQuery({
           queryKey: ['workerDashboardStats'],

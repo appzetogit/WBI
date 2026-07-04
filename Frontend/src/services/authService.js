@@ -395,7 +395,22 @@ export const engineerAuthService = {
   },
 
   getRegistrationConfig: async () => {
-    const response = await api.get('/forms/register-config?role=engineer');
+    const response = await api.get('/engineers/auth/config/registration');
+    return response.data;
+  },
+
+  validateCoupon: async (code) => {
+    const response = await api.post('/engineer/coupon/validate', { code });
+    return response.data;
+  },
+
+  createJoiningFeeOrder: async (data) => {
+    const response = await api.post('/engineer/joining-fee/create-order', data);
+    return response.data;
+  },
+
+  verifyJoiningFeePayment: async (data) => {
+    const response = await api.post('/engineer/joining-fee/verify-payment', data);
     return response.data;
   },
 

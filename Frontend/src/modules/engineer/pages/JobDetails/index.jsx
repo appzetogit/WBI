@@ -5,7 +5,7 @@ import { FaWhatsapp } from 'react-icons/fa';
 import { workerTheme as themeColors } from '../../../../theme';
 import { SkeletonCard } from '../../../../components/common/SkeletonLoaders';
 
-const VisitVerificationModal = lazy(() => import('../../components/common/VisitVerificationModal'));
+import VisitVerificationModal from '../../components/common/VisitVerificationModal';
 import engineerService from '../../../../services/engineerService';
 import { toast } from 'react-hot-toast';
 import { useAppNotifications } from '../../../../hooks/useAppNotifications';
@@ -527,7 +527,6 @@ const JobDetails = () => {
         </div>
       </div>
 
-      <Suspense fallback={null}>
         <VisitVerificationModal
           isOpen={isVisitModalOpen}
           onClose={() => setIsVisitModalOpen(false)}
@@ -537,7 +536,6 @@ const JobDetails = () => {
             fetchJobDetails();
           }}
         />
-      </Suspense>
 
     </div>
   );

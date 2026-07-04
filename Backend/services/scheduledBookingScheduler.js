@@ -122,7 +122,7 @@ class ScheduledBookingScheduler {
             console.log(`[ScheduledBookingScheduler] Booking ${booking.bookingNumber}: Worker matching started. Dispatched Wave 1.`);
 
             // Dispatch Wave 1
-            await WaveManagerService.dispatchWave(booking._id.toString(), 1);
+            await WaveManagerService.dispatchWave(booking._id.toString(), 0);
 
             // Notify User & Admin
             if (io) {

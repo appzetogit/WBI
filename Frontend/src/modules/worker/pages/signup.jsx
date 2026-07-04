@@ -191,77 +191,54 @@ export default function WorkerSignup() {
     }
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><LogoLoader fullScreen={false} /></div>;
+  const renderContent = () => {
+    if (isLoading) return <div className="flex-1 flex items-center justify-center"><LogoLoader fullScreen={false} /></div>;
 
-  if (!config) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4 text-center">
-        <FiLock className="w-12 h-12 text-gray-300 mb-4" />
-        <h2 className="text-xl font-bold text-gray-800 mb-2">Service Temporarily Unavailable</h2>
-        <p className="text-gray-500 max-w-md mb-6">We are currently experiencing technical difficulties connecting to the server. Please check your connection or try again in a few moments.</p>
-        <button onClick={() => window.location.reload()} className="px-6 py-2.5 bg-black text-white rounded-xl font-semibold shadow-sm hover:bg-gray-800 transition-colors">
-          Retry
-        </button>
-      </div>
-    );
-  }
+    if (!config) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center p-4 text-center">
+          <FiLock className="w-12 h-12 text-gray-300 mb-4" />
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Service Temporarily Unavailable</h2>
+          <p className="text-gray-500 max-w-md mb-6">We are currently experiencing technical difficulties connecting to the server. Please check your connection or try again in a few moments.</p>
+          <button onClick={() => window.location.reload()} className="px-6 py-2.5 bg-black text-white rounded-xl font-semibold shadow-sm hover:bg-gray-800 transition-colors">
+            Retry
+          </button>
+        </div>
+      );
+    }
 
-  const currentStepData = config?.steps?.find(s => s.step === currentStep);
-  const totalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2); // At least 2 steps (fields + categories)
+    const currentStepData = config?.steps?.find(s => s.step === currentStep);
+    const totalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2); // At least 2 steps (fields + categories)
 
     const getFieldIcon = (key, type) => {
-    const iconClass = "w-4 h-4";
-    switch (key.toLowerCase()) {
-      case 'name': return <FiUser className={`${iconClass} text-black`} />;
-      case 'phone': return <FiPhone className={`${iconClass} text-black`} />;
-      case 'email': return <FiMail className={`${iconClass} text-black`} />;
-      case 'password': return <FiLock className={`${iconClass} text-black`} />;
-      case 'city': 
-      case 'pincode': return <FiMapPin className={`${iconClass} text-black`} />;
-      default:
-        if (type === 'tel') return <FiPhone className={`${iconClass} text-black`} />;
-        if (type === 'email') return <FiMail className={`${iconClass} text-black`} />;
-        if (type === 'password') return <FiLock className={`${iconClass} text-black`} />;
-        return <FiCheckCircle className={`${iconClass} text-gray-600`} />;
-    }
-  };
+      const iconClass = "w-4 h-4";
+      switch (key.toLowerCase()) {
+        case 'name': return <FiUser className={`${iconClass} text-black`} />;
+        case 'phone': return <FiPhone className={`${iconClass} text-black`} />;
+        case 'email': return <FiMail className={`${iconClass} text-black`} />;
+        case 'password': return <FiLock className={`${iconClass} text-black`} />;
+        case 'city': 
+        case 'pincode': return <FiMapPin className={`${iconClass} text-black`} />;
+        default:
+          if (type === 'tel') return <FiPhone className={`${iconClass} text-black`} />;
+          if (type === 'email') return <FiMail className={`${iconClass} text-black`} />;
+          if (type === 'password') return <FiLock className={`${iconClass} text-black`} />;
+          return <FiCheckCircle className={`${iconClass} text-gray-600`} />;
+      }
+    };
 
-  return (
-    <div className="min-h-screen bg-[#F8FCFC] font-sans text-[#0F172A]">
-      <nav className="bg-white px-6 py-4 border-b flex items-center justify-between shadow-sm sticky top-0 z-50">
-        <div className="flex items-center gap-4">
-          <Link to="/worker/login" className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
-            <FiArrowLeft className="w-5 h-5 text-gray-600" />
-          </Link>
-          <Logo />
-        </div>
-        <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button 
-            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-white text-black shadow-sm"
-          >
-            Worker
-          </button>
-          <button 
-            onClick={() => navigate('/engineer/signup')}
-            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all text-gray-500 hover:text-gray-700"
-          >
-            Engineer
-          </button>
-        </div>
-        <Link to="/worker/login" className="text-sm font-bold text-black hover:text-gray-800">Sign In</Link>
-      </nav>
-
-      <main className="px-5 pt-8 pb-12 max-w-2xl mx-auto space-y-6">
-          <div className="bg-white p-6 sm:p-8 rounded-[2rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-gray-50">
+    return (
+      <main className="max-w-3xl mx-auto w-full p-4 sm:p-6 lg:p-8 flex-1">
+        <div className="bg-white rounded-2xl shadow-sm border p-6">
             
             {/* Stepper Header */}
-            <div className="flex items-center justify-between mb-10 max-w-sm mx-auto">
+            <div className="flex items-center justify-between mb-8 overflow-x-auto pb-4 scrollbar-hide">
               {Array.from({length: totalSteps}, (_, i) => i + 1).map((step) => (
                 <React.Fragment key={step}>
-                  <div className={`w-10 h-10 flex items-center justify-center rounded-2xl font-bold text-sm shrink-0 shadow-sm transition-all duration-300 ${currentStep >= step ? 'bg-black text-white shadow-[0_4px_15px_rgba(0,0,0,0.3)]' : 'bg-gray-50 text-gray-400 border border-gray-100'}`}>
+                  <div className={`w-9 h-9 flex items-center justify-center rounded-full font-bold text-sm shrink-0 shadow-sm transition-all ${currentStep >= step ? 'bg-black text-white ring-4 ring-black/20' : 'bg-gray-100 text-gray-400'}`}>
                     {step}
                   </div>
-                  {step < totalSteps && <div className={`flex-1 h-1.5 mx-3 rounded-full transition-all duration-300 ${currentStep > step ? 'bg-black' : 'bg-gray-100'}`} />}
+                  {step < totalSteps && <div className={`flex-1 h-1.5 mx-2 rounded-full transition-all min-w-[20px] ${currentStep > step ? 'bg-black' : 'bg-gray-100'}`} />}
                 </React.Fragment>
               ))}
             </div>
@@ -400,6 +377,38 @@ export default function WorkerSignup() {
 
           </div>
       </main>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 font-sans flex flex-col">
+      <nav className="bg-white px-6 py-4 border-b flex items-center justify-between shadow-sm sticky top-0 z-50">
+        <div className="flex items-center gap-4">
+          <Link to="/worker/login" className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
+            <FiArrowLeft className="w-5 h-5 text-gray-600" />
+          </Link>
+          <Logo />
+        </div>
+        <div className="flex bg-gray-100 p-1 rounded-xl">
+          <button 
+            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-white text-black shadow-sm"
+          >
+            Worker
+          </button>
+          <button 
+            onClick={() => {
+              localStorage.removeItem('engineerAccessToken');
+              localStorage.removeItem('engineerRefreshToken');
+              localStorage.removeItem('engineerData');
+              navigate('/engineer/signup');
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all text-gray-500 hover:text-gray-700"
+          >
+            Engineer
+          </button>
+        </div>
+      </nav>
+      {renderContent()}
     </div>
   );
 }

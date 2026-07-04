@@ -51,7 +51,16 @@ exports.acceptBooking = async (req, res) => {
 
     console.log(`[WORKER_ACCEPTED_FIRST] Worker ${workerId} accepted first for booking ${bookingId}`);
 
-    // Update winning worker's assignment attempt
+    // Update winning worker's assignment log (if exists)
+    const BookingDispatchLog = require('../../models/BookingDispatchLog');
+    const log = await BookingDispatchLog.findOne({ bookingId, workerId, status: 'NOTIFIED' });
+    if (log) {
+      log.status = 'ACCEPTED';
+      log.acceptTime = new Date();
+      await log.save();
+    }
+
+    // (Optional backwards compatibility) Update WorkerAssignmentAttempt if used elsewhere
     const attempt = await WorkerAssignmentAttempt.findOne({ bookingId, workerId, status: 'sent' });
     if (attempt) {
       attempt.status = 'accepted';
@@ -120,15 +129,26 @@ exports.rejectBooking = async (req, res) => {
     const { bookingId } = req.params;
     const workerId = req.userId;
 
+    // Update BookingDispatchLog
+    const BookingDispatchLog = require('../../models/BookingDispatchLog');
+    const log = await BookingDispatchLog.findOne({ bookingId, workerId, status: 'NOTIFIED' });
+    if (log) {
+      log.status = 'REJECTED';
+      log.rejectTime = new Date();
+      await log.save();
+    }
+
     const attempt = await WorkerAssignmentAttempt.findOne({ bookingId, workerId, status: 'sent' });
-    if (!attempt) {
+    if (!attempt && !log) {
       return res.status(400).json({ success: false, message: 'Invalid or expired request' });
     }
 
-    attempt.status = 'rejected';
-    attempt.respondedAt = new Date();
-    attempt.responseTimeSec = (attempt.respondedAt - attempt.sentAt) / 1000;
-    await attempt.save();
+    if (attempt) {
+      attempt.status = 'rejected';
+      attempt.respondedAt = new Date();
+      attempt.responseTimeSec = (attempt.respondedAt - attempt.sentAt) / 1000;
+      await attempt.save();
+    }
     
     console.log(`[WORKER_REJECTED] Booking: ${bookingId}, Worker: ${workerId}`);
 
