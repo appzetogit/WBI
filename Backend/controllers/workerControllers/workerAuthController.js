@@ -252,12 +252,14 @@ const register = async (req, res) => {
     const panDoc = processedDocuments.find(d => d.key === 'pan');
 
     // Create worker
+    const formattedSubServices = Array.isArray(subServices) ? subServices.map(s => typeof s === 'string' ? { subServiceId: s } : s) : [];
+
     const worker = await Worker.create({
       name, email: email && email.trim() !== '' ? email : undefined, phone, password,
       serviceCategories: serviceCategories || [],
       serviceCategoryRefs: serviceCategoryRefs || [],
       approvedOneTimeServices: approvedOneTimeServices || [],
-      subServices: subServices || [],
+      subServices: formattedSubServices,
       skills: skills || [],
       secondarySkills: secondarySkills || [],
       uploadedDocuments: processedDocuments,
@@ -294,10 +296,11 @@ const register = async (req, res) => {
       ...tokens
     });
   } catch (error) {
-    console.error('Worker registration error:', error);
+    console.error('Registration Error:', error);
     res.status(500).json({
       success: false,
-      message: error.message || 'Registration failed. Please try again.'
+      message: error.message || 'Registration failed',
+      errors: error.errors ? Object.keys(error.errors).reduce((acc, key) => { acc[key] = error.errors[key].message; return acc; }, {}) : undefined
     });
   }
 };

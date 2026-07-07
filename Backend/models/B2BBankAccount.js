@@ -53,6 +53,4 @@ const b2bBankAccountSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bBankAccountSchema.index({ companyId: 1 });
-
 module.exports = mongoose.model('B2BBankAccount', b2bBankAccountSchema);

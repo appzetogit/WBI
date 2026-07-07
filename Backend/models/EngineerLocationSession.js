@@ -51,7 +51,6 @@ const engineerLocationSessionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-engineerLocationSessionSchema.index({ engineerId: 1 });
 engineerLocationSessionSchema.index({ 'currentLocation.coordinates': '2dsphere' });
 
 module.exports = mongoose.model('EngineerLocationSession', engineerLocationSessionSchema);
