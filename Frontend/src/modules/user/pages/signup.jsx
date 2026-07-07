@@ -117,7 +117,7 @@ const Signup = () => {
     }
 
     try {
-      const response = await userAuthService.sendOTP(formData.phoneNumber, formData.email || null);
+      const response = await userAuthService.sendOTP(formData.phoneNumber, formData.email || null, 'register');
       if (response.success) {
         setOtpToken(response.token);
         setIsLoading(false);
@@ -404,7 +404,7 @@ const Signup = () => {
                     if (isLoading || resendTimer > 0) return;
                     try {
                       setIsLoading(true);
-                      const response = await userAuthService.sendOTP(formData.phoneNumber, formData.email || null);
+                      const response = await userAuthService.sendOTP(formData.phoneNumber, formData.email || null, 'register');
                       if (response.success) {
                         setOtpToken(response.token);
                         setResendTimer(120);

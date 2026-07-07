@@ -119,8 +119,8 @@ export const sharedAuthService = {
  */
 export const userAuthService = {
   // Send OTP
-  sendOTP: async (phone, email = null) => {
-    const response = await api.post('/users/auth/send-otp', { phone, email });
+  sendOTP: async (phone, email = null, type = 'login') => {
+    const response = await api.post('/users/auth/send-otp', { phone, email, type });
     return response.data;
   },
 

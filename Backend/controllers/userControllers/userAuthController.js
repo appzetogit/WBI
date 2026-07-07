@@ -21,8 +21,18 @@ const sendOTP = async (req, res) => {
       });
     }
 
-    const { phone, email } = req.body;
+    const { phone, email, type } = req.body;
 
+    // Check existing user for login
+    if (type === 'login' || !type) {
+        const existingUser = await findUserAcrossCollections(phone, 'user');
+        if (!existingUser || existingUser.role !== 'user') {
+            return res.status(404).json({
+                success: false,
+                message: 'User is not registered. Please create an account first.'
+            });
+        }
+    }
     // 1. Rate limit check
     const allowed = await checkRateLimit(phone);
     if (!allowed) {
