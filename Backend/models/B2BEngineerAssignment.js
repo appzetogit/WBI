@@ -33,8 +33,8 @@ const b2bEngineerAssignmentSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bEngineerAssignmentSchema.index({ companyId: 1 });
-b2bEngineerAssignmentSchema.index({ engineerId: 1 });
+
+
 b2bEngineerAssignmentSchema.index({ jobId: 1 });
 b2bEngineerAssignmentSchema.index({ companyId: 1, engineerId: 1 });
 

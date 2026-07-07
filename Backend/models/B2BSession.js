@@ -26,6 +26,5 @@ const b2bSessionSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bSessionSchema.index({ companyId: 1 });
 
 module.exports = mongoose.model('B2BSession', b2bSessionSchema);

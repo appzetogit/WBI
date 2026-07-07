@@ -45,8 +45,8 @@ const engineerAssignmentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-engineerAssignmentSchema.index({ companyId: 1 });
-engineerAssignmentSchema.index({ engineerId: 1 });
+
+
 engineerAssignmentSchema.index({ jobId: 1 });
 
 module.exports = mongoose.model('EngineerAssignment', engineerAssignmentSchema);

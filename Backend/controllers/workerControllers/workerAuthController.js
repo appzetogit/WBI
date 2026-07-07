@@ -254,6 +254,10 @@ const register = async (req, res) => {
     // Create worker
     const formattedSubServices = Array.isArray(subServices) ? subServices.map(s => typeof s === 'string' ? { subServiceId: s } : s) : [];
 
+    if (customFields.customSkills && Array.isArray(customFields.customSkills)) {
+      customFields.customSkills = customFields.customSkills.map(s => typeof s === 'string' ? { name: s } : s);
+    }
+
     const worker = await Worker.create({
       name, email: email && email.trim() !== '' ? email : undefined, phone, password,
       serviceCategories: serviceCategories || [],

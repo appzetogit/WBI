@@ -143,7 +143,7 @@ const b2bJobSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bJobSchema.index({ companyId: 1 });
+
 b2bJobSchema.index({ companyId: 1, date: 1 });
 
 b2bJobSchema.index({ 'coordinates.coordinates': '2d' }); // 2d index for standard coordinates querying if 2dsphere is too strict

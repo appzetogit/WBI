@@ -31,6 +31,5 @@ const b2bPaymentMethodSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bPaymentMethodSchema.index({ companyId: 1 });
 
 module.exports = mongoose.model('B2BPaymentMethod', b2bPaymentMethodSchema);

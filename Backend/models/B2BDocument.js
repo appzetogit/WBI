@@ -26,7 +26,7 @@ const b2bDocumentSchema = new mongoose.Schema({
 });
 
 // Indexes for query speed
-b2bDocumentSchema.index({ companyId: 1 });
+
 b2bDocumentSchema.index({ companyId: 1, documentType: 1 });
 
 module.exports = mongoose.model('B2BDocument', b2bDocumentSchema);

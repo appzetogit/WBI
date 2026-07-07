@@ -28,6 +28,5 @@ const jobStatusLogSchema = new mongoose.Schema({
 });
 
 jobStatusLogSchema.index({ jobId: 1 });
-jobStatusLogSchema.index({ engineerId: 1 });
 
 module.exports = mongoose.model('JobStatusLog', jobStatusLogSchema);

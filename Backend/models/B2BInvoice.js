@@ -149,7 +149,7 @@ b2bInvoiceSchema.pre('save', function(next) {
 });
 
 // Create Mongoose indexes for rapid query performance
-b2bInvoiceSchema.index({ companyId: 1 });
+
 b2bInvoiceSchema.index({ status: 1 });
 b2bInvoiceSchema.index({ invoiceDate: 1 });
 b2bInvoiceSchema.index({ billingPeriodStart: 1 });

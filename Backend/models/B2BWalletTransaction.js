@@ -71,7 +71,7 @@ const b2bWalletTransactionSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bWalletTransactionSchema.index({ companyId: 1 });
+
 b2bWalletTransactionSchema.index({ companyId: 1, date: 1 });
 b2bWalletTransactionSchema.index({ razorpayOrderId: 1 });
 

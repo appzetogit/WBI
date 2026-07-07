@@ -49,6 +49,5 @@ const b2bBranchSchema = new mongoose.Schema({
   timestamps: true 
 });
 
-b2bBranchSchema.index({ companyId: 1 });
 
 module.exports = mongoose.model('B2BBranch', b2bBranchSchema);
