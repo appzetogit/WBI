@@ -34,6 +34,7 @@ const lazyLoad = (importFunc) => {
 
 // Lazy loaded B2B Pages
 const LoginRegister = lazyLoad(() => import('../pages/LoginRegister'));
+const ForgotPassword = lazyLoad(() => import('../pages/ForgotPassword'));
 const Dashboard = lazyLoad(() => import('../pages/Dashboard'));
 const BulkJobs = lazyLoad(() => import('../pages/BulkJobs'));
 const BulkJobsHistory = lazyLoad(() => import('../pages/BulkJobs/BulkJobsHistory'));
@@ -67,6 +68,7 @@ const B2BRoutes = () => {
             {/* Public routes */}
             <Route path="/login" element={<AnimatedPage><PublicRoute userType="b2b"><LoginRegister defaultTab="login" /></PublicRoute></AnimatedPage>} />
             <Route path="/register" element={<AnimatedPage><PublicRoute userType="b2b"><LoginRegister defaultTab="register" /></PublicRoute></AnimatedPage>} />
+            <Route path="/forgot-password" element={<AnimatedPage><PublicRoute userType="b2b"><ForgotPassword /></PublicRoute></AnimatedPage>} />
             <Route path="/accept-invite" element={<AnimatedPage><PublicRoute userType="b2b"><AcceptInvite /></PublicRoute></AnimatedPage>} />
 
             {/* Base Redirect */}

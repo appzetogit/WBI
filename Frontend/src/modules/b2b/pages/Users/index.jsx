@@ -518,7 +518,9 @@ const Users = () => {
                         </div>
                         <div>
                           <h4 className="text-xs font-black text-gray-800">{user.fullName}</h4>
-                          <span className="text-[9px] text-gray-400 font-bold block mt-0.5">ID: {user._id.substring(user._id.length - 8).toUpperCase()}</span>
+                          <span className="text-[9px] text-gray-400 font-bold block mt-0.5">
+                            ID: {user._id ? String(user._id).slice(-8).toUpperCase() : (user.id ? String(user.id).slice(-8).toUpperCase() : 'N/A')}
+                          </span>
                         </div>
                       </div>
                     </td>

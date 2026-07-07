@@ -8,12 +8,14 @@ const {
   getProfile,
   updateProfile,
   reuploadDocuments,
-  getVerificationStatus
+  getVerificationStatus,
+  refreshToken
 } = require('../../controllers/b2bControllers/b2bAuthController');
 
 // Public auth routes
 router.post('/register', registerCompany);
 router.post('/login', loginCompany);
+router.post('/refresh-token', refreshToken);
 
 // Document upload route - Public since it's used during the register form wizard before submission!
 router.post('/documents/upload', uploadGenericFile, handleMulterError, async (req, res) => {

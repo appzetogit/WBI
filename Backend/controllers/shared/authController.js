@@ -13,6 +13,7 @@ const Worker = require('../../models/Worker');
 const Engineer = require('../../models/Engineer');
 const Vendor = require('../../models/Vendor');
 const Admin = require('../../models/Admin');
+const B2BUser = require('../../models/B2BUser');
 const Token = require('../../models/Token'); // Assuming tokens might be stored here for refresh invalidation
 
 const ROLE_MODELS = {
@@ -20,10 +21,13 @@ const ROLE_MODELS = {
   worker: { model: Worker, name: 'Worker' },
   engineer: { model: Engineer, name: 'Engineer' },
   vendor: { model: Vendor, name: 'Vendor' },
-  admin: { model: Admin, name: 'Admin' }
+  admin: { model: Admin, name: 'Admin' },
+  b2b: { model: B2BUser, name: 'B2BUser' }
 };
 
 const { generateTokenPair } = require('../../utils/tokenService');
+const { sendOtpEmail } = require('../../utils/emailService');
+const { sendOTP: sendOtpSms } = require('../../services/smsService');
 
 // Helper to log auth activities
 const logAuthActivity = async (data) => {
@@ -36,80 +40,96 @@ const logAuthActivity = async (data) => {
 
 // Helper to generate a 6-digit OTP
 const generateOTP = () => {
+  if (process.env.USE_DEFAULT_OTP === 'true') {
+    return '123456';
+  }
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// --- Mock Delivery Service ---
+// --- OTP Delivery Service ---
 const sendOTP = async (identifier, otp, role) => {
-  if (process.env.NODE_ENV !== 'production') {
-    console.log(`[DEVELOPMENT ONLY] Mock Delivery: Sending OTP ${otp} to ${identifier} (Role: ${role})`);
+  const isEmail = identifier.includes('@');
+  
+  // Bypass actual sending if using default OTP for testing
+  if (process.env.USE_DEFAULT_OTP === 'true') {
+    console.log(`[DEV MODE] Default OTP ${otp} generated for ${identifier} (Role: ${role})`);
+    return true;
   }
-  // TODO: Plug in Nodemailer/Twilio/MSG91 later based on if identifier is email or mobile
-  return true;
+  
+  if (isEmail) {
+    // Send email via AWS SES / Nodemailer service
+    await sendOtpEmail(identifier, otp, role);
+    return true;
+  } else {
+    // Send mobile OTP via SMS India Hub service
+    await sendOtpSms(identifier, otp);
+    return true;
+  }
 };
 
 exports.forgotPassword = async (req, res) => {
   try {
-    const { role, identifier } = req.body; // identifier can be email or mobile
+    let { role, identifier } = req.body; // identifier can be email or mobile
 
     if (!role || !identifier) {
       return res.status(400).json({ success: false, message: 'Role and identifier are required' });
     }
+    
+    // Sanitize identifier by trimming spaces
+    identifier = identifier.toString().trim();
 
     const roleConfig = ROLE_MODELS[role.toLowerCase()];
     if (!roleConfig) {
       return res.status(400).json({ success: false, message: 'Invalid role' });
     }
 
-    // Rate Limiting Check
+    // Rate Limiting Check (Relaxed to 10 attempts for testing/usability, ideally 3-5 in strict production to save SMS cost)
     const recentRequests = await AuthActivityLog.countDocuments({
       identifier,
       action: 'FORGOT_PASSWORD_REQUEST',
       createdAt: { $gt: new Date(Date.now() - 15 * 60 * 1000) } // 15 mins
     });
 
-    if (recentRequests >= 3) {
+    if (recentRequests >= 10) {
       await logAuthActivity({ role, roleModel: roleConfig.name, action: 'ACCOUNT_LOCKED', identifier, status: 'FAILURE', details: 'Rate limit exceeded', ipAddress: req.ip });
       return res.status(429).json({ success: false, message: 'Too many requests. Please try again later.' });
     }
 
     // Determine query: email or mobile
     const isEmail = identifier.includes('@');
-    const query = isEmail ? { email: identifier } : { mobile: identifier };
+    const query = isEmail ? { email: identifier } : { $or: [{ mobile: identifier }, { phone: identifier }] };
 
-    // Don't leak user existence logic starts here. We always succeed, even if user isn't found.
     const user = await roleConfig.model.findOne(query);
 
-    if (user) {
-      // Generate OTP and hash it
-      const otp = generateOTP();
-      const salt = await bcrypt.genSalt(10);
-      const hashedOtp = await bcrypt.hash(otp, salt);
-
-      // Save token, expires in 5 minutes
-      await PasswordResetToken.findOneAndDelete({ userId: user._id, role }); // Remove any existing token
-
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
-      await PasswordResetToken.create({
-        userId: user._id,
-        role,
-        roleModel: roleConfig.name,
-        hashedOtp,
-        expiresAt
-      });
-
-      // Send OTP
-      await sendOTP(identifier, otp, role);
-      await logAuthActivity({ userId: user._id, role, roleModel: roleConfig.name, action: 'FORGOT_PASSWORD_REQUEST', identifier, status: 'SUCCESS', ipAddress: req.ip });
-    } else {
-      // User not found, log failure but don't tell the client
+    if (!user) {
       await logAuthActivity({ role, action: 'FORGOT_PASSWORD_REQUEST', identifier, status: 'FAILURE', details: 'User not found', ipAddress: req.ip });
+      return res.status(404).json({ success: false, message: 'Account not found with this registered email or mobile number.' });
     }
 
-    // Generic success response
+    // Generate OTP and hash it
+    const otp = generateOTP();
+    const salt = await bcrypt.genSalt(10);
+    const hashedOtp = await bcrypt.hash(otp, salt);
+
+    // Save token, expires in 5 minutes
+    await PasswordResetToken.findOneAndDelete({ userId: user._id, role }); // Remove any existing token
+
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
+    await PasswordResetToken.create({
+      userId: user._id,
+      role,
+      roleModel: roleConfig.name,
+      hashedOtp,
+      expiresAt
+    });
+
+    // Send OTP
+    await sendOTP(identifier, otp, role);
+    await logAuthActivity({ userId: user._id, role, roleModel: roleConfig.name, action: 'FORGOT_PASSWORD_REQUEST', identifier, status: 'SUCCESS', ipAddress: req.ip });
+
     res.status(200).json({
       success: true,
-      message: 'If an account with that identifier exists, an OTP has been sent.'
+      message: 'OTP has been sent to your registered email/mobile.'
     });
 
   } catch (error) {
@@ -120,11 +140,13 @@ exports.forgotPassword = async (req, res) => {
 
 exports.verifyResetOtp = async (req, res) => {
   try {
-    const { role, identifier, otp } = req.body;
+    let { role, identifier, otp } = req.body;
 
     if (!role || !identifier || !otp) {
       return res.status(400).json({ success: false, message: 'Role, identifier, and OTP are required' });
     }
+    
+    identifier = identifier.toString().trim();
 
     const roleConfig = ROLE_MODELS[role.toLowerCase()];
     if (!roleConfig) {
@@ -132,7 +154,7 @@ exports.verifyResetOtp = async (req, res) => {
     }
 
     const isEmail = identifier.includes('@');
-    const query = isEmail ? { email: identifier } : { mobile: identifier };
+    const query = isEmail ? { email: identifier } : { $or: [{ mobile: identifier }, { phone: identifier }] };
     const user = await roleConfig.model.findOne(query);
 
     if (!user) {
@@ -191,11 +213,13 @@ exports.verifyResetOtp = async (req, res) => {
 
 exports.resendResetOtp = async (req, res) => {
   try {
-    const { role, identifier } = req.body;
+    let { role, identifier } = req.body;
 
     if (!role || !identifier) {
       return res.status(400).json({ success: false, message: 'Role and identifier are required' });
     }
+    
+    identifier = identifier.toString().trim();
 
     const roleConfig = ROLE_MODELS[role.toLowerCase()];
     if (!roleConfig) {
@@ -203,7 +227,7 @@ exports.resendResetOtp = async (req, res) => {
     }
 
     const isEmail = identifier.includes('@');
-    const query = isEmail ? { email: identifier } : { mobile: identifier };
+    const query = isEmail ? { email: identifier } : { $or: [{ mobile: identifier }, { phone: identifier }] };
     const user = await roleConfig.model.findOne(query);
 
     if (!user) {
@@ -255,11 +279,13 @@ exports.resendResetOtp = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
   try {
-    const { role, identifier, resetToken, newPassword, confirmPassword } = req.body;
+    let { role, identifier, resetToken, newPassword, confirmPassword } = req.body;
 
     if (!role || !identifier || !resetToken || !newPassword || !confirmPassword) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
     }
+    
+    identifier = identifier.toString().trim();
 
     if (newPassword !== confirmPassword) {
       return res.status(400).json({ success: false, message: 'Passwords do not match' });
@@ -275,7 +301,7 @@ exports.resetPassword = async (req, res) => {
     }
 
     const isEmail = identifier.includes('@');
-    const query = isEmail ? { email: identifier } : { mobile: identifier };
+    const query = isEmail ? { email: identifier } : { $or: [{ mobile: identifier }, { phone: identifier }] };
     const user = await roleConfig.model.findOne(query);
 
     if (!user) {
@@ -300,10 +326,13 @@ exports.resetPassword = async (req, res) => {
     }
 
     // Hash the new password and update user
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    if (role.toLowerCase() === 'b2b') {
+      const salt = await bcrypt.genSalt(10);
+      user.passwordHash = await bcrypt.hash(newPassword, salt);
+    } else {
+      user.password = newPassword; // Pre-save hook will hash it for other roles
+    }
     
-    user.password = hashedPassword;
     await user.save();
 
     // Clean up reset token

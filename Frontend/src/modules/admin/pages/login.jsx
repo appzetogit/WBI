@@ -183,14 +183,13 @@ const AdminLogin = () => {
                       Remember me
                     </label>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsForgotPassword(true)}
+                  <Link
+                    to="/admin/forgot-password"
                     className="text-sm font-semibold transition-colors"
                     style={{ color: themeColors.button }}
                   >
                     Forgot Password?
-                  </button>
+                  </Link>
                 </div>
 
                 {/* Login Button */}

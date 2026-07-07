@@ -33,14 +33,14 @@ const logAction = async (req, actionType, targetId, targetType, changes = {}) =>
  */
 exports.getProfile = async (req, res) => {
   try {
-    const company = await B2BCompany.findById(req.user.id).select('-passwordHash');
+    const company = await B2BCompany.findById(req.companyId).select('-passwordHash');
     if (!company) {
       return res.status(404).json({ success: false, message: 'B2B company not found' });
     }
 
-    const branches = await B2BBranch.find({ companyId: req.user.id });
-    const documents = await B2BDocument.find({ companyId: req.user.id });
-    const bankAccount = await B2BBankAccount.findOne({ companyId: req.user.id });
+    const branches = await B2BBranch.find({ companyId: req.companyId });
+    const documents = await B2BDocument.find({ companyId: req.companyId });
+    const bankAccount = await B2BBankAccount.findOne({ companyId: req.companyId });
 
     // Decrypt bank account details for displaying safely
     let decryptedBankAccount = null;
@@ -111,7 +111,7 @@ exports.updateProfile = async (req, res) => {
       companyPhone
     } = req.body;
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({ success: false, message: 'Company not found' });
     }
@@ -158,7 +158,7 @@ exports.updateContactPerson = async (req, res) => {
   try {
     const { name, designation, email, phone, altPhone } = req.body;
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({ success: false, message: 'Company not found' });
     }
@@ -198,7 +198,7 @@ exports.updateAddress = async (req, res) => {
   try {
     const { registeredAddress, billingAddress } = req.body;
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({ success: false, message: 'Company not found' });
     }
@@ -242,7 +242,7 @@ exports.updateLogo = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No logo file provided' });
     }
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({ success: false, message: 'Company not found' });
     }
@@ -272,7 +272,7 @@ exports.updateLogo = async (req, res) => {
  */
 exports.getBranches = async (req, res) => {
   try {
-    const branches = await B2BBranch.find({ companyId: req.user.id });
+    const branches = await B2BBranch.find({ companyId: req.companyId });
     return res.status(200).json({ success: true, branches });
   } catch (error) {
     console.error('getBranches error:', error);
@@ -292,7 +292,7 @@ exports.createBranch = async (req, res) => {
     }
 
     const newBranch = await B2BBranch.create({
-      companyId: req.user.id,
+      companyId: req.companyId,
       branchName,
       address,
       city,
@@ -303,7 +303,7 @@ exports.createBranch = async (req, res) => {
     });
 
     // Also update company branches embedded array for backup compatibility
-    await B2BCompany.findByIdAndUpdate(req.user.id, {
+    await B2BCompany.findByIdAndUpdate(req.companyId, {
       $push: {
         branches: {
           branchName,
@@ -337,7 +337,7 @@ exports.updateBranch = async (req, res) => {
     const { branchId } = req.params;
     const { branchName, address, city, state, pincode, contactPerson, contactPhone } = req.body;
 
-    const branch = await B2BBranch.findOne({ _id: branchId, companyId: req.user.id });
+    const branch = await B2BBranch.findOne({ _id: branchId, companyId: req.companyId });
     if (!branch) {
       return res.status(404).json({ success: false, message: 'Branch not found or ownership mismatch' });
     }
@@ -355,7 +355,7 @@ exports.updateBranch = async (req, res) => {
     await branch.save();
 
     // Sync B2BCompany embedded branches array if branch name matches or index matches
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (company) {
       const embeddedBranchIndex = company.branches.findIndex(b => b.branchName === oldBranch.branchName);
       if (embeddedBranchIndex !== -1) {
@@ -394,13 +394,13 @@ exports.deleteBranch = async (req, res) => {
   try {
     const { branchId } = req.params;
 
-    const branch = await B2BBranch.findOneAndDelete({ _id: branchId, companyId: req.user.id });
+    const branch = await B2BBranch.findOneAndDelete({ _id: branchId, companyId: req.companyId });
     if (!branch) {
       return res.status(404).json({ success: false, message: 'Branch not found or ownership mismatch' });
     }
 
     // Also pull from B2BCompany embedded list
-    await B2BCompany.findByIdAndUpdate(req.user.id, {
+    await B2BCompany.findByIdAndUpdate(req.companyId, {
       $pull: {
         branches: { branchName: branch.branchName }
       }
@@ -423,7 +423,7 @@ exports.deleteBranch = async (req, res) => {
  */
 exports.getDocuments = async (req, res) => {
   try {
-    const documents = await B2BDocument.find({ companyId: req.user.id });
+    const documents = await B2BDocument.find({ companyId: req.companyId });
     
     // Sign private file urls
     const securedDocuments = documents.map(doc => {
@@ -467,7 +467,7 @@ exports.uploadDocument = async (req, res) => {
     }
 
     // Check if document already exists
-    const existingDoc = await B2BDocument.findOne({ companyId: req.user.id, documentType });
+    const existingDoc = await B2BDocument.findOne({ companyId: req.companyId, documentType });
     if (existingDoc && existingDoc.status === 'verified') {
       return res.status(400).json({
         success: false,
@@ -487,7 +487,7 @@ exports.uploadDocument = async (req, res) => {
       doc = await existingDoc.save();
     } else {
       doc = await B2BDocument.create({
-        companyId: req.user.id,
+        companyId: req.companyId,
         documentType,
         fileUrl: req.file.path,
         fileKey: req.file.filename || null,
@@ -499,7 +499,7 @@ exports.uploadDocument = async (req, res) => {
     }
 
     // Update company embedded array
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (company) {
       const embeddedDocIdx = company.documents.findIndex(d => d.documentType === documentType);
       if (embeddedDocIdx !== -1) {
@@ -547,7 +547,7 @@ exports.reuploadDocument = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No file provided' });
     }
 
-    const doc = await B2BDocument.findOne({ _id: documentId, companyId: req.user.id });
+    const doc = await B2BDocument.findOne({ _id: documentId, companyId: req.companyId });
     if (!doc) {
       return res.status(404).json({ success: false, message: 'Document not found or ownership mismatch' });
     }
@@ -570,7 +570,7 @@ exports.reuploadDocument = async (req, res) => {
     await doc.save();
 
     // Sync with company embedded doc
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (company) {
       const companyDoc = company.documents.find(d => d.documentType === doc.documentType);
       if (companyDoc) {
@@ -603,7 +603,7 @@ exports.viewDocument = async (req, res) => {
   try {
     const { documentId } = req.params;
 
-    const doc = await B2BDocument.findOne({ _id: documentId, companyId: req.user.id });
+    const doc = await B2BDocument.findOne({ _id: documentId, companyId: req.companyId });
     if (!doc) {
       return res.status(404).json({ success: false, message: 'Document not found or ownership mismatch' });
     }
@@ -636,7 +636,7 @@ exports.viewDocument = async (req, res) => {
  */
 exports.getBankDetails = async (req, res) => {
   try {
-    const bankAccount = await B2BBankAccount.findOne({ companyId: req.user.id });
+    const bankAccount = await B2BBankAccount.findOne({ companyId: req.companyId });
     if (!bankAccount) {
       return res.status(200).json({ success: true, bankAccount: null });
     }
@@ -674,7 +674,7 @@ exports.updateBankDetails = async (req, res) => {
     const encryptedNumber = encrypt(accountNumber);
     const maskedNumber = maskAccountNumber(accountNumber);
 
-    let bankAccount = await B2BBankAccount.findOne({ companyId: req.user.id });
+    let bankAccount = await B2BBankAccount.findOne({ companyId: req.companyId });
     if (bankAccount) {
       bankAccount.accountHolderName = accountHolderName;
       bankAccount.accountNumberEncrypted = encryptedNumber;
@@ -687,7 +687,7 @@ exports.updateBankDetails = async (req, res) => {
       await bankAccount.save();
     } else {
       bankAccount = await B2BBankAccount.create({
-        companyId: req.user.id,
+        companyId: req.companyId,
         accountHolderName,
         accountNumberEncrypted: encryptedNumber,
         accountNumberMasked: maskedNumber,
@@ -726,7 +726,7 @@ exports.updateBankDetails = async (req, res) => {
  */
 exports.verifyBankPennyDrop = async (req, res) => {
   try {
-    const bankAccount = await B2BBankAccount.findOne({ companyId: req.user.id });
+    const bankAccount = await B2BBankAccount.findOne({ companyId: req.companyId });
     if (!bankAccount) {
       return res.status(404).json({ success: false, message: 'No bank account details found to verify' });
     }
@@ -775,7 +775,7 @@ exports.changePassword = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Current password and new password are required' });
     }
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({ success: false, message: 'Company not found' });
     }
@@ -805,12 +805,12 @@ exports.changePassword = async (req, res) => {
  */
 exports.getSessions = async (req, res) => {
   try {
-    let sessions = await B2BSession.find({ companyId: req.user.id, isActive: true });
+    let sessions = await B2BSession.find({ companyId: req.companyId, isActive: true });
     
     if (sessions.length === 0) {
       // Seed a session for current request so it never returns empty for the current user
       const currentSession = await B2BSession.create({
-        companyId: req.user.id,
+        companyId: req.companyId,
         deviceInfo: req.headers['user-agent'] || 'Chrome Browser on Windows',
         ipAddress: req.ip || req.headers['x-forwarded-for'] || '127.0.0.1',
         isActive: true
@@ -831,13 +831,13 @@ exports.getSessions = async (req, res) => {
 exports.logoutAllDevices = async (req, res) => {
   try {
     await B2BSession.updateMany(
-      { companyId: req.user.id },
+      { companyId: req.companyId },
       { $set: { isActive: false } }
     );
 
     // Keep the current session active if required, but prompt requests logout all other devices.
     // For safety, we set them all to inactive.
-    await logAction(req, 'B2B_SESSIONS_LOGOUT', req.user.id, 'B2BCompany');
+    await logAction(req, 'B2B_SESSIONS_LOGOUT', req.companyId, 'B2BCompany');
 
     return res.status(200).json({ success: true, message: 'Logged out of all other devices successfully' });
   } catch (error) {
@@ -854,11 +854,11 @@ exports.updateNotificationPreferences = async (req, res) => {
     const preferences = req.body;
 
     // Save notification preferences inside the company record as an arbitrary/mixed field
-    await B2BCompany.findByIdAndUpdate(req.user.id, {
+    await B2BCompany.findByIdAndUpdate(req.companyId, {
       $set: { notificationPreferences: preferences }
     });
 
-    await logAction(req, 'B2B_NOTIF_PREFS_UPDATE', req.user.id, 'B2BCompany', preferences);
+    await logAction(req, 'B2B_NOTIF_PREFS_UPDATE', req.companyId, 'B2BCompany', preferences);
 
     return res.status(200).json({
       success: true,

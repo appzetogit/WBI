@@ -513,6 +513,69 @@ const deleteVendor = async (req, res) => {
   }
 };
 
+/**
+ * Update vendor KYC status
+ */
+const updateVendorKycStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+    
+    const vendor = await Vendor.findById(id);
+    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    
+    vendor.kycStatus = status;
+    if (status === 'rejected' && reason) {
+      // You can store reason in Vendor or VendorKYC
+    }
+    await vendor.save();
+    
+    res.status(200).json({ success: true, message: `KYC status updated to ${status}` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to update KYC status' });
+  }
+};
+
+/**
+ * Update vendor Bank status
+ */
+const updateVendorBankStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+    
+    const vendor = await Vendor.findById(id);
+    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    
+    vendor.bankStatus = status;
+    await vendor.save();
+    
+    res.status(200).json({ success: true, message: `Bank status updated to ${status}` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to update Bank status' });
+  }
+};
+
+/**
+ * Update vendor Registration Config
+ */
+const updateVendorRegistrationConfig = async (req, res) => {
+  try {
+    const VendorRegistrationConfig = require('../../models/VendorRegistrationConfig');
+    let config = await VendorRegistrationConfig.findOne();
+    if (!config) {
+      config = new VendorRegistrationConfig(req.body);
+    } else {
+      Object.assign(config, req.body);
+    }
+    await config.save();
+    
+    res.status(200).json({ success: true, message: 'Configuration updated successfully', data: config });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to update configuration' });
+  }
+};
+
 module.exports = {
   getAllVendors,
   getVendorDetails,
@@ -524,6 +587,9 @@ module.exports = {
   getAllVendorBookings,
   getVendorPaymentsSummary,
   toggleVendorStatus,
-  deleteVendor
+  deleteVendor,
+  updateVendorKycStatus,
+  updateVendorBankStatus,
+  updateVendorRegistrationConfig
 };
 

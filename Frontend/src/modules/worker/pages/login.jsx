@@ -190,9 +190,9 @@ const WorkerLogin = () => {
                 </button>
               </div>
               <div className="flex justify-end mt-2">
-                <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-semibold text-[#347989] hover:text-[#D68F35] transition-colors">
+                <Link to="/worker/forgot-password" className="text-xs font-semibold text-[#347989] hover:text-[#D68F35] transition-colors">
                   Forgot Password?
-                </button>
+                </Link>
               </div>
             </div>
 

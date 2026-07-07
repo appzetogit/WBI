@@ -8,13 +8,13 @@ const passwordResetTokenSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'worker', 'engineer', 'vendor', 'admin'],
+    enum: ['user', 'worker', 'engineer', 'vendor', 'admin', 'b2b'],
     required: true
   },
   roleModel: {
     type: String,
     required: true,
-    enum: ['User', 'Worker', 'Engineer', 'Vendor', 'Admin']
+    enum: ['User', 'Worker', 'Engineer', 'Vendor', 'Admin', 'B2BUser']
   },
   hashedOtp: {
     type: String,

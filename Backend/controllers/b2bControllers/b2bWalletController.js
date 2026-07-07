@@ -24,7 +24,7 @@ const emitWalletEvent = (req, eventName, roomName, data) => {
  */
 const getWalletSummary = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     let wallet = await B2BWallet.findOne({ companyId });
     if (!wallet) {
       wallet = await B2BWallet.create({ companyId, balance: 0 });
@@ -63,7 +63,7 @@ const getWalletSummary = async (req, res) => {
  */
 const getWalletTransactions = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     const transactions = await B2BWalletTransaction.find({ companyId })
       .sort({ createdAt: -1 });
 
@@ -82,7 +82,7 @@ const getWalletTransactions = async (req, res) => {
  */
 const createTopupOrder = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     const { amount, paymentMethod } = req.body;
 
     const amountNum = parseFloat(amount);
@@ -242,7 +242,7 @@ const verifyTopupPayment = async (req, res) => {
  */
 const getWalletUsageSummary = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     const txns = await B2BWalletTransaction.find({ companyId, status: 'success' });
 
     let jobDeductions = 0;
@@ -277,7 +277,7 @@ const getWalletUsageSummary = async (req, res) => {
  */
 const getDeductionRule = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     let rule = await B2BDeductionRule.findOne({ companyId, isActive: true });
     if (!rule) {
       rule = await B2BDeductionRule.create({ companyId, perJobCharge: 12, gstPercent: 18, isActive: true });
@@ -293,7 +293,7 @@ const getDeductionRule = async (req, res) => {
  */
 const getPaymentMethods = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     const methods = await B2BPaymentMethod.find({ companyId, isActive: true });
     res.status(200).json({ success: true, data: methods });
   } catch (error) {
@@ -306,7 +306,7 @@ const getPaymentMethods = async (req, res) => {
  */
 const addPaymentMethod = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     const { type, label, maskedDetails } = req.body;
 
     const newMethod = await B2BPaymentMethod.create({

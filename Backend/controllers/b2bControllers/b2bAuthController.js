@@ -403,7 +403,7 @@ const loginCompany = async (req, res) => {
  */
 const getProfile = async (req, res) => {
   try {
-    const company = await B2BCompany.findById(req.user.id).select('-passwordHash');
+    const company = await B2BCompany.findById(req.companyId).select('-passwordHash');
     if (!company) {
       return res.status(404).json({
         success: false,
@@ -438,7 +438,7 @@ const updateProfile = async (req, res) => {
       logoUrl
     } = req.body;
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({
         success: false,
@@ -488,7 +488,7 @@ const reuploadDocuments = async (req, res) => {
     const { companyId, documents } = req.body;
     
     // Find the company
-    const company = await B2BCompany.findById(companyId || req.user?.id);
+    const company = await B2BCompany.findById(companyId || req.companyId);
     if (!company) {
       return res.status(404).json({
         success: false,
@@ -560,7 +560,7 @@ const reuploadDocuments = async (req, res) => {
  */
 const getVerificationStatus = async (req, res) => {
   try {
-    const company = await B2BCompany.findById(req.user.id).select('verificationStatus rejectionReason documents');
+    const company = await B2BCompany.findById(req.companyId).select('verificationStatus rejectionReason documents');
     if (!company) {
       return res.status(404).json({
         success: false,
@@ -583,11 +583,64 @@ const getVerificationStatus = async (req, res) => {
   }
 };
 
+/**
+ * Refresh Access Token
+ */
+const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(400).json({ success: false, message: 'Refresh token is required' });
+    }
+
+    const { verifyRefreshToken, generateTokenPair } = require('../../utils/tokenService');
+    
+    const decoded = verifyRefreshToken(refreshToken);
+    if (!decoded) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+    }
+
+    const user = await B2BUser.findById(decoded.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (user.status === 'blocked' || user.status !== 'active') {
+      return res.status(403).json({ success: false, message: 'Account is not active' });
+    }
+
+    const company = await B2BCompany.findById(user.companyId);
+    if (!company || !company.isActive) {
+      return res.status(403).json({ success: false, message: 'Company account is inactive' });
+    }
+
+    const tokens = generateTokenPair({
+      userId: user._id.toString(),
+      role: 'B2B',
+      profileId: company._id.toString(),
+      mobile: user.mobile,
+      email: user.email,
+      loginSessionId: decoded.loginSessionId
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Token refreshed successfully',
+      ...tokens,
+      accessToken: tokens.accessToken
+    });
+  } catch (error) {
+    console.error('B2B Refresh token error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to refresh token' });
+  }
+};
+
 module.exports = {
   registerCompany,
   loginCompany,
   getProfile,
   updateProfile,
   reuploadDocuments,
-  getVerificationStatus
+  getVerificationStatus,
+  refreshToken
 };

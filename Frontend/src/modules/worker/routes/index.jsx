@@ -40,6 +40,7 @@ const lazyLoad = (importFunc) => {
 // Lazy load worker pages for code splitting
 const Login = lazyLoad(() => import('../pages/login'));
 const Signup = lazyLoad(() => import('../pages/signup'));
+const ForgotPassword = lazyLoad(() => import('../pages/ForgotPassword'));
 const Dashboard = lazyLoad(() => import('../pages/Dashboard'));
 const AssignedJobs = lazyLoad(() => import('../pages/AssignedJobs'));
 const JobDetails = lazyLoad(() => import('../pages/JobDetails'));
@@ -83,6 +84,7 @@ const WorkerRoutes = () => {
   const shouldHideBottomNav =
     location.pathname === '/worker/login' ||
     location.pathname === '/worker/signup' ||
+    location.pathname === '/worker/forgot-password' ||
     location.pathname === '/engineer/login' ||
     location.pathname === '/engineer/signup' ||
     location.pathname.endsWith('/map') ||
@@ -100,6 +102,7 @@ const WorkerRoutes = () => {
               {/* Public routes */}
               <Route path="/login" element={<PublicRoute userType="worker"><Login /></PublicRoute>} />
               <Route path="/signup" element={<PublicRoute userType="worker"><Signup /></PublicRoute>} />
+              <Route path="/forgot-password" element={<PublicRoute userType="worker"><ForgotPassword /></PublicRoute>} />
 
               {/* Protected routes (auth required) */}
               <Route path="/" element={<ProtectedRoute userType="worker"><Navigate to="dashboard" replace /></ProtectedRoute>} />

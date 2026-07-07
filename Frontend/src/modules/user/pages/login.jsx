@@ -282,6 +282,14 @@ const Login = () => {
                     Create an account
                   </Link>
                 </p>
+                <p className="text-sm text-gray-500 font-medium text-center mt-2">
+                  <Link
+                    to="/user/forgot-password"
+                    className="text-[#FF8A00] hover:text-[#e65100] font-bold transition-colors"
+                  >
+                    Forgot Password?
+                  </Link>
+                </p>
               </div>
             </form>
           ) : (

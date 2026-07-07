@@ -21,32 +21,26 @@ const sendSMS = async (phone, message) => {
       return { success: false, message: 'SMS configuration missing' };
     }
 
-    // Build parameters with multiple possible auth field names
-    const params = {
-      // Primary fields (as per docs)
-      user: process.env.SMS_INDIA_HUB_USERNAME,
-      password: process.env.SMS_INDIA_HUB_API_KEY,
-      // Fallback fields for compatibility
-      username: process.env.SMS_INDIA_HUB_USERNAME,
-      apikey: process.env.SMS_INDIA_HUB_API_KEY,
-      msisdn: phone,
-      sid: process.env.SMS_INDIA_HUB_SENDER_ID,
-      msg: message,
-      fl: 0,
-      gwid: 2,
-    };
-    // Add DLT Template ID if available
-    if (process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID) {
-      params.TemplateId = process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID;
-    }
+    // Prepend 91 to 10-digit Indian numbers as required by most vendors
+    const formattedPhone = (phone && phone.length === 10) ? `91${phone}` : phone;
 
-    // Use HTTPS for secure transmission
+    // Build parameters exactly as per the working URL provided by the vendor
+    // Manually construct the URL to avoid any Axios params serialization issues
     const baseUrl = process.env.SMS_BASE_URL || 'https://cloud.smsindiahub.in/vendorsms/pushsms.aspx';
+    
+    // We encode the message to handle spaces properly
+    const encodedMsg = encodeURIComponent(message);
+    
+    // Add TemplateId if it exists in .env for faster DLT processing and bypassing regex matching
+    const templateIdParam = process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID ? `&TemplateId=${process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID}` : '';
+    
+    const finalUrl = `${baseUrl}?APIKey=${process.env.SMS_INDIA_HUB_API_KEY}&msisdn=${formattedPhone}&sid=${process.env.SMS_INDIA_HUB_SENDER_ID}&msg=${encodedMsg}&fl=0&gwid=2${templateIdParam}`;
+
     console.log('[SMS] Sending request to (HTTPS):', baseUrl);
-    console.log('[SMS] Params (masked):', { ...params, password: '***', apikey: '***' });
+    console.log('[SMS] Constructed URL (Masked):', finalUrl.replace(process.env.SMS_INDIA_HUB_API_KEY, '***'));
 
     // Added 5-second timeout to prevent hanging the event loop if SMS API provider is slow
-    const response = await axios.get(baseUrl, { params, timeout: 5000 });
+    const response = await axios.get(finalUrl, { timeout: 5000 });
 
     console.log('[SMS] Response status:', response.status);
     console.log('[SMS] Response data:', response.data);
@@ -70,7 +64,7 @@ const sendSMS = async (phone, message) => {
     }
 
     if (isSuccess) {
-      console.log(`[SMS] ✅ SMS sent successfully to ${phone}`);
+      console.log({phone})
       return { success: true, data: response.data };
     } else {
       console.error(`[SMS] ❌ SMS Provider Error:`, JSON.stringify(response.data));
@@ -96,10 +90,9 @@ const sendSMS = async (phone, message) => {
  * @param {string} otp - OTP code
  */
 const sendOTP = async (phone, otp) => {
-  // DLT-compliant message format (must match registered template)
-  // Template: "Welcome to the ##var## powered by SMSINDIAHUB. Your OTP for registration is ##var##"
-  const appName = 'HOMECARE';
-  const message = `Welcome to the ${appName} powered by SMSINDIAHUB. Your OTP for registration is ${otp}`;
+  // DLT-compliant message format exactly as approved by the provider
+  // Template from screenshot: Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is 123456.BGADEC
+  const message = `Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is ${otp}.BGADEC`;
 
   console.log(`[SMS] Attempting to send OTP to ${phone}`);
   console.log(`[SMS] Message: ${message}`);

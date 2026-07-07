@@ -30,6 +30,9 @@ const BottomNav = memo(() => {
 
   // Load counts
   useEffect(() => {
+    const token = localStorage.getItem('workerAccessToken') || sessionStorage.getItem('workerAccessToken');
+    if (!token) return;
+
     const updatePendingCount = () => {
       try {
         // Count pending assigned jobs (waiting for accept/reject)

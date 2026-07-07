@@ -32,7 +32,7 @@ const checkIsMay2025 = (start, end) => {
  */
 const getDashboardSummary = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -148,7 +148,7 @@ const getDashboardSummary = async (req, res) => {
  */
 const getJobsOverview = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -224,7 +224,7 @@ const getJobsOverview = async (req, res) => {
  */
 const getJobsStatusDistribution = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -303,7 +303,7 @@ const getJobsStatusDistribution = async (req, res) => {
  */
 const getRecentJobs = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -345,7 +345,7 @@ const getRecentJobs = async (req, res) => {
  */
 const getWalletBalance = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId;
     
     let wallet = await B2BWallet.findOne({ companyId });
     if (!wallet) {
@@ -373,7 +373,7 @@ const getWalletBalance = async (req, res) => {
 
 const getEngineers = async (req, res) => {
   try {
-    const engineers = await B2BEngineerAssignment.find({ companyId: req.user.id });
+    const engineers = await B2BEngineerAssignment.find({ companyId: req.companyId });
     res.status(200).json({
       success: true,
       data: engineers
@@ -390,7 +390,7 @@ const getEngineers = async (req, res) => {
 
 const getUsers = async (req, res) => {
   try {
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(req.companyId);
     if (!company) {
       return res.status(404).json({
         success: false,
@@ -434,7 +434,7 @@ const getUsers = async (req, res) => {
 const getCompanyJobs = async (req, res) => {
   try {
     const { status, search, batchId, page = 1, limit = 15 } = req.query;
-    const query = { companyId: req.user.id };
+    const query = { companyId: req.companyId };
     
     if (batchId) {
       query.batchId = batchId;

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
   FiMail, FiLock, FiEye, FiEyeOff, FiArrowRight, FiUploadCloud, 
   FiTrash2, FiPlus, FiCheckCircle, FiInfo, FiCheck, FiFileText,
@@ -540,7 +540,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                   <div>
                     <div className="flex justify-between items-center mb-1.5">
                       <label className="text-xs font-bold text-gray-700">Password</label>
-                      <a href="#" className="text-xs font-bold text-[#10AFA5] hover:underline">Forgot Password?</a>
+                      <Link to="/b2b/forgot-password" className="text-xs font-bold text-[#10AFA5] hover:underline">Forgot Password?</Link>
                     </div>
                     <div className="relative">
                       <FiLock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />

@@ -11,6 +11,7 @@ import GlobalWorkerJobAlert from '../components/common/GlobalWorkerJobAlert';
 
 import Login from '../pages/login';
 import Signup from '../pages/signup';
+import ForgotPassword from '../pages/ForgotPassword';
 import Dashboard from '../pages/Dashboard';
 import AssignedJobs from '../pages/AssignedJobs';
 import JobDetails from '../pages/JobDetails';
@@ -66,6 +67,7 @@ const EngineerRoutes = () => {
               {/* Public routes */}
               <Route path="/login" element={<PublicRoute userType="engineer"><Login /></PublicRoute>} />
               <Route path="/signup" element={<PublicRoute userType="engineer"><Signup /></PublicRoute>} />
+              <Route path="/forgot-password" element={<PublicRoute userType="engineer"><ForgotPassword /></PublicRoute>} />
 
               {/* Protected routes (auth required) */}
               <Route path="/" element={<ProtectedRoute userType="engineer"><Navigate to="dashboard" replace /></ProtectedRoute>} />

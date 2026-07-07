@@ -1,15 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowLeft, FiAlertCircle } from 'react-icons/fi';
+import React, { useState, useEffect, useRef } from 'react';
+import { FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowLeft, FiAlertCircle, FiEye, FiEyeOff } from 'react-icons/fi';
 import sharedAuthService from '../../../services/sharedAuthService';
 import toast from 'react-hot-toast';
+
+const PasswordStrength = ({ password }) => {
+  let score = 0;
+  if (password.length > 7) score += 1;
+  if (/[A-Z]/.test(password)) score += 1;
+  if (/[0-9]/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+  
+  const getStyle = () => {
+    if (score === 0) return { width: '0%', bg: 'bg-gray-200', text: '' };
+    if (score === 1) return { width: '25%', bg: 'bg-red-400', text: 'Weak' };
+    if (score === 2) return { width: '50%', bg: 'bg-yellow-400', text: 'Fair' };
+    if (score === 3) return { width: '75%', bg: 'bg-blue-400', text: 'Good' };
+    return { width: '100%', bg: 'bg-green-500', text: 'Strong' };
+  };
+  const { width, bg, text } = getStyle();
+
+  return (
+    <div className="mt-2">
+      <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden flex">
+        <div className={`h-full transition-all duration-300 ${bg}`} style={{ width }}></div>
+      </div>
+      {password.length > 0 && <p className="text-xs text-gray-500 mt-1 font-medium">{text}</p>}
+    </div>
+  );
+};
 
 const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, onSuccess }) => {
   const [step, setStep] = useState(1);
   const [identifier, setIdentifier] = useState(initialIdentifier);
-  const [otp, setOtp] = useState('');
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
+  
   const [resetToken, setResetToken] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
@@ -30,7 +61,7 @@ const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, 
       await sharedAuthService.forgotPassword(role, identifier);
       toast.success('OTP sent successfully');
       setStep(2);
-      setCountdown(60); // 1 minute cooldown for resend
+      setCountdown(60); 
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to send OTP');
     } finally {
@@ -38,14 +69,31 @@ const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, 
     }
   };
 
+  const handleOtpChange = (index, value) => {
+    if (isNaN(value)) return;
+    const newOtp = [...otp];
+    newOtp[index] = value;
+    setOtp(newOtp);
+    
+    if (value && index < 5) {
+      otpRefs[index + 1].current.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      otpRefs[index - 1].current.focus();
+    }
+  };
+
   const handleVerifyOtp = async (e) => {
-    e.preventDefault();
-    if (!otp) return toast.error('Please enter the OTP');
-    if (otp.length !== 6) return toast.error('OTP must be 6 digits');
+    if (e) e.preventDefault();
+    const otpString = otp.join('');
+    if (otpString.length !== 6) return toast.error('Please enter all 6 digits');
 
     setLoading(true);
     try {
-      const res = await sharedAuthService.verifyResetOtp(role, identifier, otp);
+      const res = await sharedAuthService.verifyResetOtp(role, identifier, otpString);
       setResetToken(res.resetToken);
       toast.success('OTP Verified!');
       setStep(3);
@@ -63,6 +111,8 @@ const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, 
       await sharedAuthService.resendResetOtp(role, identifier);
       toast.success('OTP resent');
       setCountdown(60);
+      setOtp(['', '', '', '', '', '']);
+      otpRefs[0].current?.focus();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to resend OTP');
     } finally {
@@ -140,26 +190,30 @@ const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, 
           <p className="text-gray-500 mb-8 text-sm">
             Enter the 6-digit verification code sent to <span className="font-semibold text-gray-700">{identifier}</span>
           </p>
-          <form onSubmit={handleVerifyOtp} className="space-y-6">
-            <div>
-              <input
-                type="text"
-                maxLength={6}
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                className="block w-full text-center tracking-[0.5em] text-2xl py-4 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
-                placeholder="------"
-                required
-              />
+          <div className="space-y-6">
+            <div className="flex gap-2 justify-between">
+              {otp.map((digit, index) => (
+                <input
+                  key={index}
+                  ref={otpRefs[index]}
+                  type="text"
+                  maxLength={1}
+                  value={digit}
+                  onChange={(e) => handleOtpChange(index, e.target.value)}
+                  onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                  className="w-12 h-14 text-center text-2xl font-bold bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+                  autoFocus={index === 0}
+                />
+              ))}
             </div>
             <button
-              type="submit"
-              disabled={loading || otp.length !== 6}
+              onClick={handleVerifyOtp}
+              disabled={loading || otp.join('').length !== 6}
               className="w-full flex justify-center py-4 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:opacity-50 transition-all active:scale-[0.98]"
             >
               {loading ? 'Verifying...' : 'Verify Code'}
             </button>
-          </form>
+          </div>
           <div className="mt-6 text-center">
             <button 
               onClick={handleResendOtp}
@@ -191,14 +245,18 @@ const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, 
                   <FiLock className="h-5 w-5 text-gray-400" />
                 </div>
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="block w-full pl-11 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+                  className="block w-full pl-11 pr-12 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
                   placeholder="••••••••"
                   required
                 />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600">
+                   {showPassword ? <FiEyeOff className="w-5 h-5"/> : <FiEye className="w-5 h-5"/>}
+                </button>
               </div>
+              <PasswordStrength password={newPassword} />
             </div>
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">Confirm Password</label>
@@ -207,15 +265,18 @@ const ForgotPasswordFlow = ({ role, identifier: initialIdentifier = '', onBack, 
                   <FiLock className="h-5 w-5 text-gray-400" />
                 </div>
                 <input
-                  type="password"
+                  type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className={`block w-full pl-11 pr-4 py-3.5 bg-gray-50 border rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:bg-white transition-all ${
+                  className={`block w-full pl-11 pr-12 py-3.5 bg-gray-50 border rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:bg-white transition-all ${
                     confirmPassword && newPassword !== confirmPassword ? 'border-red-300 focus:ring-red-500' : 'border-gray-200 focus:ring-teal-500'
                   }`}
                   placeholder="••••••••"
                   required
                 />
+                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600">
+                   {showConfirmPassword ? <FiEyeOff className="w-5 h-5"/> : <FiEye className="w-5 h-5"/>}
+                </button>
               </div>
               {confirmPassword && newPassword !== confirmPassword && (
                 <p className="mt-2 text-xs text-red-500 flex items-center gap-1"><FiAlertCircle /> Passwords do not match</p>

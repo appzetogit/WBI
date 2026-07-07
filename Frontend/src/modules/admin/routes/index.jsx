@@ -9,6 +9,7 @@ import AnimatedPage from '../../../components/common/AnimatedPage';
 
 // Login page (not lazy loaded for faster initial access)
 import Login from '../pages/login';
+import ForgotPassword from '../pages/ForgotPassword';
 
 // Lazy load admin pages for code splitting
 const Dashboard = lazy(() => import('../pages/Dashboard'));
@@ -90,6 +91,7 @@ const AdminRoutes = () => {
       <Routes location={location || undefined}>
         {/* Login route - outside of layout (public) */}
         <Route path="/login" element={<AnimatedPage><PublicRoute userType="admin"><Login /></PublicRoute></AnimatedPage>} />
+        <Route path="/forgot-password" element={<AnimatedPage><PublicRoute userType="admin"><ForgotPassword /></PublicRoute></AnimatedPage>} />
 
         {/* Protected routes - inside layout */}
         <Route path="/" element={

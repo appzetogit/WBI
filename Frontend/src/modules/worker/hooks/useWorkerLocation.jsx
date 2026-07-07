@@ -5,6 +5,10 @@ export const useWorkerLocationTracker = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    // Only track location if the worker is authenticated
+    const token = localStorage.getItem('workerAccessToken') || sessionStorage.getItem('workerAccessToken');
+    if (!token) return;
+
     if (!navigator.geolocation) {
       setError('Geolocation is not supported by your browser');
       return;

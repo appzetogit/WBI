@@ -57,14 +57,19 @@ const VendorLogin = () => {
 
       const response = await sharedAuthService.unifiedLogin(loginPayload);
       if (response.success) {
-        toast.success(
-          <div className="flex flex-col">
-            <span className="font-bold">Welcome Back!</span>
-            <span className="text-xs">Successfully logged into your {response.user.role} account.</span>
-          </div>,
-          { icon: <FiCheckCircle className="text-green-500" /> }
-        );
-        navigate(response.redirectTo, { replace: true });
+        if (response.vendor?.adminApproval === 'pending') {
+          toast.success('Your account is under review.', { icon: <FiCheckCircle className="text-blue-500" /> });
+          navigate('/vendor/pending-approval', { replace: true });
+        } else {
+          toast.success(
+            <div className="flex flex-col">
+              <span className="font-bold">Welcome Back!</span>
+              <span className="text-xs">Successfully logged into your {response.user?.role || 'vendor'} account.</span>
+            </div>,
+            { icon: <FiCheckCircle className="text-green-500" /> }
+          );
+          navigate(response.redirectTo || '/vendor', { replace: true });
+        }
       } else {
         toast.error(response.message || 'Login failed');
       }
@@ -292,9 +297,9 @@ const VendorLogin = () => {
                 </div>
 
                 <div className="text-sm">
-                  <button type="button" onClick={() => setIsForgotPassword(true)} className="font-semibold text-[#0D8A72] hover:text-[#0a6b58] transition-colors">
+                  <Link to="/vendor/forgot-password" className="font-semibold text-[#0D8A72] hover:text-[#0a6b58] transition-colors">
                     Forgot Password?
-                  </button>
+                  </Link>
                 </div>
               </div>
 

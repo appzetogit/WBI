@@ -73,6 +73,7 @@ import TechnicianFound from '../pages/TechnicianFound';
 import Login from '../pages/login';
 import Signup from '../pages/signup';
 import Account from '../pages/Account';
+import ForgotPassword from '../pages/ForgotPassword';
 
 // Lazy load minor/non-critical pages for code splitting with error handling
 const Rewards = lazyLoad(() => import('../pages/Rewards'));
@@ -156,7 +157,7 @@ const UserRoutes = () => {
 
 
   // Check if we are on public pages (login/signup) where we shouldn't fetch bookings
-  const isPublicPage = location.pathname.includes('/login') || location.pathname.includes('/signup');
+  const isPublicPage = location.pathname.includes('/login') || location.pathname.includes('/signup') || location.pathname.includes('/forgot-password');
 
   return (
     <ErrorBoundary>
@@ -170,6 +171,7 @@ const UserRoutes = () => {
               {/* Public routes */}
               <Route path="/login" element={<AnimatedPage><PublicRoute userType="user"><Login /></PublicRoute></AnimatedPage>} />
               <Route path="/signup" element={<AnimatedPage><PublicRoute userType="user"><Signup /></PublicRoute></AnimatedPage>} />
+              <Route path="/forgot-password" element={<AnimatedPage><PublicRoute userType="user"><ForgotPassword /></PublicRoute></AnimatedPage>} />
 
               {/* Protected routes (auth required) */}
               <Route path="/" element={<AnimatedPage><ProtectedRoute userType="user"><Home /></ProtectedRoute></AnimatedPage>} />

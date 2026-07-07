@@ -400,7 +400,7 @@ export default function WorkerSignup() {
               localStorage.removeItem('engineerAccessToken');
               localStorage.removeItem('engineerRefreshToken');
               localStorage.removeItem('engineerData');
-              navigate('/engineer/signup');
+              navigate('/engineer/signup', { replace: true });
             }}
             className="px-4 py-2 rounded-lg text-sm font-semibold transition-all text-gray-500 hover:text-gray-700"
           >

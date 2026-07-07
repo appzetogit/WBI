@@ -41,6 +41,8 @@ const lazyLoad = (importFunc) => {
 // Lazy load vendor pages for code splitting
 const Login = lazyLoad(() => import('../pages/login'));
 const Signup = lazyLoad(() => import('../pages/signup'));
+const ForgotPassword = lazyLoad(() => import('../pages/ForgotPassword'));
+const PendingApproval = lazyLoad(() => import('../pages/PendingApproval'));
 const Dashboard = lazyLoad(() => import('../pages/Dashboard'));
 const BookingAlert = lazyLoad(() => import('../pages/BookingAlert'));
 const BookingAlerts = lazyLoad(() => import('../pages/BookingAlerts'));
@@ -86,6 +88,8 @@ const VendorRoutes = () => {
             {/* Public routes */}
             <Route path="/login" element={<AnimatedPage><PublicRoute userType="vendor"><Login /></PublicRoute></AnimatedPage>} />
             <Route path="/signup" element={<AnimatedPage><PublicRoute userType="vendor"><Signup /></PublicRoute></AnimatedPage>} />
+            <Route path="/forgot-password" element={<AnimatedPage><PublicRoute userType="vendor"><ForgotPassword /></PublicRoute></AnimatedPage>} />
+            <Route path="/pending-approval" element={<AnimatedPage><PendingApproval /></AnimatedPage>} />
 
             {/* Base Redirect */}
             <Route path="/" element={<Navigate to="digital-solution/dashboard" replace />} />

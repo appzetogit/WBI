@@ -14,7 +14,10 @@ const {
   getAllVendorBookings,
   getVendorPaymentsSummary,
   toggleVendorStatus,
-  deleteVendor
+  deleteVendor,
+  updateVendorKycStatus,
+  updateVendorBankStatus,
+  updateVendorRegistrationConfig
 } = require('../../controllers/adminControllers/adminVendorController');
 
 // Validation rules
@@ -34,6 +37,9 @@ router.patch('/vendors/:id/status', authenticate, isAdmin, toggleVendorStatus); 
 router.delete('/vendors/:id', authenticate, isAdmin, deleteVendor); // New
 router.get('/vendors/:id/bookings', authenticate, isAdmin, getVendorBookings);
 router.get('/vendors/:id/earnings', authenticate, isAdmin, getVendorEarnings);
+router.patch('/vendors/:id/kyc-status', authenticate, isAdmin, updateVendorKycStatus);
+router.patch('/vendors/:id/bank-status', authenticate, isAdmin, updateVendorBankStatus);
+router.patch('/vendor-registration-config', authenticate, isAdmin, updateVendorRegistrationConfig);
 
 module.exports = router;
 

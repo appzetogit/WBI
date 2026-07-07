@@ -245,6 +245,7 @@ app.use('/api/scrap', scrapRoutes);
 
 // Vendor routes
 app.use('/api/vendors/auth', require('./routes/vendor-routes/auth.routes'));
+app.use('/api/vendor', require('./routes/vendor-routes/registration.routes'));
 app.use('/api/vendors', require('./routes/vendor-routes/profile.routes'));
 app.use('/api/vendors', require('./routes/vendor-routes/settings.routes'));
 app.use('/api/vendors', require('./routes/vendor-routes/wallet.routes'));

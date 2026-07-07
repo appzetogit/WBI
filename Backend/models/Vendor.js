@@ -64,6 +64,81 @@ const vendorSchema = new mongoose.Schema({
     type: Number,
     default: 1
   },
+  partnerMode: {
+    type: String,
+    enum: ['independent', 'company'],
+    default: 'independent'
+  },
+  businessType: {
+    type: String,
+    enum: ['quick_service', 'project_partner'],
+    default: 'quick_service'
+  },
+  vendorType: {
+    type: String,
+    enum: ['quick_service', 'project_partner'],
+    default: 'quick_service'
+  },
+  subServiceIds: {
+    type: [mongoose.Schema.Types.ObjectId],
+    ref: 'SubService',
+    default: []
+  },
+  workingCities: {
+    type: [String],
+    default: []
+  },
+  serviceRadiusKm: {
+    type: Number,
+    default: 10
+  },
+  companyDescription: {
+    type: String,
+    default: null
+  },
+  website: {
+    type: String,
+    default: null
+  },
+  totalWorkers: {
+    type: Number,
+    default: 0
+  },
+  totalEngineers: {
+    type: Number,
+    default: 0
+  },
+  workingDays: {
+    type: [String],
+    default: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  },
+  workingHours: {
+    type: String,
+    default: '09:00 AM - 06:00 PM'
+  },
+  emergencyServiceAvailable: {
+    type: Boolean,
+    default: false
+  },
+  available24x7: {
+    type: Boolean,
+    default: false
+  },
+  kycStatus: {
+    type: String,
+    enum: ['pending', 'verified', 'rejected'],
+    default: 'pending'
+  },
+  bankStatus: {
+    type: String,
+    enum: ['pending', 'verified', 'rejected'],
+    default: 'pending'
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'paid', 'skipped'],
+    default: 'pending'
+  },
   operatingCities: [{
     type: String
   }],

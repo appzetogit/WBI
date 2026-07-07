@@ -132,6 +132,7 @@ const EngineerLogin = () => {
               identifier={formData.phone}
               onBack={() => setIsForgotPassword(false)}
               onSuccess={() => setIsForgotPassword(false)}
+              isInline={true}
             />
           </div>
         ) : (
@@ -191,7 +192,11 @@ const EngineerLogin = () => {
                 </button>
               </div>
               <div className="flex justify-end mt-2">
-                <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-semibold text-[#347989] hover:text-[#D68F35] transition-colors">
+                <button 
+                  type="button"
+                  onClick={() => setIsForgotPassword(true)}
+                  className="text-xs font-semibold text-[#347989] hover:text-[#D68F35] transition-colors"
+                >
                   Forgot Password?
                 </button>
               </div>
