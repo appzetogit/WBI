@@ -156,11 +156,13 @@ export const userAuthService = {
   login: async (data) => {
     const response = await api.post('/users/auth/login', { ...data, role: 'user', platform: getPlatformType() });
     if (response.data.accessToken) {
-      localStorage.setItem('accessToken', response.data.accessToken);
-      localStorage.setItem('refreshToken', response.data.refreshToken);
-      localStorage.setItem('userData', JSON.stringify(response.data.user));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'user';
+      const userData = user || worker || engineer || vendor || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken('user', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },
