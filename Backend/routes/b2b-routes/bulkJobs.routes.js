@@ -36,13 +36,10 @@ const excelFilter = (req, file, cb) => {
   }
 };
 
-// Spreadsheet upload handler (Max 20MB)
+// Spreadsheet upload handler (No file size limit — supports large enterprise batches)
 const uploadSpreadsheet = multer({
   storage: diskStorage,
-  fileFilter: excelFilter,
-  limits: {
-    fileSize: 20 * 1024 * 1024
-  }
+  fileFilter: excelFilter
 }).single('file');
 
 const handleMulterError = (err, req, res, next) => {

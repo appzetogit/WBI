@@ -2,14 +2,20 @@ const mongoose = require('mongoose');
 const B2BJob = require('../../models/B2BJob');
 const B2BJobStatusLog = require('../../models/B2BJobStatusLog');
 const B2BWalletTransaction = require('../../models/B2BWalletTransaction');
+const B2BWallet = require('../../models/B2BWallet');
+const B2BBatch = require('../../models/B2BBatch');
 const Engineer = require('../../models/Engineer');
+const EngineerRating = require('../../models/EngineerRating');
+const QuoteApproval = require('../../models/QuoteApproval');
+const B2BCompany = require('../../models/B2BCompany');
 
 /**
  * GET Stats (KPIs)
  */
 const getStats = async (req, res) => {
   try {
-    const companyId = new mongoose.Types.ObjectId(req.user.id);
+    const rawId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawId);
     
     // Complex Aggregation for KPI Cards
     const statsPipeline = [
@@ -99,7 +105,7 @@ const getStats = async (req, res) => {
  */
 const getJobs = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { 
       page = 1, limit = 10, search, status, service, city, priority, 
       paymentStatus, startDate, endDate, batchId, sort = 'createdAt', order = 'desc' 
@@ -175,7 +181,7 @@ const getJobs = async (req, res) => {
  */
 const exportJobs = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const filter = { companyId };
     
     // Apply same filters as GET (simplified for brevity)
@@ -204,7 +210,8 @@ const exportJobs = async (req, res) => {
  */
 const getJobDetails = async (req, res) => {
   try {
-    const job = await B2BJob.findOne({ _id: req.params.id, companyId: req.user.id })
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const job = await B2BJob.findOne({ _id: req.params.id, companyId })
       .populate('batchId')
       .populate('assignedTo');
     
@@ -221,8 +228,9 @@ const getJobDetails = async (req, res) => {
  */
 const updateJob = async (req, res) => {
   try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const job = await B2BJob.findOneAndUpdate(
-      { _id: req.params.id, companyId: req.user.id },
+      { _id: req.params.id, companyId },
       { $set: req.body },
       { new: true }
     );
@@ -251,7 +259,8 @@ const updateJob = async (req, res) => {
  */
 const cancelJob = async (req, res) => {
   try {
-    const job = await B2BJob.findOne({ _id: req.params.id, companyId: req.user.id });
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const job = await B2BJob.findOne({ _id: req.params.id, companyId });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
     job.status = 'cancelled';
@@ -290,7 +299,8 @@ const getJobTimeline = async (req, res) => {
 const reassignEngineer = async (req, res) => {
   try {
     const { jobId, engineerId } = req.body;
-    const job = await B2BJob.findOne({ _id: jobId, companyId: req.user.id });
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const job = await B2BJob.findOne({ _id: jobId, companyId });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
     const engineer = await Engineer.findById(engineerId);
@@ -353,6 +363,186 @@ const getJobLogs = async (req, res) => {
   }
 };
 
+/**
+ * POST Submit Engineer Rating
+ */
+const submitEngineerRating = async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const { behavior, slaAdherence, toolsCarried, ethics, reviewText } = req.body;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+
+    const job = await B2BJob.findOne({ _id: jobId, companyId });
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    if (!job.assignedTo) return res.status(400).json({ success: false, message: 'No engineer was assigned' });
+
+    const existingRating = await EngineerRating.findOne({ jobId, companyId });
+    if (existingRating) {
+      return res.status(400).json({ success: false, message: 'You have already rated this job' });
+    }
+
+    const averageRating = (behavior + slaAdherence + toolsCarried + ethics) / 4;
+
+    const rating = await EngineerRating.create({
+      companyId,
+      engineerId: job.assignedTo,
+      jobId,
+      metrics: { behavior, slaAdherence, toolsCarried, ethics },
+      averageRating,
+      reviewText
+    });
+
+    res.status(200).json({ success: true, message: 'Rating submitted successfully', data: rating });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: 'Failed to submit rating' });
+  }
+};
+
+/**
+ * GET Pending Quote Approvals for this company
+ * GET /api/b2b/jobs/quotes/pending
+ */
+const getPendingQuotes = async (req, res) => {
+  try {
+    const rawId2 = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawId2);
+    const quotes = await QuoteApproval.find({ companyId, status: 'pending' })
+      .populate('jobId', 'jobId service address city charge status preferredDate')
+      .populate('engineerId', 'name phone profilePhoto')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({ success: true, data: quotes });
+  } catch (error) {
+    console.error('[QuoteApproval] getPendingQuotes error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch pending quotes' });
+  }
+};
+
+/**
+ * POST Approve a modified quote — activates the job
+ * POST /api/b2b/jobs/quotes/:quoteId/approve
+ */
+const approveQuote = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const { quoteId } = req.params;
+    const { clientRemarks } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(quoteId)) {
+      return res.status(400).json({ success: false, message: 'Invalid quote ID' });
+    }
+
+    const quote = await QuoteApproval.findOne({ _id: quoteId, companyId, status: 'pending' });
+    if (!quote) {
+      return res.status(404).json({ success: false, message: 'Pending quote not found' });
+    }
+
+    // 1. Deduct the new approved amount from wallet
+    const wallet = await B2BWallet.findOne({ companyId });
+    if (!wallet) {
+      return res.status(404).json({ success: false, message: 'Wallet not found. Please top-up first.' });
+    }
+
+    const amountDiff = quote.proposedAmount - quote.originalAmount;
+
+    if (amountDiff > 0 && wallet.balance < amountDiff) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient wallet balance. Need ₹${amountDiff} more for this revised quote.`,
+        required: amountDiff,
+        available: wallet.balance
+      });
+    }
+
+    // 2. Update quote status
+    quote.status = 'approved';
+    quote.clientRemarks = clientRemarks || 'Approved';
+    quote.decidedAt = new Date();
+    await quote.save();
+
+    // 3. Update the job charge and activate it
+    const job = await B2BJob.findById(quote.jobId);
+    if (job) {
+      const prevCharge = job.charge;
+      job.charge = quote.proposedAmount;
+      job.status = 'searching_engineer'; // Activate job
+      job.quoteApprovalId = quote._id;
+      await job.save();
+
+      // 4. Deduct extra if proposed > original, or refund if less
+      if (amountDiff !== 0) {
+        wallet.balance -= amountDiff;
+        await wallet.save();
+
+        await B2BWalletTransaction.create({
+          companyId,
+          walletId: wallet._id,
+          transactionId: `QA-${Date.now()}`,
+          type: 'job_deduction',
+          amount: -amountDiff,
+          totalAmount: -amountDiff,
+          status: 'success',
+          remark: `Quote adjustment for Job ${job.jobId} (${amountDiff > 0 ? '+' : ''}${amountDiff})`
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Quote approved. Job is now active in the queue.',
+      data: quote
+    });
+  } catch (error) {
+    console.error('[QuoteApproval] approveQuote error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to approve quote' });
+  }
+};
+
+/**
+ * POST Reject a modified quote — cancels the job
+ * POST /api/b2b/jobs/quotes/:quoteId/reject
+ */
+const rejectQuote = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const { quoteId } = req.params;
+    const { clientRemarks } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(quoteId)) {
+      return res.status(400).json({ success: false, message: 'Invalid quote ID' });
+    }
+
+    const quote = await QuoteApproval.findOne({ _id: quoteId, companyId, status: 'pending' });
+    if (!quote) {
+      return res.status(404).json({ success: false, message: 'Pending quote not found' });
+    }
+
+    // Update quote
+    quote.status = 'rejected';
+    quote.clientRemarks = clientRemarks || 'Rejected by client';
+    quote.decidedAt = new Date();
+    await quote.save();
+
+    // Cancel the associated job
+    const job = await B2BJob.findById(quote.jobId);
+    if (job) {
+      job.status = 'cancelled';
+      job.quoteApprovalId = quote._id;
+      await job.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Quote rejected. Job has been cancelled.',
+      data: quote
+    });
+  } catch (error) {
+    console.error('[QuoteApproval] rejectQuote error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to reject quote' });
+  }
+};
+
 module.exports = {
   getStats,
   getJobs,
@@ -363,5 +553,9 @@ module.exports = {
   getJobTimeline,
   reassignEngineer,
   getLiveTracking,
-  getJobLogs
+  getJobLogs,
+  submitEngineerRating,
+  getPendingQuotes,
+  approveQuote,
+  rejectQuote
 };

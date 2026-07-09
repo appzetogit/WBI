@@ -45,13 +45,7 @@ const BottomNav = React.memo(() => {
   const navRef = useRef(null);
   const { cartCount } = useCart();
 
-  const { scrollY } = useScroll();
-  const [hidden, setHidden] = React.useState(false);
-  useMotionValueEvent(scrollY, 'change', (latest) => {
-    const prev = scrollY.getPrevious();
-    if (latest > prev && latest > 150) setHidden(true);
-    else setHidden(false);
-  });
+  // Hide-on-scroll removed to fix empty bottom space issue
 
   const navItems = useMemo(() => [
     { id: 'home', label: 'Home', icon: FiHome, filledIcon: HiHome, path: '/user' },
@@ -81,9 +75,7 @@ const BottomNav = React.memo(() => {
   return (
     <motion.nav
       className="fixed bottom-0 z-40 w-full max-w-[480px] mx-auto left-1/2 -translate-x-1/2 bg-white border-t border-gray-100 pb-[env(safe-area-inset-bottom)] pb-2 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]"
-      variants={{ visible: { y: 0 }, hidden: { y: '100%' } }}
-      animate={hidden ? 'hidden' : 'visible'}
-      transition={{ duration: 0.35, ease: 'easeInOut' }}
+
     >
       <div className="w-full px-2 pt-2 pb-1.5">
         <div ref={navRef} className="flex items-center justify-around max-w-md mx-auto relative">

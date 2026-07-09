@@ -22,13 +22,8 @@ const navItems = [
   },
   { name: 'My Jobs', path: '/b2b/jobs', icon: FiBriefcase },
   { name: 'Wallet & Payments', path: '/b2b/wallet', icon: FiCreditCard },
-  { name: 'Engineers', path: '/b2b/engineers', icon: FiUsers },
-  { name: 'Live Tracking', path: '/b2b/live-tracking', icon: FiMap },
-  { name: 'Invoices', path: '/b2b/invoices', icon: FiFileText },
   { name: 'Reports', path: '/b2b/reports', icon: FiPieChart },
-  { name: 'Support', path: '/b2b/support', icon: FiHelpCircle },
   { name: 'Company Profile', path: '/b2b/company-profile', icon: FiUser },
-  { name: 'Users', path: '/b2b/users', icon: FiUsers },
   { name: 'Settings', path: '/b2b/settings', icon: FiSettings },
   { name: 'Logout', path: '#logout', icon: FiLogOut }
 ];

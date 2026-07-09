@@ -172,7 +172,13 @@ api.interceptors.response.use(
     // Handle 403 Forbidden - Role mismatch or Invalid Token
     if (error.response?.status === 403) {
       console.error('Access Denied (403):', error.response.data.message);
-      // Removed automatic logout to prevent login loops during debugging
+      const message = error.response.data.message?.toLowerCase() || '';
+      const isPendingApproval = message.includes('pending') || message.includes('rejected') || message.includes('suspended');
+      const path = window.location.pathname;
+      if (!path.includes('/login') && !isPendingApproval) {
+        const { role } = getTokenKeys(originalRequest.url);
+        handleLogout(role);
+      }
     }
 
     return Promise.reject(error);

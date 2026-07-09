@@ -10,7 +10,7 @@ const vendorSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: [true, 'Please provide an email'],
+    sparse: true,
     unique: true,
     trim: true,
     lowercase: true
@@ -108,6 +108,30 @@ const vendorSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  totalTechnicians: {
+    type: Number,
+    default: 0
+  },
+  canHandleDailyInstantJobs: {
+    type: Boolean,
+    default: true
+  },
+  totalProjectManagers: {
+    type: Number,
+    default: 0
+  },
+  totalFieldTechnicians: {
+    type: Number,
+    default: 0
+  },
+  hasInHouseTeam: {
+    type: Boolean,
+    default: true
+  },
+  usesSubcontractors: {
+    type: Boolean,
+    default: false
+  },
   workingDays: {
     type: [String],
     default: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -162,28 +186,28 @@ const vendorSchema = new mongoose.Schema({
   aadhar: {
     number: {
       type: String,
-      required: [true, 'Please provide Aadhar number'],
-      trim: true
+      trim: true,
+      default: null
     },
     document: {
       type: String, // Cloudinary URL (Front Side)
-      required: [true, 'Please upload Aadhar Front document']
+      default: null
     },
     backDocument: {
       type: String, // Cloudinary URL (Back Side)
-      required: [true, 'Please upload Aadhar Back document']
+      default: null
     }
   },
   pan: {
     number: {
       type: String,
-      required: [true, 'Please provide PAN number'],
       trim: true,
-      uppercase: true
+      uppercase: true,
+      default: null
     },
     document: {
       type: String, // Cloudinary URL
-      required: [true, 'Please upload PAN document']
+      default: null
     }
   },
   otherDocuments: [{
@@ -193,6 +217,16 @@ const vendorSchema = new mongoose.Schema({
     type: String,
     enum: Object.values(VENDOR_STATUS),
     default: VENDOR_STATUS.PENDING
+  },
+  inductionStatus: {
+    type: String,
+    enum: ['pending', 'completed'],
+    default: 'pending'
+  },
+  kitDispatchStatus: {
+    type: String,
+    enum: ['pending', 'dispatched', 'delivered'],
+    default: 'pending'
   },
   approvalDate: {
     type: Date

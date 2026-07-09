@@ -394,12 +394,6 @@ exports.unifiedLogin = async (req, res) => {
     // Check vendor specific approval status
     if (resolvedRole === 'vendor') {
       const status = foundUser.approvalStatus || 'pending';
-      if (status === 'pending') {
-        return res.status(403).json({
-          success: false,
-          message: 'Your account is pending admin approval. Please wait for approval.'
-        });
-      }
       if (status === 'rejected') {
         return res.status(403).json({
           success: false,

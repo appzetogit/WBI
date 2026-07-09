@@ -111,6 +111,8 @@ const authenticate = async (req, res, next) => {
               id: company._id.toString(), 
               companyId: company._id.toString(),
               role: 'Company Admin',
+              verificationStatus: company.verificationStatus, // ← FIXED: explicitly set for isApprovedB2B
+              isActive: company.isActive,
               permissions: [
                 'bulk_jobs.read', 'bulk_jobs.write',
                 'jobs.read', 'jobs.write',

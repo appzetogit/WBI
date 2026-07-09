@@ -259,7 +259,7 @@ const BulkJobReview = () => {
                       <td>{err.rowData.city || 'N/A'}</td>
                       <td>{err.rowData.pincode || 'N/A'}</td>
                       <td className="text-right text-red-500 font-extrabold pr-2 max-w-[200px] truncate">
-                        {err.errors.join(', ')}
+                        {(err.errorList || err.errors || []).join(', ')}
                       </td>
                     </tr>
                   ))

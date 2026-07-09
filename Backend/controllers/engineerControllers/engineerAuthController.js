@@ -4,6 +4,7 @@ const { generateOTP, hashOTP, storeOTP, verifyOTP, checkRateLimit } = require('.
 const { generateTokenPair, verifyRefreshToken, generateVerificationToken, verifyVerificationToken } = require('../../utils/tokenService');
 const { sendOTP: sendSMSOTP } = require('../../services/smsService');
 const cloudinaryService = require('../../services/cloudinaryService');
+const cgpeService = require('../../services/cgpeService');
 const { USER_ROLES, ENGINEER_STATUS } = require('../../utils/constants');
 const { validationResult } = require('express-validator');
 const Worker = require('../../models/Worker');
@@ -588,11 +589,83 @@ const refreshToken = async (req, res) => {
   }
 };
 
+/**
+ * Verify Aadhaar before completing registration
+ */
+const verifyAadhaarSignup = async (req, res) => {
+  try {
+    const { aadhaarNumber } = req.body;
+    if (!aadhaarNumber) {
+      return res.status(400).json({ success: false, message: 'Aadhaar number is required' });
+    }
+    const result = await cgpeService.verifyAadhaar(aadhaarNumber);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Aadhaar pre-verification error:', error);
+    res.status(500).json({ success: false, message: error.response?.data?.message || error.message || 'Verification failed' });
+  }
+};
+
+/**
+ * Verify PAN before completing registration
+ */
+const verifyPanSignup = async (req, res) => {
+  try {
+    const { panNumber, fullName, dob } = req.body;
+    if (!panNumber || !fullName) {
+      return res.status(400).json({ success: false, message: 'PAN number and Full Name are required' });
+    }
+    const result = await cgpeService.verifyPan(panNumber, fullName, dob);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('PAN pre-verification error:', error);
+    res.status(500).json({ success: false, message: error.response?.data?.message || error.message || 'Verification failed' });
+  }
+};
+
+/**
+ * Initiate DigiLocker Flow
+ */
+const initiateDigiLockerSignup = async (req, res) => {
+  try {
+    const { mobileNumber, redirectUrl } = req.body;
+    if (!mobileNumber) {
+      return res.status(400).json({ success: false, message: 'Mobile number is required' });
+    }
+    const result = await cgpeService.initiateDigiLocker(mobileNumber, redirectUrl);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('DigiLocker initiate error:', error);
+    res.status(500).json({ success: false, message: error.response?.data?.message || error.message || 'DigiLocker initiation failed' });
+  }
+};
+
+/**
+ * Complete DigiLocker Flow
+ */
+const completeDigiLockerSignup = async (req, res) => {
+  try {
+    const { recordId } = req.body;
+    if (!recordId) {
+      return res.status(400).json({ success: false, message: 'Record ID is required' });
+    }
+    const result = await cgpeService.completeDigiLocker(recordId);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('DigiLocker complete error:', error);
+    res.status(500).json({ success: false, message: error.response?.data?.message || error.message || 'DigiLocker completion failed' });
+  }
+};
+
 module.exports = {
   sendOTP,
   verifyLogin,
   register,
   login,
   logout,
-  refreshToken
+  refreshToken,
+  verifyAadhaarSignup,
+  verifyPanSignup,
+  initiateDigiLockerSignup,
+  completeDigiLockerSignup
 };

@@ -66,7 +66,7 @@ exports.getSummary = async (req, res) => {
     let companyId = req.query.companyId;
 
     if (!isAdminUser) {
-      companyId = req.user.id;
+      companyId = req.companyId || req.user.companyId || req.user.id;
     }
 
     let engineerIds = [];
@@ -144,7 +144,7 @@ exports.getEngineersList = async (req, res) => {
     let companyId = req.query.companyId;
 
     if (!isAdminUser) {
-      companyId = req.user.id;
+      companyId = req.companyId || req.user.companyId || req.user.id;
     }
 
     let engineerIds = [];
@@ -280,7 +280,8 @@ exports.getEngineerDetails = async (req, res) => {
     }
 
     if (!isAdminUser) {
-      const companyId = new mongoose.Types.ObjectId(req.user.id);
+      const rawId = req.companyId || req.user.companyId || req.user.id;
+      const companyId = new mongoose.Types.ObjectId(rawId);
       const authorizedIds = await getCompanyEngineerIds(companyId);
       if (!authorizedIds.some(id => id.toString() === engineerId)) {
         return res.status(403).json({ success: false, message: 'Not authorized to view this engineer details' });
@@ -356,7 +357,8 @@ exports.getEngineerLocation = async (req, res) => {
     }
 
     if (!isAdminUser) {
-      const companyId = new mongoose.Types.ObjectId(req.user.id);
+      const rawId = req.companyId || req.user.companyId || req.user.id;
+      const companyId = new mongoose.Types.ObjectId(rawId);
       const authorizedIds = await getCompanyEngineerIds(companyId);
       if (!authorizedIds.some(id => id.toString() === engineerId)) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -400,7 +402,8 @@ exports.getEngineerTimeline = async (req, res) => {
     }
 
     if (!isAdminUser) {
-      const companyId = new mongoose.Types.ObjectId(req.user.id);
+      const rawId = req.companyId || req.user.companyId || req.user.id;
+      const companyId = new mongoose.Types.ObjectId(rawId);
       const authorizedIds = await getCompanyEngineerIds(companyId);
       if (!authorizedIds.some(id => id.toString() === engineerId)) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -448,7 +451,8 @@ exports.getJobRoute = async (req, res) => {
 
     // Security check
     if (!['ADMIN', 'super_admin', 'admin'].includes(req.userRole)) {
-      if (job.companyId.toString() !== req.user.id) {
+      const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+      if (job.companyId.toString() !== authCompanyId.toString()) {
         return res.status(403).json({ success: false, message: 'Not authorized' });
       }
     }

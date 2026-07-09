@@ -57,7 +57,10 @@ const VendorLogin = () => {
 
       const response = await sharedAuthService.unifiedLogin(loginPayload);
       if (response.success) {
-        if (response.vendor?.adminApproval === 'pending') {
+        const isPendingVendor = response.vendor?.adminApproval === 'pending' || 
+                                (response.user?.role === 'vendor' && 
+                                 (response.user?.approvalStatus === 'pending' || response.user?.status === 'pending'));
+        if (isPendingVendor) {
           toast.success('Your account is under review.', { icon: <FiCheckCircle className="text-blue-500" /> });
           navigate('/vendor/pending-approval', { replace: true });
         } else {

@@ -7,11 +7,16 @@ const {
   login,
   logout,
   refreshToken,
-  verifyLogin
+  verifyLogin,
+  verifyAadhaarSignup,
+  verifyPanSignup,
+  initiateDigiLockerSignup,
+  completeDigiLockerSignup
 } = require('../../controllers/engineerControllers/engineerAuthController');
 const { registerCompany } = require('../../controllers/b2bControllers/companyAuthController');
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isEngineer } = require('../../middleware/roleMiddleware');
+const { verificationLimiter } = require('../../middleware/rateLimiter');
 const { getRegistrationConfig } = require('../../controllers/engineerControllers/engineerConfigController');
 
 // Validation rules
@@ -46,5 +51,11 @@ router.post('/login', loginValidation, login);
 router.post('/refresh-token', refreshToken);
 router.get('/config/registration', getRegistrationConfig); // Added config route
 router.post('/logout', authenticate, isEngineer, logout);
+
+// Pre-registration CGPE endpoints
+router.post('/verify-aadhaar-signup', verificationLimiter, verifyAadhaarSignup);
+router.post('/verify-pan-signup', verificationLimiter, verifyPanSignup);
+router.post('/digilocker/initiate', verificationLimiter, initiateDigiLockerSignup);
+router.post('/digilocker/complete', verificationLimiter, completeDigiLockerSignup);
 
 module.exports = router;

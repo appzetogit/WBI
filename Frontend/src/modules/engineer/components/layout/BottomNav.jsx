@@ -11,13 +11,7 @@ import api from '../../../../services/api';
 import engineerService from '../../../../services/engineerService';
 
 const BottomNav = memo(() => {
-  const { scrollY } = useScroll();
-  const [hidden, setHidden] = React.useState(false);
-  useMotionValueEvent(scrollY, 'change', (latest) => {
-    const prev = scrollY.getPrevious();
-    if (latest > prev && latest > 150) setHidden(true);
-    else setHidden(false);
-  });
+  // Hide-on-scroll removed to fix empty bottom space issue
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -111,9 +105,7 @@ const BottomNav = memo(() => {
   return (
     <motion.nav
       className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-slate-200 pb-safe shadow-[0_-4px_24px_rgba(0,0,0,0.02)]"
-      variants={{ visible: { y: 0 }, hidden: { y: '100%' } }}
-      animate={hidden ? 'hidden' : 'visible'}
-      transition={{ duration: 0.35, ease: 'easeInOut' }}
+
       style={{
         zIndex: 40,
         paddingBottom: 'env(safe-area-inset-bottom)',

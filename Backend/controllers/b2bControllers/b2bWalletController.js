@@ -91,8 +91,8 @@ const createTopupOrder = async (req, res) => {
     }
 
     const company = await B2BCompany.findById(companyId);
-    if (!company || company.verificationStatus !== 'approved') {
-      return res.status(403).json({ success: false, message: 'Only approved partner profiles can execute top ups' });
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Company not found. Please re-login.' });
     }
 
     let wallet = await B2BWallet.findOne({ companyId });

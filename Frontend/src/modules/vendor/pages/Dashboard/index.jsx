@@ -2,365 +2,791 @@ import React, { useState, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   FiBriefcase, FiShield, FiClipboard, FiCalendar, 
-  FiArrowUpRight, FiArrowDownRight 
+  FiArrowUpRight, FiArrowDownRight, FiNavigation, FiPhone, 
+  FiCheckCircle, FiDollarSign, FiFileText, FiUploadCloud, 
+  FiSettings, FiMapPin, FiFolder, FiAlertTriangle, FiCamera, 
+  FiClock, FiXCircle, FiPlay, FiSmile, FiBookOpen, FiActivity
 } from 'react-icons/fi';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
-} from 'recharts';
-import { vendorDashboardService } from '../../services/dashboardService';
-import { SkeletonDashboardStats, SkeletonList, SkeletonLine } from '../../../../components/common/SkeletonLoaders';
-import DigitalDashboard from './DigitalDashboard';
 import toast from 'react-hot-toast';
+import { themeColors } from '../../../../theme';
+import api from '../../../../services/api';
 
 const Dashboard = memo(() => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
-    totalProjects: 0,
-    activeAMC: 0,
-    pendingWorkOrders: 0,
-    totalEarnings: 0
-  });
-  const [recentWorkOrders, setRecentWorkOrders] = useState([]);
-  const [revenueData, setRevenueData] = useState([]);
-  const [projectStatusData, setProjectStatusData] = useState([
-    { name: 'Completed', value: 0 },
-    { name: 'In Progress', value: 0 },
-    { name: 'Pending', value: 0 }
+  const brandColor = themeColors.brand?.teal || '#0D8A72';
+
+  // Active Dashboard Mode: 'A' (Quick Services), 'B' (Contracts), 'C' (Rentals)
+  const [dashboardMode, setDashboardMode] = useState('A');
+  const [vendorData, setVendorData] = useState(null);
+
+  // Mode A (Quick Service) States
+  const [isOnline, setIsOnline] = useState(false);
+  const [locationPings, setLocationPings] = useState([]);
+  const [showActiveAlarm, setShowActiveAlarm] = useState(true);
+  const [alarmAccepted, setAlarmAccepted] = useState(false);
+  const [arrivalOtp, setArrivalOtp] = useState('');
+  const [arrivalOtpVerified, setArrivalOtpVerified] = useState(false);
+  const [completionOtp, setCompletionOtp] = useState('');
+  const [completionOtpVerified, setCompletionOtpVerified] = useState(false);
+  const [showCancellationSurvey, setShowCancellationSurvey] = useState(false);
+
+  // Daily Ledger Mock Data
+  const [earningsToday, setEarningsToday] = useState(1360);
+  const [tipsToday, setTipsToday] = useState(150);
+  const [commissionToday, setCommissionToday] = useState(240);
+
+  // Mode B (Contracts) States
+  const [milestones, setMilestones] = useState([
+    { id: 1, name: 'Site Survey', status: 'completed' },
+    { id: 2, name: 'Wiring & Cable Prep', status: 'completed' },
+    { id: 3, name: 'Component Mounting', status: 'in_progress' },
+    { id: 4, name: 'Programming & Logic', status: 'pending' },
+    { id: 5, name: 'Final Testing & Signoff', status: 'pending' }
   ]);
-  const [isDigitalVendor, setIsDigitalVendor] = useState(false);
+  const [procurements, setProcurements] = useState([
+    { item: '6-Port Smart Junction Box', qty: 2, cost: 1800, status: 'approved' },
+    { item: 'Shielded CAT-6 Spool (50m)', qty: 1, cost: 1200, status: 'pending_approval' }
+  ]);
+  const [newMaterialName, setNewMaterialName] = useState('');
+  const [newMaterialQty, setNewMaterialQty] = useState('');
+  const [newMaterialCost, setNewMaterialCost] = useState('');
+  
+  // Mode C (Rentals) States
+  const [assets, setAssets] = useState([
+    { id: 'AST-902', name: 'Industrial Concrete Mixer', status: 'Available', deposit: 5000 },
+    { id: 'AST-774', name: 'Hydraulic Scaffolding Ladder', status: 'Out on Rent', deposit: 8000 },
+    { id: 'AST-551', name: 'High-Torque Rotary Hammer Drill', status: 'Maintenance', deposit: 2000 }
+  ]);
+  const [selectedAssetForClaim, setSelectedAssetForClaim] = useState(null);
+  const [damageClaimAmount, setDamageClaimAmount] = useState('');
+  const [damageDescription, setDamageDescription] = useState('');
+
+  // General Wallet / Payout States
+  const [walletBalance, setWalletBalance] = useState(4350);
+  const [cashoutProcessing, setCashoutProcessing] = useState(false);
+  
+  // Anti-Renting biometric state
+  const [showBiometricModal, setShowBiometricModal] = useState(false);
+  const [biometricScanRunning, setBiometricScanRunning] = useState(false);
 
   useEffect(() => {
-    // Check if the vendor belongs to the Digital Solutions category
-    try {
-      const vendorData = JSON.parse(localStorage.getItem('vendorData'));
-      // ID for 'Digital Solutions' category from DB
-      const DIGITAL_CATEGORY_ID = '6a23fd15f2513e09a97eeb7f';
-      
-      if (vendorData && vendorData.categories) {
-        if (vendorData.categories.includes(DIGITAL_CATEGORY_ID)) {
-          setIsDigitalVendor(true);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to parse vendor data', e);
-    }
-
-    const fetchDashboardData = async () => {
+    // Read vendor data to determine primary mode from categories/services if present
+    const dataStr = localStorage.getItem('vendorData');
+    if (dataStr) {
       try {
-        setLoading(true);
-        const res = await vendorDashboardService.getDashboardStats();
-        if (res.success) {
-          const { stats: apiStats, recentWorkOrders: apiRecentWOs } = res.data;
-          
-          setStats({
-            totalProjects: apiStats?.totalProjects || 0,
-            activeAMC: apiStats?.activeAMC || 0,
-            pendingWorkOrders: apiStats?.pendingWorkOrders || 0,
-            totalEarnings: apiStats?.totalEarnings || 0
-          });
-
-          setRecentWorkOrders(apiRecentWOs || []);
-
-          // Static data for charts for now, until real endpoints are populated with real history
-          setRevenueData([
-            { name: '20 May', revenue: 45000 },
-            { name: '21 May', revenue: 120000 },
-            { name: '22 May', revenue: 80000 },
-            { name: '23 May', revenue: 170000 },
-            { name: '24 May', revenue: 110000 },
-            { name: '25 May', revenue: 200000 },
-            { name: '26 May', revenue: 250000 }
-          ]);
-
-          setProjectStatusData([
-            { name: 'Completed', value: Math.floor(Math.random() * 10) + 5 },
-            { name: 'In Progress', value: Math.floor(Math.random() * 10) + 2 },
-            { name: 'Pending', value: Math.floor(Math.random() * 10) + 1 }
-          ]);
+        const v = JSON.parse(dataStr);
+        setVendorData(v);
+        // Map to corresponding mode
+        if (v.businessType === 'project_partner') {
+          setDashboardMode('B');
         }
-      } catch (error) {
-        console.error('Error fetching dashboard:', error);
-        toast.error('Failed to load dashboard data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboardData();
+      } catch (_) {}
+    }
   }, []);
 
-  if (loading) {
-    return (
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div>
-          <SkeletonLine width="150px" height="2rem" className="mb-2" />
-          <SkeletonLine width="250px" height="1rem" />
-        </div>
-        <SkeletonDashboardStats />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 px-4">
-          <SkeletonList count={3} />
-          <SkeletonList count={3} />
-        </div>
-      </div>
-    );
-  }
+  // Mode A: Radar simulator
+  useEffect(() => {
+    let interval = null;
+    if (isOnline) {
+      interval = setInterval(() => {
+        const timestamp = new Date().toLocaleTimeString();
+        setLocationPings(prev => [`Ping dispatched at ${timestamp} (Coordinates: 10.02${Math.floor(Math.random()*90)}, 76.32${Math.floor(Math.random()*90)})`, ...prev.slice(0, 4)]);
+      }, 5000);
+    } else {
+      setLocationPings([]);
+    }
+    return () => clearInterval(interval);
+  }, [isOnline]);
 
-  // Render highly-specialized Digital Dashboard if applicable
-  if (isDigitalVendor) {
-    return <DigitalDashboard />;
-  }
+  const handleOnlineToggle = () => {
+    if (!isOnline) {
+      // Trigger anti-renting unannounced biometric face scan check before letting them go online
+      setShowBiometricModal(true);
+    } else {
+      setIsOnline(false);
+    }
+  };
 
-  const PIE_COLORS = ['#10B981', '#3B82F6', '#F59E0B'];
+  const handleBiometricSuccess = () => {
+    setBiometricScanRunning(true);
+    setTimeout(() => {
+      setBiometricScanRunning(false);
+      setShowBiometricModal(false);
+      setIsOnline(true);
+      toast.success('AI Biometric scan matched owner profile! Online mode unlocked.');
+    }, 2500);
+  };
+
+  const handleVerifyArrivalOtp = () => {
+    if (arrivalOtp === '4321') {
+      setArrivalOtpVerified(true);
+      toast.success('Arrival OTP verified! Escrow holds activated, job started.');
+    } else {
+      toast.error('Invalid OTP! Enter 4321 for verification simulation.');
+    }
+  };
+
+  const handleVerifyCompletionOtp = () => {
+    if (completionOtp === '8821') {
+      setCompletionOtpVerified(true);
+      // Simulate Split Payment Engine (15% Commission, 85% Wallet)
+      const grossJobPayout = 800;
+      const partnerEarnings = grossJobPayout * 0.85; // 680
+      const systemCommission = grossJobPayout * 0.15; // 120
+
+      setWalletBalance(prev => prev + partnerEarnings);
+      setEarningsToday(prev => prev + partnerEarnings);
+      setCommissionToday(prev => prev + systemCommission);
+
+      toast.success(`Job completed! ₹${partnerEarnings} (85%) credited to your wallet. WBI platform take-rate ₹${systemCommission} (15%) deducted.`);
+    } else {
+      toast.error('Invalid Completion OTP! Enter 8821 for validation.');
+    }
+  };
+
+  const handleInstantCashout = () => {
+    if (walletBalance < 100) {
+      toast.error('Insufficient wallet balance for instant cashout');
+      return;
+    }
+    setCashoutProcessing(true);
+    setTimeout(() => {
+      setWalletBalance(prev => prev - 500 - 5); // Cashout 500 + 5 processing fee
+      setCashoutProcessing(false);
+      toast.success('₹500.00 instantly transferred to your bank account via IMPS/UPI routing (₹5 processing fee applied).');
+    }, 2000);
+  };
+
+  const handleAddProcurement = () => {
+    if (!newMaterialName || !newMaterialCost) return;
+    const costNum = parseFloat(newMaterialCost);
+    const qtyNum = parseInt(newMaterialQty) || 1;
+    const newRecord = {
+      item: newMaterialName,
+      qty: qtyNum,
+      cost: costNum * qtyNum,
+      status: 'pending_approval'
+    };
+    setProcurements(prev => [...prev, newRecord]);
+    setNewMaterialName('');
+    setNewMaterialQty('');
+    setNewMaterialCost('');
+    toast.success('Material receipt uploaded and appended to client invoice. Pending Admin review.');
+  };
+
+  const handleDamageClaim = () => {
+    if (!damageClaimAmount) return;
+    toast.success(`Security deposit claim of ₹${damageClaimAmount} submitted for verification with photographic damage proof.`);
+    setSelectedAssetForClaim(null);
+    setDamageClaimAmount('');
+    setDamageDescription('');
+  };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      
+    <div className="max-w-7xl mx-auto space-y-6 px-4">
+
       {/* Header Info */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-        <p className="text-gray-500">Welcome back to your Vendor Panel 👋</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-5 rounded-3xl shadow-sm border border-[#E6F4F2]">
+        <div>
+          <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse"></span>
+            TaskY Partner Dashboard
+          </h1>
+          <p className="text-xs text-gray-400 mt-0.5">Manage dispatches, track digital BGV KYC/Penny drop compliance, and monitor earnings.</p>
+        </div>
+
+        {/* Dynamic Mode Switcher */}
+        <div className="flex bg-gray-50 border border-gray-100 p-1 rounded-2xl w-full md:w-auto overflow-x-auto shrink-0">
+          <button 
+            onClick={() => setDashboardMode('A')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${dashboardMode === 'A' ? 'bg-[#0D8A72] text-white' : 'text-gray-500 hover:text-gray-800'}`}
+          >
+            Mode A: Quick Services
+          </button>
+          <button 
+            onClick={() => setDashboardMode('B')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${dashboardMode === 'B' ? 'bg-[#0D8A72] text-white' : 'text-gray-500 hover:text-gray-800'}`}
+          >
+            Mode B: Contracts Project
+          </button>
+          <button 
+            onClick={() => setDashboardMode('C')}
+            className={`px-4 py-2 text-xs font-bold rounded-xl transition-all shrink-0 ${dashboardMode === 'C' ? 'bg-[#0D8A72] text-white' : 'text-gray-500 hover:text-gray-800'}`}
+          >
+            Mode C: Asset Rentals
+          </button>
+        </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        
-        {/* Total Projects */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-gray-500 text-sm font-medium mb-1">Total Projects</p>
-              <h3 className="text-2xl font-bold text-gray-800">{stats.totalProjects}</h3>
-            </div>
-            <div className="p-2.5 bg-[#10AFA5]/10 rounded-lg">
-              <FiBriefcase className="w-5 h-5 text-[#10AFA5]" />
-            </div>
-          </div>
-          <div className="flex items-center text-sm">
-            <FiArrowUpRight className="text-green-500 mr-1" />
-            <span className="text-green-500 font-medium">+12%</span>
-            <span className="text-gray-400 ml-1">vs last week</span>
-          </div>
-        </div>
-
-        {/* Active AMC */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-gray-500 text-sm font-medium mb-1">Active AMC</p>
-              <h3 className="text-2xl font-bold text-gray-800">{stats.activeAMC}</h3>
-            </div>
-            <div className="p-2.5 bg-indigo-100 rounded-lg">
-              <FiShield className="w-5 h-5 text-indigo-600" />
-            </div>
-          </div>
-          <div className="flex items-center text-sm">
-            <FiArrowUpRight className="text-green-500 mr-1" />
-            <span className="text-green-500 font-medium">+8%</span>
-            <span className="text-gray-400 ml-1">vs last week</span>
-          </div>
-        </div>
-
-        {/* Pending Work Orders */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-gray-500 text-sm font-medium mb-1">Pending Work Orders</p>
-              <h3 className="text-2xl font-bold text-gray-800">{stats.pendingWorkOrders}</h3>
-            </div>
-            <div className="p-2.5 bg-orange-100 rounded-lg">
-              <FiClipboard className="w-5 h-5 text-orange-500" />
-            </div>
-          </div>
-          <div className="flex items-center text-sm">
-            <FiArrowUpRight className="text-green-500 mr-1" />
-            <span className="text-green-500 font-medium">+15%</span>
-            <span className="text-gray-400 ml-1">vs last week</span>
-          </div>
-        </div>
-
-        {/* Total Earnings */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <p className="text-gray-500 text-sm font-medium mb-1">Total Earnings</p>
-              <h3 className="text-2xl font-bold text-gray-800">₹{stats.totalEarnings.toLocaleString()}</h3>
-            </div>
-            <div className="p-2.5 bg-green-100 rounded-lg">
-              <span className="text-green-600 font-bold text-lg">₹</span>
-            </div>
-          </div>
-          <div className="flex items-center text-sm">
-            <FiArrowUpRight className="text-green-500 mr-1" />
-            <span className="text-green-500 font-medium">+18%</span>
-            <span className="text-gray-400 ml-1">vs last week</span>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Charts Row */}
+      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Earnings Overview Chart */}
-        <div className="lg:col-span-2 bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-gray-800">Earnings Overview</h3>
-            <select className="bg-gray-50 border border-gray-200 text-gray-600 text-sm rounded-lg focus:ring-[#10AFA5] focus:border-[#10AFA5] px-3 py-1.5 outline-none">
-              <option>This Week</option>
-              <option>Last Week</option>
-              <option>This Month</option>
-            </select>
-          </div>
-          <div className="h-[280px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={revenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10AFA5" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#10AFA5" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} tickFormatter={(val) => val >= 100000 ? `${(val/100000).toFixed(1)}L` : `${val/1000}k`} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                  formatter={(value) => [`₹${value.toLocaleString()}`, 'Earnings']}
-                />
-                <Area type="monotone" dataKey="revenue" stroke="#10AFA5" strokeWidth={3} fillOpacity={1} fill="url(#colorRevenue)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
 
-        {/* Project Status Pie Chart */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
-          <h3 className="text-lg font-bold text-gray-800 mb-6">Project Status</h3>
-          <div className="h-[200px] w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={projectStatusData}
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {projectStatusData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Center Text */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-2xl font-bold text-gray-800">
-                {projectStatusData.reduce((acc, curr) => acc + curr.value, 0)}
-              </span>
-              <span className="text-xs text-gray-500 font-medium">Total</span>
-            </div>
-          </div>
-          {/* Custom Legend */}
-          <div className="mt-6 space-y-3">
-            {projectStatusData.map((entry, index) => (
-              <div key={entry.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}></span>
-                  <span className="text-sm font-medium text-gray-600">{entry.name}</span>
+        {/* 2-Column Main Workspace */}
+        <div className="lg:col-span-2 space-y-6">
+
+          {/* MODE A: BLUE-COLLAR / QUICK SERVICES */}
+          {dashboardMode === 'A' && (
+            <div className="space-y-6">
+              
+              {/* online status switch */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm flex justify-between items-center">
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-gray-500">Go Online Radar availability</p>
+                  <p className="text-[10px] text-gray-400">Activates real-time background location updates for dispatches.</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-gray-800">{entry.value}</span>
-                  <span className="text-xs text-gray-400 w-8 text-right">
-                    {Math.round((entry.value / projectStatusData.reduce((acc, curr) => acc + curr.value, 0)) * 100)}%
+                
+                <div className="flex items-center gap-3">
+                  <span className={`text-xs font-bold ${isOnline ? 'text-green-500' : 'text-gray-400'}`}>
+                    {isOnline ? 'ONLINE' : 'OFFLINE'}
                   </span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer" 
+                      checked={isOnline}
+                      onChange={handleOnlineToggle}
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0D8A72]"></div>
+                  </label>
                 </div>
               </div>
-            ))}
+
+              {/* Ping Radar Simulator */}
+              {isOnline && (
+                <div className="bg-gray-900 text-green-400 rounded-3xl p-5 border border-gray-800 font-mono text-xs space-y-2 animate-fade-in">
+                  <p className="font-bold flex items-center gap-1.5 text-white">
+                    <span className="w-2 h-2 rounded-full bg-green-400 animate-ping"></span> Live Background Location Pings:
+                  </p>
+                  <div className="space-y-1 text-[10px]">
+                    {locationPings.length > 0 ? locationPings.map((ping, idx) => (
+                      <p key={idx}>{ping}</p>
+                    )) : (
+                      <p className="text-gray-500">Awaiting location lock... updates every 5 seconds</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Active Dispatch Alarm (Job Card) */}
+              {showActiveAlarm && (
+                <div className="bg-white rounded-3xl border border-red-100 shadow-lg p-6 space-y-4 relative overflow-hidden animate-pulse-slow">
+                  <div className="absolute top-0 right-0 bg-red-500 text-white font-bold text-[9px] uppercase tracking-wider px-3 py-1 rounded-bl-xl">
+                    New Dispatch Request
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-bold text-gray-800">Job Card ID: DISP-88372</h3>
+                    <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-gray-600 pt-2">
+                      <div className="flex items-center gap-2">
+                        <FiMapPin className="text-[#0D8A72]" /> Location: Infopark Phase-2 (1.8 km)
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FiBriefcase className="text-[#0D8A72]" /> Category: Smart Lock Setup & Calibration
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FiClock className="text-[#0D8A72]" /> Est Time: 45 Minutes
+                      </div>
+                      <div className="flex items-center gap-2 text-green-700 font-bold">
+                        <FiDollarSign className="text-green-700" /> Payout: ₹680 (Net Earnings)
+                      </div>
+                    </div>
+                  </div>
+
+                  {!alarmAccepted ? (
+                    <div className="flex gap-3 pt-2">
+                      <button 
+                        onClick={() => {
+                          setShowActiveAlarm(false);
+                          setShowCancellationSurvey(true);
+                          toast.error('Dispatch request declined.');
+                        }}
+                        className="flex-1 py-3 border border-red-200 text-red-500 font-bold rounded-xl text-xs hover:bg-red-50 transition-colors"
+                      >
+                        Decline Dispatch
+                      </button>
+                      <button 
+                        onClick={() => {
+                          setAlarmAccepted(true);
+                          toast.success('Dispatch accepted! Head to customer location.');
+                        }}
+                        className="flex-1 py-3 bg-[#0D8A72] text-white font-bold rounded-xl text-xs hover:bg-teal-700 transition-all shadow-md"
+                      >
+                        Accept Dispatch
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 space-y-4">
+                      
+                      {/* Dialer masking */}
+                      <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+                        <span className="text-xs font-bold text-gray-700">Dialer Masking Proxy:</span>
+                        <button 
+                          onClick={() => toast.success('Dialing masked customer proxy: +91 98765 XXXXX')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-50 border border-[#0D8A72]/20 text-[#0D8A72] rounded-xl text-xs font-bold hover:bg-teal-100 transition-colors"
+                        >
+                          <FiPhone className="w-3.5 h-3.5" /> Call Customer Masked
+                        </button>
+                      </div>
+
+                      {/* Arrival OTP */}
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold text-gray-700">1. Arrival OTP Validation (Ask customer at door)</p>
+                        {!arrivalOtpVerified ? (
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              maxLength={4}
+                              placeholder="Enter 4-digit Arrival OTP (Use 4321)" 
+                              className="flex-1 p-2.5 border rounded-xl text-xs font-semibold outline-none focus:border-[#0D8A72]"
+                              value={arrivalOtp}
+                              onChange={e => setArrivalOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                            />
+                            <button 
+                              onClick={handleVerifyArrivalOtp}
+                              className="px-4 bg-gray-900 text-white font-bold rounded-xl text-xs hover:bg-black"
+                            >
+                              Verify
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-xl p-2">
+                            <FiCheckCircle className="mr-2 w-4 h-4" /> Arrival Verified. Job in progress.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Completion OTP */}
+                      {arrivalOtpVerified && (
+                        <div className="space-y-2 pt-2 border-t border-gray-200">
+                          <p className="text-xs font-bold text-gray-700">2. Complete OTP Sign-off (Ask customer on completion)</p>
+                          {!completionOtpVerified ? (
+                            <div className="flex gap-2">
+                              <input 
+                                type="text" 
+                                maxLength={4}
+                                placeholder="Enter Completion OTP (Use 8821)" 
+                                className="flex-1 p-2.5 border rounded-xl text-xs font-semibold outline-none focus:border-[#0D8A72]"
+                                value={completionOtp}
+                                onChange={e => setCompletionOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                              />
+                              <button 
+                                onClick={handleVerifyCompletionOtp}
+                                className="px-4 bg-[#0D8A72] text-white font-bold rounded-xl text-xs hover:bg-teal-700"
+                              >
+                                Sign-off Job
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-xl p-2">
+                              <FiCheckCircle className="mr-2 w-4 h-4" /> Job Completed & Funds Settled!
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Cancellation micro-survey */}
+              {showCancellationSurvey && (
+                <div className="bg-white rounded-3xl border border-red-100 shadow-md p-6 space-y-4 animate-fade-in">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-bold text-sm text-gray-800">Job Cancellation Audit Survey</h4>
+                    <button onClick={() => setShowCancellationSurvey(false)} className="text-gray-400 hover:text-gray-600"><FiXCircle className="w-5 h-5"/></button>
+                  </div>
+                  <p className="text-xs text-gray-500">Why was the dispatch cancelled? (Helps detect off-platform cash steering leakage)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-semibold text-gray-600">
+                    <button onClick={() => { setShowCancellationSurvey(false); toast.success('Survey response logged!'); }} className="p-3 border rounded-xl hover:bg-gray-50 text-left">Customer not reachable</button>
+                    <button onClick={() => { setShowCancellationSurvey(false); toast.success('Survey response logged!'); }} className="p-3 border rounded-xl hover:bg-gray-50 text-left">Customer requested cash settlement offline</button>
+                    <button onClick={() => { setShowCancellationSurvey(false); toast.success('Survey response logged!'); }} className="p-3 border rounded-xl hover:bg-gray-50 text-left">Equipment unavailable</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Daily Earnings Ledger */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <h3 className="font-bold text-sm text-gray-800">Daily Earnings Ledger (Today)</h3>
+                
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                    <span className="block text-[10px] text-gray-400 font-bold uppercase">Tasks Net Pay</span>
+                    <span className="block text-base font-extrabold text-gray-800 mt-1">₹{earningsToday}</span>
+                  </div>
+                  <div className="bg-green-50/50 p-4 rounded-2xl border border-green-100">
+                    <span className="block text-[10px] text-green-600 font-bold uppercase">Cash Tips</span>
+                    <span className="block text-base font-extrabold text-green-700 mt-1">₹{tipsToday}</span>
+                  </div>
+                  <div className="bg-red-50/50 p-4 rounded-2xl border border-red-100 text-red-500">
+                    <span className="block text-[10px] text-red-400 font-bold uppercase">TaskY Commission</span>
+                    <span className="block text-base font-extrabold text-red-600 mt-1">₹{commissionToday}</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* MODE B: PROFESSIONAL CONTRACTS */}
+          {dashboardMode === 'B' && (
+            <div className="space-y-6">
+              
+              {/* Milestone Progress Board */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <h3 className="font-bold text-sm text-gray-800">Milestone Progress Board (Home Automation Setup)</h3>
+                <div className="space-y-3">
+                  {milestones.map((m, idx) => (
+                    <div key={m.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-xl">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
+                          m.status === 'completed' ? 'bg-green-100 text-green-700' :
+                          m.status === 'in_progress' ? 'bg-blue-100 text-blue-700 animate-pulse' :
+                          'bg-gray-100 text-gray-400'
+                        }`}>
+                          {idx + 1}
+                        </div>
+                        <span className="text-xs font-bold text-gray-800">{m.name}</span>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        m.status === 'completed' ? 'bg-green-50 text-green-600' :
+                        m.status === 'in_progress' ? 'bg-blue-50 text-blue-600' :
+                        'bg-gray-50 text-gray-400'
+                      }`}>
+                        {m.status.toUpperCase().replace('_', ' ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Procurement Module */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <h3 className="font-bold text-sm text-gray-800">Digital Material Procurement</h3>
+                <p className="text-xs text-gray-400">Upload and claim local materials purchase receipts to append costs directly to the client's final invoice.</p>
+                
+                <div className="space-y-3">
+                  {procurements.map((p, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 border border-gray-100 rounded-xl text-xs font-semibold">
+                      <div>
+                        <p className="text-gray-800 font-bold">{p.item}</p>
+                        <p className="text-gray-400 text-[10px]">Qty: {p.qty} • Cost: ₹{p.cost}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${p.status === 'approved' ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                        {p.status.toUpperCase().replace('_', ' ')}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="border-t border-gray-100 pt-4 space-y-3">
+                  <h4 className="text-xs font-bold text-gray-700">Add New Procurement Receipt</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input 
+                      type="text" 
+                      placeholder="Material Name" 
+                      className="p-2 border rounded-xl text-xs outline-none focus:border-[#0D8A72]"
+                      value={newMaterialName}
+                      onChange={e => setNewMaterialName(e.target.value)}
+                    />
+                    <input 
+                      type="number" 
+                      placeholder="Qty" 
+                      className="p-2 border rounded-xl text-xs outline-none focus:border-[#0D8A72]"
+                      value={newMaterialQty}
+                      onChange={e => setNewMaterialQty(e.target.value)}
+                    />
+                    <input 
+                      type="number" 
+                      placeholder="Cost / Unit" 
+                      className="p-2 border rounded-xl text-xs outline-none focus:border-[#0D8A72]"
+                      value={newMaterialCost}
+                      onChange={e => setNewMaterialCost(e.target.value)}
+                    />
+                  </div>
+                  <button 
+                    onClick={handleAddProcurement}
+                    className="w-full py-2 bg-gray-900 text-white font-bold rounded-xl text-xs hover:bg-black transition-colors"
+                  >
+                    Upload Bill Receipt & Submit Cost
+                  </button>
+                </div>
+              </div>
+
+              {/* Warranty Management */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <h3 className="font-bold text-sm text-gray-800">Warranty Management Index</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 border rounded-xl bg-gray-50 border-gray-100">
+                    <p className="font-bold text-gray-800">Smart Hub Hub-992</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Manufacturer Warranty: 2 Years Active</p>
+                    <p className="text-[10px] text-gray-400">Installation Coverage: Active (Expires 12-May-2027)</p>
+                  </div>
+                  <div className="p-3 border rounded-xl bg-gray-50 border-gray-100">
+                    <p className="font-bold text-gray-800">Camera System Cam-773</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Manufacturer Warranty: 1 Year Active</p>
+                    <p className="text-[10px] text-gray-400">Installation Coverage: Active (Expires 20-Jun-2027)</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* MODE C: ASSET & HEAVY RENTAL PROVIDERS */}
+          {dashboardMode === 'C' && (
+            <div className="space-y-6">
+              
+              {/* Asset Availability Grid */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <h3 className="font-bold text-sm text-gray-800">Live Asset Availability Status</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {assets.map((asset, idx) => (
+                    <div key={asset.id} className="p-4 border border-gray-100 rounded-2xl bg-gray-50 space-y-2 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-gray-800">{asset.id}</span>
+                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full ${
+                          asset.status === 'Available' ? 'bg-green-50 text-green-700' :
+                          asset.status === 'Out on Rent' ? 'bg-blue-50 text-blue-700' :
+                          'bg-red-50 text-red-700'
+                        }`}>
+                          {asset.status}
+                        </span>
+                      </div>
+                      <p className="text-gray-500 font-semibold">{asset.name}</p>
+                      
+                      {/* Availability switcher */}
+                      <select 
+                        value={asset.status}
+                        onChange={(e) => {
+                          const updated = [...assets];
+                          updated[idx].status = e.target.value;
+                          setAssets(updated);
+                          toast.success(`${asset.id} status updated to ${e.target.value}`);
+                        }}
+                        className="w-full mt-2 p-1.5 bg-white border border-gray-200 rounded-xl text-[10px] focus:outline-none"
+                      >
+                        <option>Available</option>
+                        <option>Out on Rent</option>
+                        <option>Undergoing Maintenance</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Logistics Routing Sheet */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <h3 className="font-bold text-sm text-gray-800">Logistics Routing Sheet</h3>
+                <div className="space-y-3 text-xs">
+                  <div className="p-3 border rounded-xl flex items-center justify-between bg-gray-50 border-gray-100">
+                    <div>
+                      <p className="font-bold text-gray-800">Concrete Mixer Delivery Slot</p>
+                      <p className="text-[10px] text-gray-400 mt-1">Route: Warehouse #3 ➔ Infopark Site (Delivery Time: 10:00 AM - 12:00 PM)</p>
+                    </div>
+                    <button 
+                      onClick={() => toast.success('Routing details fetched')}
+                      className="px-2.5 py-1 bg-[#0D8A72] text-white font-bold rounded-lg text-[10px]"
+                    >
+                      Route Map
+                    </button>
+                  </div>
+                  <div className="p-3 border rounded-xl flex items-center justify-between bg-gray-50 border-gray-100">
+                    <div>
+                      <p className="font-bold text-gray-800">Hydraulic Scaffolding Pickup Slot</p>
+                      <p className="text-[10px] text-gray-400 mt-1">Route: Kochi Tech Zone ➔ Warehouse #3 (Pickup Time: 04:00 PM - 06:00 PM)</p>
+                    </div>
+                    <button 
+                      onClick={() => toast.success('Routing details fetched')}
+                      className="px-2.5 py-1 bg-[#0D8A72] text-white font-bold rounded-lg text-[10px]"
+                    >
+                      Route Map
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Security Deposit Vault */}
+              <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-sm text-gray-800">Security Deposit Vault Pool</h3>
+                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Escrow Holdings</span>
+                </div>
+                
+                <div className="space-y-3">
+                  {assets.map((asset) => (
+                    <div key={asset.id} className="flex justify-between items-center p-3 bg-gray-50 border border-gray-100 rounded-xl text-xs">
+                      <div>
+                        <p className="font-bold text-gray-800">{asset.name}</p>
+                        <p className="text-[10px] text-gray-400">Escrow Safety Deposit Held: ₹{asset.deposit}</p>
+                      </div>
+                      {asset.status === 'Out on Rent' && (
+                        <button 
+                          onClick={() => setSelectedAssetForClaim(asset)}
+                          className="px-3 py-1.5 bg-red-500 text-white font-bold rounded-xl text-[10px] hover:bg-red-600"
+                        >
+                          File Damage Claim
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+
+        {/* 1-Column Right Sidebar */}
+        <div className="space-y-6">
+
+          {/* Secure Escrow Lock Info */}
+          <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm text-gray-800">Financial Security Escrow</h3>
+            <div className="p-4 bg-teal-50/50 border border-[#10AFA5]/10 rounded-2xl space-y-2 text-xs leading-relaxed text-gray-600">
+              <p className="font-bold text-[#0D8A72] flex items-center gap-1.5">
+                <FiShield/> Upfront Payment Lock Active
+              </p>
+              <p>Clients pay 100% of cost upfront before task scheduling. Payments remain locked in a secure corporate escrow account, releasing instantly to partner wallets upon input of the Completion OTP.</p>
+            </div>
           </div>
+
+          {/* Partner Wallet Card */}
+          <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-sm text-gray-800">In-App Partner Wallet</h3>
+              <FiDollarSign className="text-[#0D8A72]" />
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-xs text-gray-400 font-bold uppercase">Available Balance</span>
+              <h2 className="text-3xl font-black text-gray-800">₹{walletBalance.toLocaleString()}</h2>
+            </div>
+
+            <div className="pt-2 space-y-2">
+              <button
+                onClick={handleInstantCashout}
+                disabled={cashoutProcessing}
+                className="w-full py-3 bg-[#0D8A72] text-white font-extrabold rounded-xl text-xs shadow-md hover:bg-teal-700 transition-colors flex items-center justify-center gap-2"
+              >
+                {cashoutProcessing ? 'Processing IMPS Transfer...' : 'Run Instant Cashout to Bank'}
+              </button>
+              <p className="text-[10px] text-gray-400 text-center">Flexible Instant Mode applies a flat rate of ₹5 per IMPS request. Auto-Friday disbursals are free of cost.</p>
+            </div>
+          </div>
+
+          {/* Compliance & Insurance Status */}
+          <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm text-gray-800">Partner Compliance Profile</h3>
+            
+            <div className="space-y-3 text-xs font-semibold">
+              <div className="flex items-center justify-between p-2.5 bg-green-50 text-green-700 border border-green-200 rounded-xl">
+                <span>Aadhaar Identity check</span>
+                <span className="text-[9px] uppercase font-bold">Verified</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-green-50 text-green-700 border border-green-200 rounded-xl">
+                <span>Penny Drop Name Score (95%)</span>
+                <span className="text-[9px] uppercase font-bold">Passed</span>
+              </div>
+              <div className="flex items-center justify-between p-2.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl">
+                <span>Active Insurance Cover</span>
+                <span className="text-[9px] uppercase font-bold">₹20k active</span>
+              </div>
+            </div>
+          </div>
+
         </div>
 
       </div>
 
-      {/* Lists Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Recent Work Orders */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-gray-800">Recent Work Orders</h3>
-            <button onClick={() => navigate('/vendor/work-orders')} className="text-[#10AFA5] text-sm font-medium hover:underline">
-              View All
-            </button>
-          </div>
-          
-          <div className="space-y-4">
-            {recentWorkOrders.length > 0 ? recentWorkOrders.map((wo, i) => (
-              <div key={i} className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100 cursor-pointer" onClick={() => navigate(`/vendor/work-orders/${wo._id}`)}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-                    <FiClipboard className="text-indigo-500" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-gray-800">{wo.workOrderId || 'WO-Unknown'}</h4>
-                    <p className="text-xs text-gray-500">{wo.userId?.name || 'Customer'} • {wo.type || 'Maintenance'}</p>
-                  </div>
-                </div>
-                <div>
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                    wo.status === 'Pending' ? 'bg-orange-100 text-orange-600' :
-                    wo.status === 'In Progress' ? 'bg-blue-100 text-blue-600' :
-                    wo.status === 'Assigned' ? 'bg-indigo-100 text-indigo-600' :
-                    'bg-green-100 text-green-600'
-                  }`}>
-                    {wo.status}
-                  </span>
-                </div>
+      {/* MODAL: ANTI-RENTING BIOMETRIC VERIFICATION */}
+      {showBiometricModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 border border-gray-100 shadow-2xl">
+            <div className="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center text-[#0D8A72] mx-auto">
+              <FiCamera className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-800 text-base">Random Face Scan Verification</h3>
+              <p className="text-xs text-gray-400 mt-1">To ensure safety guidelines, perform a quick facial biometric scan before switching availability to Online.</p>
+            </div>
+            
+            {biometricScanRunning ? (
+              <div className="py-4 space-y-2">
+                <div className="w-8 h-8 border-4 border-t-transparent border-[#0D8A72] rounded-full animate-spin mx-auto"></div>
+                <p className="text-[10px] text-gray-400">Comparing live facial model with Aadhaar verification record...</p>
               </div>
-            )) : (
-              <div className="text-center py-6 text-gray-500 text-sm">
-                No recent work orders found.
+            ) : (
+              <div className="flex gap-2 pt-2">
+                <button 
+                  onClick={() => setShowBiometricModal(false)}
+                  className="flex-1 py-2.5 border rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleBiometricSuccess}
+                  className="flex-1 py-2.5 bg-[#0D8A72] text-white font-bold rounded-xl text-xs hover:bg-teal-700"
+                >
+                  Start Scanning
+                </button>
               </div>
             )}
           </div>
         </div>
+      )}
 
-        {/* Upcoming Schedules */}
-        <div className="bg-white rounded-xl p-5 border border-gray-100 shadow-sm">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-bold text-gray-800">Upcoming Schedules</h3>
-            <button className="text-[#10AFA5] text-sm font-medium hover:underline">
-              View Calendar
+      {/* MODAL: FILE DAMAGE CLAIM */}
+      {selectedAssetForClaim && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 border border-gray-100 shadow-2xl">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-gray-800 text-sm">Submit Safety Deposit Damage Claim</h3>
+              <button onClick={() => setSelectedAssetForClaim(null)} className="text-gray-400 hover:text-gray-600"><FiXCircle className="w-5 h-5"/></button>
+            </div>
+            <p className="text-xs text-gray-500">Asset: {selectedAssetForClaim.name} ({selectedAssetForClaim.id})</p>
+            
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-gray-600 mb-1">Requested Deduction Amount (Escrow Hold: ₹{selectedAssetForClaim.deposit})</label>
+                <input 
+                  type="number"
+                  placeholder="Enter Claim Amount"
+                  className="w-full p-3 border rounded-xl outline-none focus:border-[#0D8A72] font-semibold"
+                  value={damageClaimAmount}
+                  onChange={e => setDamageClaimAmount(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-gray-600 mb-1">Explain Damage details</label>
+                <textarea 
+                  rows={3}
+                  placeholder="Describe parts damaged, wear, or missing tools..."
+                  className="w-full p-3 border rounded-xl outline-none focus:border-[#0D8A72]"
+                  value={damageDescription}
+                  onChange={e => setDamageDescription(e.target.value)}
+                />
+              </div>
+
+              <div className="border-2 border-dashed border-gray-200 rounded-xl p-4 bg-gray-50 text-center space-y-2">
+                <FiUploadCloud className="w-6 h-6 mx-auto text-gray-400" />
+                <p className="font-bold text-gray-500">Upload Photographic Proof of Damage</p>
+                <p className="text-[10px] text-gray-400">Claims require photographic proof to retain safety holds.</p>
+              </div>
+            </div>
+
+            <button 
+              onClick={handleDamageClaim}
+              className="w-full py-3 bg-red-500 text-white font-bold rounded-xl text-xs hover:bg-red-600 shadow-md"
+            >
+              Submit Claim & Lock Deposit Holding
             </button>
           </div>
-          
-          <div className="space-y-4">
-            {[1, 2, 3].map((item, i) => (
-              <div key={i} className="flex items-start gap-4 p-3 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100 cursor-pointer">
-                <div className="flex flex-col items-center justify-center w-12 pt-1">
-                  <span className="text-[#10AFA5] font-bold text-lg leading-none">{27 + i}</span>
-                  <span className="text-[#10AFA5] text-xs font-medium">May</span>
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-sm font-bold text-gray-800">Axis Bank - Connaught Place</h4>
-                  <p className="text-xs text-gray-500 mt-0.5">Preventive Maintenance</p>
-                </div>
-                <div className="text-right pt-1">
-                  <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded-md">
-                    10:00 AM
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
+      )}
 
-      </div>
     </div>
   );
 });

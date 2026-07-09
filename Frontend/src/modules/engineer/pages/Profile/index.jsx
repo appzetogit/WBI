@@ -29,7 +29,16 @@ const Profile = () => {
     if (profileRes?.success && (profileRes?.engineer || profileRes?.worker)) {
       return profileRes.engineer || profileRes.worker;
     }
-    const localEngineerData = JSON.parse(localStorage.getItem('engineerData') || '{}');
+    let localEngineerData = null;
+    try {
+      const stored = localStorage.getItem('engineerData');
+      if (stored && stored !== 'undefined') {
+        localEngineerData = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error('Failed to parse engineerData from localStorage', e);
+    }
+    
     if (localEngineerData && Object.keys(localEngineerData).length > 0) {
       return localEngineerData;
     }

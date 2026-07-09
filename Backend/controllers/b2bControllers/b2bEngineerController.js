@@ -5,6 +5,9 @@ const B2BEngineerAssignment = require('../../models/B2BEngineerAssignment');
 const B2BJobStatusLog = require('../../models/B2BJobStatusLog');
 const { WORKER_STATUS } = require('../../utils/constants');
 
+// Helper to get authoritative B2B companyId from request
+const getCompanyId = (req) => req.companyId || req.user.companyId || req.user.id;
+
 // Helper to get distinct engineer IDs assigned to a company's jobs
 const getCompanyEngineerIds = async (companyId) => {
   const jobEngineers = await B2BJob.distinct('assignedTo', { companyId, assignedTo: { $ne: null } });
@@ -21,7 +24,8 @@ const getCompanyEngineerIds = async (companyId) => {
  */
 const getStats = async (req, res) => {
   try {
-    const engineerIds = await getCompanyEngineerIds(req.user.id);
+    const companyId = getCompanyId(req);
+    const engineerIds = await getCompanyEngineerIds(companyId);
     
     const totalEngineers = engineerIds.length;
     const available = await Engineer.countDocuments({ _id: { $in: engineerIds }, status: { $in: ['ONLINE', 'active'] } });
@@ -29,7 +33,7 @@ const getStats = async (req, res) => {
     
     // On job means they have an active B2B job in progress or on the way
     const activeJobs = await B2BJob.find({
-      companyId: req.user.id,
+      companyId,
       assignedTo: { $in: engineerIds },
       status: { $in: ['in_progress', 'engineer_on_way', 'assigned'] }
     }).distinct('assignedTo');
@@ -67,7 +71,8 @@ const getStats = async (req, res) => {
  */
 const getEngineers = async (req, res) => {
   try {
-    const engineerIds = await getCompanyEngineerIds(req.user.id);
+    const companyId = getCompanyId(req);
+    const engineerIds = await getCompanyEngineerIds(companyId);
     
     const { 
       page = 1, limit = 10, search, status, skill, city, rating, experience
@@ -119,7 +124,7 @@ const getEngineers = async (req, res) => {
     // For each engineer, fetch their current active job for this company
     const enrichedEngineers = await Promise.all(engineers.map(async (eng) => {
       const currentJob = await B2BJob.findOne({
-        companyId: req.user.id,
+        companyId,
         assignedTo: eng._id,
         status: { $in: ['assigned', 'searching_engineer', 'in_progress', 'engineer_on_way'] }
       }).select('jobId service city status').lean();
@@ -169,7 +174,8 @@ const getEngineers = async (req, res) => {
  */
 const getEngineerDetails = async (req, res) => {
   try {
-    const engineerIds = await getCompanyEngineerIds(req.user.id);
+    const companyId = getCompanyId(req);
+    const engineerIds = await getCompanyEngineerIds(companyId);
     const engId = req.params.engineerId;
     
     if (!engineerIds.some(id => id.toString() === engId)) {
@@ -184,14 +190,14 @@ const getEngineerDetails = async (req, res) => {
 
     // Fetch current job
     const currentJob = await B2BJob.findOne({
-      companyId: req.user.id,
+      companyId,
       assignedTo: engId,
       status: { $in: ['assigned', 'in_progress'] }
     }).select('jobId service status city address charge').lean();
 
     // Fetch jobs completed for this company
     const completedForCompany = await B2BJob.countDocuments({
-      companyId: req.user.id,
+      companyId,
       assignedTo: engId,
       status: 'completed'
     });
@@ -214,8 +220,9 @@ const getEngineerDetails = async (req, res) => {
  */
 const getCurrentJob = async (req, res) => {
   try {
+    const companyId = getCompanyId(req);
     const currentJob = await B2BJob.findOne({
-      companyId: req.user.id,
+      companyId,
       assignedTo: req.params.engineerId,
       status: { $in: ['assigned', 'in_progress'] }
     }).lean();
@@ -230,7 +237,8 @@ const getCurrentJob = async (req, res) => {
  */
 const getPerformance = async (req, res) => {
   try {
-    const engineerIds = await getCompanyEngineerIds(req.user.id);
+    const companyId = getCompanyId(req);
+    const engineerIds = await getCompanyEngineerIds(companyId);
     const engId = req.params.engineerId;
     
     if (!engineerIds.some(id => id.toString() === engId)) {
@@ -243,7 +251,7 @@ const getPerformance = async (req, res) => {
     currentMonthStart.setHours(0,0,0,0);
 
     const jobs = await B2BJob.find({
-      companyId: req.user.id,
+      companyId,
       assignedTo: engId
     }).lean();
 
@@ -278,7 +286,8 @@ const getPerformance = async (req, res) => {
  */
 const getTimeline = async (req, res) => {
   try {
-    const jobs = await B2BJob.find({ companyId: req.user.id, assignedTo: req.params.engineerId }).select('_id jobId').lean();
+    const companyId = getCompanyId(req);
+    const jobs = await B2BJob.find({ companyId, assignedTo: req.params.engineerId }).select('_id jobId').lean();
     const jobIds = jobs.map(j => j._id);
     
     const logs = await B2BJobStatusLog.find({ jobId: { $in: jobIds } })
@@ -298,7 +307,8 @@ const getTimeline = async (req, res) => {
  */
 const getLiveTracking = async (req, res) => {
   try {
-    const engineerIds = await getCompanyEngineerIds(req.user.id);
+    const companyId = getCompanyId(req);
+    const engineerIds = await getCompanyEngineerIds(companyId);
     
     // Get live coordinates of engineers who are currently active/busy/online
     const activeEngineers = await Engineer.find({
@@ -333,7 +343,8 @@ const getLiveTracking = async (req, res) => {
  */
 const exportEngineers = async (req, res) => {
   try {
-    const engineerIds = await getCompanyEngineerIds(req.user.id);
+    const companyId = getCompanyId(req);
+    const engineerIds = await getCompanyEngineerIds(companyId);
     const engineers = await Engineer.find({ _id: { $in: engineerIds } }).lean();
     
     let csv = 'Engineer ID,Name,Phone,Experience,City,Status,Rating\n';

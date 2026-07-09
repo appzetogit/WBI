@@ -9,23 +9,14 @@ import api from '../../../services/api';
 
 import {
   Step1Account,
-  Step2PartnerMode,
-  Step3BusinessType,
-  Step4ServiceSelection,
-  Step5GeoMapping,
-  Step6CompanyDetails,
-  Step7BusinessAddress,
-  Step8BankDetails,
-  Step9KYC,
-  Step10Team,
-  Step11WorkingHours,
-  Step12JoiningFee,
-  Step13Review
+  Step2ServiceGeo,
+  Step3KYC,
+  Step4BankDetails,
+  Step5Review
 } from '../components/registration/WizardSteps';
 
 const STEPS = [
-  'Account', 'Partner', 'Type', 'Services', 'Location', 'Company',
-  'Address', 'Bank', 'KYC', 'Team', 'Hours', 'Payment', 'Review'
+  'Account', 'Services & Location', 'Digital KYC', 'Bank Verification', 'Review'
 ];
 
 const VendorSignup = () => {
@@ -105,8 +96,11 @@ const VendorSignup = () => {
       if (!formData.ownerName) newErrors.ownerName = 'Required';
       if (!formData.mobile) newErrors.mobile = 'Required';
       if (!formData.password) newErrors.password = 'Required';
+      if (!formData.isPhoneVerified) {
+        toast.error("Please verify your phone number before proceeding.");
+        newErrors.isPhoneVerified = 'Required';
+      }
     }
-    // Add validation for other steps
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -122,7 +116,7 @@ const VendorSignup = () => {
   };
 
   const handleSubmit = async () => {
-    if (!validateStep(13)) return;
+    if (!validateStep(5)) return;
     setIsLoading(true);
     try {
       const res = await api.post('/vendor/registration-submit', formData);
@@ -144,18 +138,10 @@ const VendorSignup = () => {
   const renderStep = () => {
     switch (currentStep) {
       case 1: return <Step1Account data={formData} updateData={updateData} errors={errors} />;
-      case 2: return <Step2PartnerMode data={formData} updateData={updateData} />;
-      case 3: return <Step3BusinessType data={formData} updateData={updateData} />;
-      case 4: return <Step4ServiceSelection data={formData} updateData={updateData} />;
-      case 5: return <Step5GeoMapping data={formData} updateData={updateData} />;
-      case 6: return <Step6CompanyDetails data={formData} updateData={updateData} />;
-      case 7: return <Step7BusinessAddress data={formData} updateData={updateData} />;
-      case 8: return <Step8BankDetails data={formData} updateData={updateData} />;
-      case 9: return <Step9KYC data={formData} updateData={updateData} />;
-      case 10: return <Step10Team data={formData} updateData={updateData} />;
-      case 11: return <Step11WorkingHours data={formData} updateData={updateData} />;
-      case 12: return <Step12JoiningFee data={formData} updateData={updateData} config={config} />;
-      case 13: return <Step13Review data={formData} />;
+      case 2: return <Step2ServiceGeo data={formData} updateData={updateData} />;
+      case 3: return <Step3KYC data={formData} updateData={updateData} />;
+      case 4: return <Step4BankDetails data={formData} updateData={updateData} />;
+      case 5: return <Step5Review data={formData} />;
       default: return null;
     }
   };

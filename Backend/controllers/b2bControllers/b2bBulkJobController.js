@@ -24,7 +24,9 @@ const { bulkJobQueue } = require('../../services/b2bBulkJobQueueService');
  */
 const getStats = async (req, res) => {
   try {
-    const companyId = new mongoose.Types.ObjectId(req.user.id);
+    // Use authoritative companyId — works for both Company Admin and sub-users
+    const rawId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawId);
 
     // 1. Fetch total batch uploads
     const totalUploads = await B2BBatch.countDocuments({ companyId });
@@ -49,9 +51,12 @@ const getStats = async (req, res) => {
     ]);
     const totalRows = totalRowsAggregate[0] ? totalRowsAggregate[0].count : 0;
 
-    // 5. Fetch wallet balance
-    const company = await B2BCompany.findById(req.user.id).select('walletBalance');
-    const walletBalance = company ? company.walletBalance : 0;
+    // 5. Fetch wallet balance from B2BWallet collection (source of truth)
+    let wallet = await B2BWallet.findOne({ companyId });
+    if (!wallet) {
+      wallet = await B2BWallet.create({ companyId, balance: 0 });
+    }
+    const walletBalance = wallet.balance;
 
     return res.status(200).json({
       success: true,
@@ -69,6 +74,7 @@ const getStats = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to retrieve bulk stats summary' });
   }
 };
+
 
 /**
  * GET Download Sample layout
@@ -94,10 +100,13 @@ const uploadFile = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Please provide a valid Excel or CSV file' });
     }
 
-    const companyId = req.user.id;
+    // isApprovedB2B middleware already verified company status — use authoritative companyId from auth
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+
+    // Fetch company for batch metadata (no redundant auth check needed)
     const company = await B2BCompany.findById(companyId);
-    if (!company || company.verificationStatus !== 'approved' || !company.isActive) {
-      return res.status(403).json({ success: false, message: 'Only active, approved corporate partners can upload batches' });
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Company not found. Please re-login.' });
     }
 
     // Retrieve active deduction rules
@@ -176,7 +185,7 @@ const uploadFile = async (req, res) => {
  */
 const getHistory = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { status, search, page = 1, limit = 10, startDate, endDate, minRows, maxRows, service } = req.query;
 
     const filter = { companyId };
@@ -233,7 +242,7 @@ const getHistory = async (req, res) => {
  */
 const getBatchDetails = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch) {
@@ -255,7 +264,7 @@ const getBatchDetails = async (req, res) => {
  */
 const getBatchErrors = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch) {
@@ -295,7 +304,7 @@ const getBatchErrors = async (req, res) => {
  */
 const downloadErrorReport = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch) {
@@ -339,38 +348,36 @@ const downloadErrorReport = async (req, res) => {
  */
 const confirmUpload = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch) {
       return res.status(404).json({ success: false, message: 'Batch record not found' });
     }
 
-    if (batch.status !== 'validated') {
-      return res.status(400).json({ success: false, message: `Cannot confirm upload. Batch status is '${batch.status}' (expected 'validated')` });
+    // Accept 'validated' OR 'failed' batches that have valid rows
+    // (failed batches may have had non-critical errors like UploadReport creation failing after successful validation)
+    const isConfirmable = batch.status === 'validated' || (batch.status === 'failed' && batch.validRows > 0);
+    if (!isConfirmable) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Cannot confirm upload. Batch status is '${batch.status}' with ${batch.validRows || 0} valid rows.`
+      });
     }
 
-    if (batch.validRows === 0) {
+    if (!batch.validRows || batch.validRows === 0) {
       return res.status(400).json({ success: false, message: 'This batch has 0 valid rows. Cannot create jobs.' });
     }
 
-    // Verify company account is active and approved
+    // Company existence check only — isApprovedB2B middleware already verified approval status
     const company = await B2BCompany.findById(companyId);
-    if (!company || company.verificationStatus !== 'approved' || !company.isActive) {
-      return res.status(403).json({ success: false, message: 'Your corporate account status blocks job scheduling.' });
+    if (!company) {
+      return res.status(404).json({ success: false, message: 'Company not found. Please re-login.' });
     }
 
     // Verify Wallet Balance
     const wallet = await B2BWallet.findOne({ companyId });
-    if (!wallet || wallet.balance < batch.estimatedCost) {
-      return res.status(400).json({
-        success: false,
-        insufficientBalance: true,
-        required: batch.estimatedCost,
-        balance: wallet ? wallet.balance : 0,
-        message: `Insufficient wallet balance. Estimated cost is ₹${batch.estimatedCost.toLocaleString('en-IN')}, but balance is ₹${wallet ? wallet.balance.toLocaleString('en-IN') : 0}. Please top up first.`
-      });
-    }
+    const isInsufficient = !wallet || wallet.balance < batch.estimatedCost;
 
     // Duplicate confirmation check (checks if batch is already confirmed recently)
     const duplicateBatch = await B2BBatch.findOne({
@@ -398,8 +405,9 @@ const confirmUpload = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Job creation started in background matching queue.',
-      status: 'processing'
+      message: isInsufficient ? 'Job creation started, but jobs will be held in pending_wallet state due to low balance.' : 'Job creation started in background matching queue.',
+      status: 'processing',
+      isInsufficient
     });
   } catch (error) {
     console.error('[B2B Confirm Error]:', error);
@@ -412,7 +420,7 @@ const confirmUpload = async (req, res) => {
  */
 const deleteBatch = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch) {
@@ -453,7 +461,7 @@ const deleteBatch = async (req, res) => {
  */
 const downloadOriginalFile = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch || !batch.fileUrl || !fs.existsSync(batch.fileUrl)) {
@@ -472,7 +480,7 @@ const downloadOriginalFile = async (req, res) => {
  */
 const retryBatch = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId });
 
     if (!batch) {

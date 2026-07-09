@@ -5,7 +5,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { 
   FiUploadCloud, FiDownload, FiCheckCircle, FiFileText, 
   FiAlertCircle, FiClock, FiPlusCircle, FiList, FiTrendingUp,
-  FiTrendingDown, FiLoader, FiX, FiCheck, FiArrowRight, FiCreditCard
+  FiTrendingDown, FiLoader, FiX, FiCheck, FiArrowRight, FiCreditCard,
+  FiAlertTriangle, FiThumbsUp, FiThumbsDown
 } from 'react-icons/fi';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
@@ -43,6 +44,20 @@ const BulkJobs = () => {
     }
   });
 
+  // 2b. Fetch pending quote approvals
+  const { data: pendingQuotes, refetch: refetchQuotes } = useQuery({
+    queryKey: ['b2bPendingQuotes'],
+    queryFn: async () => {
+      const res = await api.get('/b2b/jobs/quotes/pending');
+      return res.data.data;
+    },
+    refetchInterval: 30000
+  });
+
+  const [quoteAction, setQuoteAction] = useState(null); // { quote, type: 'approve'|'reject' }
+  const [quoteRemarks, setQuoteRemarks] = useState('');
+  const [quoteLoading, setQuoteLoading] = useState(false);
+
   // 3. Fetch latest uploads for the side panel
   const { data: historyData } = useQuery({
     queryKey: ['b2bHistoryRecent'],
@@ -52,7 +67,7 @@ const BulkJobs = () => {
     }
   });
 
-  // 4. Query active batch details if batchId is set
+  // 4. Query active batch details if batchId is set — polls every 3s during processing
   const { data: activeBatch, refetch: refetchActiveBatch } = useQuery({
     queryKey: ['b2bActiveBatch', activeBatchId],
     queryFn: async () => {
@@ -60,8 +75,48 @@ const BulkJobs = () => {
       const res = await api.get(`/b2b/bulk-jobs/${activeBatchId}`);
       return res.data.batch;
     },
-    enabled: !!activeBatchId
+    enabled: !!activeBatchId,
+    // Auto-poll every 3s when batch is in an active state; stop when done/failed
+    refetchInterval: (query) => {
+      const status = query.state?.data?.status;
+      if (!status) return 3000;
+      if (['validating', 'processing'].includes(status)) return 3000;
+      if (['validated', 'completed', 'failed'].includes(status)) return false;
+      return 5000;
+    },
+    refetchIntervalInBackground: false
   });
+
+  // Track status transitions from polling — fire toasts & refresh stats automatically
+  const prevBatchStatus = React.useRef(null);
+  useEffect(() => {
+    if (!activeBatch) return;
+    const newStatus = activeBatch.status;
+    const prevStatus = prevBatchStatus.current;
+
+    if (prevStatus !== newStatus) {
+      if (newStatus === 'validating' && prevStatus === 'draft') {
+        toast.success('Validation started — checking all rows...');
+      }
+      if (newStatus === 'validated') {
+        toast.success(`Validation done! ${activeBatch.validRows} valid rows ready to confirm.`);
+        queryClient.invalidateQueries(['b2bBulkJobStats']);
+        setUploadProgress(100);
+      }
+      if (newStatus === 'processing') {
+        toast.success('Jobs are being created...');
+      }
+      if (newStatus === 'completed') {
+        toast.success('All jobs created successfully!');
+        queryClient.invalidateQueries(['b2bBulkJobStats']);
+        setCreationProgress(100);
+      }
+      if (newStatus === 'failed') {
+        toast.error(`Batch failed: ${activeBatch.failureReason || 'Unknown error'}`);
+      }
+      prevBatchStatus.current = newStatus;
+    }
+  }, [activeBatch, queryClient]);
 
   // Socket event listening for real-time progress pings
   useEffect(() => {
@@ -221,7 +276,6 @@ const BulkJobs = () => {
       'application/vnd.ms-excel': ['.xls'],
       'text/csv': ['.csv']
     },
-    maxSize: 20 * 1024 * 1024,
     multiple: false,
     onDrop: (acceptedFiles) => {
       if (acceptedFiles.length > 0) {
@@ -232,12 +286,15 @@ const BulkJobs = () => {
 
   // Calculate current wizard step
   const getWizardStep = () => {
-    if (!activeBatchId || !activeBatch) return 1; // Step 1: Upload File
+    if (!activeBatchId) return 1; // No active batch: Upload step
+    if (!activeBatch) return 2;   // Batch ID exists but data loading: show validating step
     const status = activeBatch.status;
-    if (status === 'validating') return 2; // Step 2: Validate Data
-    if (status === 'validated') return 3; // Step 3: Review & Confirm
-    if (status === 'processing') return 4; // Step 4: Processing Jobs
-    if (status === 'completed') return 5; // Step 5: Completed
+    if (status === 'draft') return 2;       // Just uploaded, queued for validation
+    if (status === 'validating') return 2;  // Actively validating
+    if (status === 'validated') return 3;   // Done — show Review & Confirm
+    if (status === 'processing') return 4;  // Creating jobs
+    if (status === 'completed') return 5;   // All done
+    if (status === 'failed') return 3;      // Failed — show review with error info
     return 1; // Fallback
   };
 
@@ -261,6 +318,26 @@ const BulkJobs = () => {
     walletBalance: 0
   };
 
+  // Low balance: flag if wallet < ₹5000
+  const LOW_BALANCE_THRESHOLD = 5000;
+  const walletBalance = walletData?.balance ?? stats.walletBalance;
+  const isLowBalance = walletBalance < LOW_BALANCE_THRESHOLD;
+
+  const handleQuoteDecision = async (quoteId, type, remarks) => {
+    setQuoteLoading(true);
+    try {
+      await api.post(`/b2b/jobs/quotes/${quoteId}/${type}`, { clientRemarks: remarks });
+      toast.success(`Quote ${type === 'approve' ? 'Approved! Job is now active.' : 'Rejected. Job cancelled.'}`);
+      setQuoteAction(null);
+      setQuoteRemarks('');
+      refetchQuotes();
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to ${type} quote`);
+    } finally {
+      setQuoteLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
       
@@ -281,6 +358,106 @@ const BulkJobs = () => {
           Download Sample Excel
         </a>
       </div>
+
+      {/* ⚠️ Low Wallet Balance Alert Banner */}
+      {isLowBalance && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl px-5 py-4 flex items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 rounded-xl">
+              <FiAlertTriangle className="text-amber-600 w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-amber-800 text-sm">Low Wallet Balance — Job Activation Restricted</p>
+              <p className="text-xs text-amber-600 font-medium mt-0.5">
+                Your current balance is <strong>₹{walletBalance.toLocaleString('en-IN')}</strong>. A minimum of ₹{LOW_BALANCE_THRESHOLD.toLocaleString('en-IN')} is required to activate new jobs. Please top-up to continue.
+              </p>
+            </div>
+          </div>
+          <a href="/b2b/wallet" className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors">
+            Top Up Now
+          </a>
+        </div>
+      )}
+
+      {/* 📋 Pending Quote Approvals Banner */}
+      {pendingQuotes && pendingQuotes.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <FiFileText className="text-blue-600" />
+            <p className="font-bold text-blue-800 text-sm">{pendingQuotes.length} Modified Quote{pendingQuotes.length > 1 ? 's' : ''} Pending Your Approval</p>
+          </div>
+          <div className="space-y-2">
+            {pendingQuotes.map(q => (
+              <div key={q._id} className="bg-white border border-blue-100 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold text-gray-800 text-sm">{q.jobId?.service || 'Service Job'} — {q.jobId?.city}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Original: <span className="line-through">₹{q.originalAmount}</span> &rarr; Revised: <strong className="text-blue-700">₹{q.proposedAmount}</strong>
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-0.5 italic">{q.reasonForChange}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setQuoteAction({ quote: q, type: 'approve' })}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors"
+                  >
+                    <FiThumbsUp size={12} /> Approve
+                  </button>
+                  <button
+                    onClick={() => setQuoteAction({ quote: q, type: 'reject' })}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors"
+                  >
+                    <FiThumbsDown size={12} /> Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quote Decision Confirmation Modal */}
+      {quoteAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className={`p-5 ${quoteAction.type === 'approve' ? 'bg-emerald-50 border-b border-emerald-100' : 'bg-red-50 border-b border-red-100'}`}>
+              <h3 className="font-black text-gray-900">{quoteAction.type === 'approve' ? '✅ Approve Revised Quote' : '❌ Reject Revised Quote'}</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Job: <strong>{quoteAction.quote.jobId?.service}</strong> — 
+                {quoteAction.type === 'approve' 
+                  ? ` Approving will deduct ₹${quoteAction.quote.proposedAmount} from your wallet and activate this job.`
+                  : ` Rejecting will cancel this job permanently.`
+                }
+              </p>
+            </div>
+            <div className="p-5">
+              <label className="text-xs font-bold text-gray-500 uppercase block mb-2">Your Remarks (optional)</label>
+              <textarea
+                rows={3}
+                value={quoteRemarks}
+                onChange={e => setQuoteRemarks(e.target.value)}
+                placeholder="Add any notes for your records..."
+                className="w-full border border-gray-200 rounded-xl p-3 text-sm focus:outline-none focus:border-[#10AFA5] resize-none"
+              />
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => { setQuoteAction(null); setQuoteRemarks(''); }}
+                  className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleQuoteDecision(quoteAction.quote._id, quoteAction.type, quoteRemarks)}
+                  disabled={quoteLoading}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors ${quoteAction.type === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'} disabled:opacity-50`}
+                >
+                  {quoteLoading ? 'Processing...' : quoteAction.type === 'approve' ? 'Confirm Approval' : 'Confirm Rejection'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top Statistics Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -385,7 +562,7 @@ const BulkJobs = () => {
                     <h4 className="text-sm font-bold text-gray-800">Drag & drop your Excel file here</h4>
                     <p className="text-xs text-gray-400 font-semibold mt-1">or click to browse from files</p>
                     <p className="text-[10px] font-bold text-[#10AFA5] mt-4 uppercase tracking-wider bg-[#F0FDFA] px-3 py-1 rounded-full inline-block">
-                      Supports .xlsx, .xls, .csv files (Max 20MB)
+                      SUPPORTS .XLSX, .XLS, .CSV FILES
                     </p>
                   </div>
                 </div>
@@ -431,24 +608,32 @@ const BulkJobs = () => {
                     </div>
                   </div>
 
-                  {/* Live Countings */}
-                  {liveStats && (
+                  {/* Live Countings - from socket OR polled DB data */}
+                  {(liveStats || (activeBatch && activeBatch.totalRows > 0)) && (
                     <div className="grid grid-cols-4 gap-2 pt-4 text-xs font-semibold">
                       <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                        <span className="block text-[10px] text-gray-400">Checked</span>
-                        <span className="block text-gray-800 font-bold mt-1">{liveStats.processed} / {liveStats.total}</span>
+                        <span className="block text-[10px] text-gray-400">Total Rows</span>
+                        <span className="block text-gray-800 font-bold mt-1">
+                          {liveStats ? `${liveStats.processed} / ${liveStats.total}` : activeBatch?.totalRows}
+                        </span>
                       </div>
                       <div className="bg-[#F0FDFA] p-3 rounded-xl border border-[#10AFA5]/10 text-[#10AFA5]">
                         <span className="block text-[10px] text-gray-400">Valid</span>
-                        <span className="block font-extrabold mt-1">{liveStats.valid}</span>
+                        <span className="block font-extrabold mt-1">
+                          {liveStats ? liveStats.valid : (activeBatch?.validRows ?? '—')}
+                        </span>
                       </div>
                       <div className="bg-red-50 p-3 rounded-xl border border-red-100 text-red-500">
                         <span className="block text-[10px] text-gray-400">Errors</span>
-                        <span className="block font-bold mt-1">{liveStats.invalid}</span>
+                        <span className="block font-bold mt-1">
+                          {liveStats ? liveStats.invalid : (activeBatch?.invalidRows ?? '—')}
+                        </span>
                       </div>
                       <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-100 text-yellow-600">
                         <span className="block text-[10px] text-gray-400">Duplicates</span>
-                        <span className="block font-bold mt-1">{liveStats.duplicates}</span>
+                        <span className="block font-bold mt-1">
+                          {liveStats ? liveStats.duplicates : (activeBatch?.duplicates ?? '—')}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -602,7 +787,7 @@ const BulkJobs = () => {
                                 <td>{err.rowData.city || 'N/A'}</td>
                                 <td>{err.rowData.pincode || 'N/A'}</td>
                                 <td className="text-right text-red-500 font-extrabold pr-2 max-w-[200px] truncate">
-                                  {err.errors.join(', ')}
+                                  {(err.errorList || err.errors || []).join(', ')}
                                 </td>
                               </tr>
                             ))
@@ -720,7 +905,7 @@ const BulkJobs = () => {
             <ul className="text-xs font-semibold text-gray-500 space-y-2.5">
               <li className="flex items-start gap-2">
                 <FiCheck className="text-teal-500 w-4 h-4 shrink-0 mt-0.5" />
-                <span>Maximum 50,000 rows per upload batch.</span>
+                <span>No row limit — supports large enterprise batches of any size.</span>
               </li>
               <li className="flex items-start gap-2">
                 <FiCheck className="text-teal-500 w-4 h-4 shrink-0 mt-0.5" />

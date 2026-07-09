@@ -128,12 +128,13 @@ export const userAuthService = {
   verifyLogin: async (data) => {
     const response = await api.post('/users/auth/verify-login', { ...data, role: 'user', platform: getPlatformType() });
     if (response.data.success && !response.data.isNewUser && response.data.accessToken) {
-      const { role, accessToken, refreshToken, user } = response.data;
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'user';
+      const userData = user || worker || engineer || vendor || {};
       
-      saveAuthSession(accessToken, refreshToken, user, role);
-
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken(role || 'user', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },
@@ -217,11 +218,13 @@ export const vendorAuthService = {
   verifyLogin: async (data) => {
     const response = await api.post('/vendors/auth/verify-login', { ...data, role: 'vendor', platform: getPlatformType() });
     if (response.data.success && !response.data.isNewUser && response.data.accessToken) {
-      localStorage.setItem('vendorAccessToken', response.data.accessToken);
-      localStorage.setItem('vendorRefreshToken', response.data.refreshToken);
-      localStorage.setItem('vendorData', JSON.stringify(response.data.vendor));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'vendor';
+      const userData = vendor || engineer || user || worker || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken('vendor', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },
@@ -238,9 +241,11 @@ export const vendorAuthService = {
     const { email, ...loginData } = data;
     const response = await api.post('/vendors/auth/login', loginData);
     if (response.data.accessToken) {
-      localStorage.setItem('vendorAccessToken', response.data.accessToken);
-      localStorage.setItem('vendorRefreshToken', response.data.refreshToken);
-      localStorage.setItem('vendorData', JSON.stringify(response.data.vendor));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'vendor';
+      const userData = vendor || engineer || user || worker || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
       // Register FCM token after successful login
       console.log('[AUTH] Vendor login successful, registering FCM token...');
@@ -310,11 +315,13 @@ export const workerAuthService = {
   verifyLogin: async (data) => {
     const response = await api.post('/workers/auth/verify-login', { ...data, role: 'worker', platform: getPlatformType() });
     if (response.data.success && !response.data.isNewUser && response.data.accessToken) {
-      localStorage.setItem('workerAccessToken', response.data.accessToken);
-      localStorage.setItem('workerRefreshToken', response.data.refreshToken);
-      localStorage.setItem('workerData', JSON.stringify(response.data.worker));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'worker';
+      const userData = worker || engineer || user || vendor || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken('worker', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },
@@ -337,11 +344,13 @@ export const workerAuthService = {
     const { email, ...loginData } = data;
     const response = await api.post('/workers/auth/login', loginData);
     if (response.data.accessToken) {
-      localStorage.setItem('workerAccessToken', response.data.accessToken);
-      localStorage.setItem('workerRefreshToken', response.data.refreshToken);
-      localStorage.setItem('workerData', JSON.stringify(response.data.worker));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'worker';
+      const userData = worker || engineer || user || vendor || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken('worker', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },
@@ -432,15 +441,37 @@ export const engineerAuthService = {
     return response.data;
   },
 
+  verifyAadhaarSignup: async (aadhaarNumber) => {
+    const response = await api.post('/engineers/auth/verify-aadhaar-signup', { aadhaarNumber });
+    return response.data;
+  },
+
+  verifyPanSignup: async (panNumber, fullName, dob) => {
+    const response = await api.post('/engineers/auth/verify-pan-signup', { panNumber, fullName, dob });
+    return response.data;
+  },
+
+  initiateDigiLockerSignup: async (mobileNumber, redirectUrl) => {
+    const response = await api.post('/engineers/auth/digilocker/initiate', { mobileNumber, redirectUrl });
+    return response.data;
+  },
+
+  completeDigiLockerSignup: async (recordId) => {
+    const response = await api.post('/engineers/auth/digilocker/complete', { recordId });
+    return response.data;
+  },
+
   // Verify Login (Unified Flow)
   verifyLogin: async (data) => {
     const response = await api.post('/engineers/auth/verify-login', { ...data, role: 'engineer', platform: getPlatformType() });
     if (response.data.success && !response.data.isNewUser && response.data.accessToken) {
-      localStorage.setItem('engineerAccessToken', response.data.accessToken);
-      localStorage.setItem('engineerRefreshToken', response.data.refreshToken);
-      localStorage.setItem('engineerData', JSON.stringify(response.data.engineer));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'engineer';
+      const userData = engineer || user || worker || vendor || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken('engineer', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },
@@ -462,11 +493,13 @@ export const engineerAuthService = {
     const { email, ...loginData } = data;
     const response = await api.post('/engineers/auth/login', loginData);
     if (response.data.accessToken) {
-      localStorage.setItem('engineerAccessToken', response.data.accessToken);
-      localStorage.setItem('engineerRefreshToken', response.data.refreshToken);
-      localStorage.setItem('engineerData', JSON.stringify(response.data.engineer));
+      const { accessToken, refreshToken, engineer, user, worker, vendor } = response.data;
+      const role = response.data.role || 'engineer';
+      const userData = engineer || user || worker || vendor || {};
+      
+      saveAuthSession(accessToken, refreshToken, userData, role);
       notifyFlutterLogin(response.data);
-      registerFCMToken('engineer', true).catch(console.error);
+      registerFCMToken(role, true).catch(console.error);
     }
     return response.data;
   },

@@ -30,7 +30,7 @@ const validateDateFilters = (startDate, endDate) => {
  */
 const getSummary = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate, service, engineer, city, status } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);
@@ -63,7 +63,7 @@ const getSummary = async (req, res) => {
  */
 const getServices = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate, engineer, city } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);
@@ -87,7 +87,7 @@ const getServices = async (req, res) => {
  */
 const getEngineers = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate, service, city, status } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);
@@ -111,7 +111,7 @@ const getEngineers = async (req, res) => {
  */
 const getExpenses = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);
@@ -135,7 +135,7 @@ const getExpenses = async (req, res) => {
  */
 const getJobStatus = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate, service, engineer, city } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);
@@ -159,7 +159,7 @@ const getJobStatus = async (req, res) => {
  */
 const exportExcel = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate, service, engineer, city, status } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);
@@ -239,7 +239,7 @@ const exportExcel = async (req, res) => {
  */
 const exportPdf = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { startDate, endDate, service, engineer, city, status } = req.query;
 
     const dateVal = validateDateFilters(startDate, endDate);

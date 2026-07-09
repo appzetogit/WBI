@@ -75,7 +75,8 @@ const getNextTicketNumber = async (year) => {
  */
 const getSupportSummary = async (req, res) => {
   try {
-    const companyId = new mongoose.Types.ObjectId(req.user.id);
+    const rawCompanyId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawCompanyId);
 
     const stats = await SupportTicket.aggregate([
       { $match: { companyId } },
@@ -128,7 +129,7 @@ const getSupportSummary = async (req, res) => {
  */
 const getTickets = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const {
       page = 1,
       limit = 10,
@@ -200,7 +201,7 @@ const getTickets = async (req, res) => {
  */
 const createTicket = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const {
       subject,
       description,
@@ -326,7 +327,8 @@ const getTicketById = async (req, res) => {
     }
 
     // Ownership check
-    if (ticket.companyId.toString() !== req.user.id.toString()) {
+    const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+    if (ticket.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({ success: false, message: 'Access denied. Ownership mismatch.' });
     }
 
@@ -372,11 +374,12 @@ const sendMessage = async (req, res) => {
     }
 
     // Ownership validation
-    if (ticket.companyId.toString() !== req.user.id.toString()) {
+    const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+    if (ticket.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({ success: false, message: 'Access denied. Ownership mismatch.' });
     }
 
-    const company = await B2BCompany.findById(req.user.id);
+    const company = await B2BCompany.findById(authCompanyId);
 
     // Save support message
     const newMessage = await SupportMessage.create({
@@ -441,7 +444,8 @@ const closeTicket = async (req, res) => {
     }
 
     // Ownership validation
-    if (ticket.companyId.toString() !== req.user.id.toString()) {
+    const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+    if (ticket.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({ success: false, message: 'Access denied. Ownership mismatch.' });
     }
 
@@ -485,7 +489,8 @@ const uploadSupportAttachment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Ticket not found' });
     }
 
-    if (ticket.companyId.toString() !== req.user.id.toString()) {
+    const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+    if (ticket.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({ success: false, message: 'Access denied. Ownership mismatch.' });
     }
 
@@ -531,6 +536,62 @@ const uploadSupportAttachment = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/b2b/support/chatbot
+ * Basic NLP-based Chatbot resolution for B2B Client
+ */
+const handleChatbotMessage = async (req, res) => {
+  try {
+    const { message, jobId } = req.body;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+
+    if (!message) {
+      return res.status(400).json({ success: false, message: 'Message is required' });
+    }
+
+    const lowerMsg = message.toLowerCase();
+    let reply = "I'm sorry, I couldn't understand your request. Please raise a support ticket.";
+    let action = 'none';
+
+    // Contextual matching
+    if (lowerMsg.includes('status') || lowerMsg.includes('where is')) {
+      if (jobId) {
+        const job = await B2BJob.findOne({ jobId, companyId });
+        if (job) {
+          reply = `The status of job ${job.jobId} is currently '${job.status}'.`;
+          action = 'show_status';
+        } else {
+          reply = `I couldn't find a job with ID ${jobId}.`;
+        }
+      } else {
+        reply = "Please provide a Job ID so I can check its status.";
+        action = 'ask_job_id';
+      }
+    } else if (lowerMsg.includes('balance') || lowerMsg.includes('wallet')) {
+      const wallet = await require('../../models/B2BWallet').findOne({ companyId });
+      reply = `Your current wallet balance is ₹${wallet ? wallet.balance : 0}.`;
+      action = 'show_balance';
+    } else if (lowerMsg.includes('deduction') || lowerMsg.includes('penalty')) {
+      reply = "Deductions happen automatically when jobs fail due to client-side dependencies (e.g., Site Closed, Customer Unavailable). Do you want to raise a dispute ticket?";
+      action = 'prompt_ticket';
+    } else if (lowerMsg.includes('human') || lowerMsg.includes('agent') || lowerMsg.includes('ticket')) {
+      reply = "Sure, I can help you raise a ticket. Please go to the Helpdesk section to create one.";
+      action = 'redirect_helpdesk';
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        reply,
+        action
+      }
+    });
+  } catch (error) {
+    console.error('[B2B Support Controller] Chatbot error:', error);
+    return res.status(500).json({ success: false, message: 'Chatbot error' });
+  }
+};
+
 module.exports = {
   getSupportSummary,
   getTickets,
@@ -538,5 +599,6 @@ module.exports = {
   getTicketById,
   sendMessage,
   closeTicket,
-  uploadSupportAttachment
+  uploadSupportAttachment,
+  handleChatbotMessage
 };

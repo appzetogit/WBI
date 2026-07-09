@@ -7,13 +7,7 @@ import { FaWallet } from 'react-icons/fa';
 import { vendorTheme as themeColors } from '../../../../theme';
 
 const BottomNav = memo(() => {
-  const { scrollY } = useScroll();
-  const [hidden, setHidden] = React.useState(false);
-  useMotionValueEvent(scrollY, 'change', (latest) => {
-    const prev = scrollY.getPrevious();
-    if (latest > prev && latest > 150) setHidden(true);
-    else setHidden(false);
-  });
+  // Hide-on-scroll removed to fix empty bottom space issue
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -80,9 +74,7 @@ const BottomNav = memo(() => {
   return (
     <motion.nav
       className="fixed bottom-0 left-0 right-0 bg-white"
-      variants={{ visible: { y: 0 }, hidden: { y: '100%' } }}
-      animate={hidden ? 'hidden' : 'visible'}
-      transition={{ duration: 0.35, ease: 'easeInOut' }}
+
       style={{
         position: 'fixed',
         bottom: 0,

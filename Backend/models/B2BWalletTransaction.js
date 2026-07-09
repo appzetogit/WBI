@@ -60,6 +60,11 @@ const b2bWalletTransactionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'B2BJob' 
   }],
+  deductionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DeductionLedger',
+    default: null
+  },
   invoiceId: { 
     type: String 
   },

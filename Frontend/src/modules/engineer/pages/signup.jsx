@@ -24,6 +24,18 @@ export default function EngineerSignup() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // OTP Verification State
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [isPhoneVerified, setIsPhoneVerified] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+
+  // Document Verification State
+  const [isAadhaarVerified, setIsAadhaarVerified] = useState(false);
+  const [verifyingAadhaar, setVerifyingAadhaar] = useState(false);
+  const [isPanVerified, setIsPanVerified] = useState(false);
+  const [verifyingPan, setVerifyingPan] = useState(false);
+
   // Form State
   const [formData, setFormData] = useState({
     engineerType: 'freelancer',
@@ -34,7 +46,8 @@ export default function EngineerSignup() {
     secondarySkills: [],
     uploadedDocuments: [],
     tshirtSize: '', toolsAvailable: [], otherTools: '',
-    selfieUrl: null, introVideoUrl: null
+    selfieUrl: null, introVideoUrl: null,
+    aadhaarNumber: '', panNumber: '', panFullName: '', panDob: ''
   });
 
   // Joining Fee State
@@ -54,7 +67,6 @@ export default function EngineerSignup() {
         if (response.success) {
           setConfig(response.config);
           
-          // Set initial document placeholders
           if (response.config.documents) {
              const docs = response.config.documents.map(d => ({
                key: d.key,
@@ -62,6 +74,15 @@ export default function EngineerSignup() {
                backUrl: ''
              }));
              setFormData(p => ({ ...p, uploadedDocuments: docs }));
+          }
+
+          // Check for DigiLocker return
+          const urlParams = new URLSearchParams(window.location.search);
+          const recordId = urlParams.get('recordId');
+          const stepStr = urlParams.get('step');
+          if (recordId) {
+            completeDigiLockerVerification(recordId, stepStr);
+            window.history.replaceState({}, document.title, window.location.pathname);
           }
         } else {
           toast.error('Failed to load registration configuration');
@@ -74,6 +95,29 @@ export default function EngineerSignup() {
     };
     loadConfig();
   }, []);
+
+  const completeDigiLockerVerification = async (recordId, stepStr) => {
+    setVerifyingAadhaar(true);
+    if (stepStr) {
+      setCurrentStep(Number(stepStr));
+    }
+    try {
+      const res = await engineerAuthService.completeDigiLockerSignup(recordId);
+      if (res.success) {
+        setIsAadhaarVerified(true);
+        if (res.data?.aadhaarNumberMasked) {
+          setFormData(p => ({ ...p, aadhaarNumber: res.data.aadhaarNumberMasked }));
+        }
+        toast.success('Aadhaar verified via DigiLocker successfully!');
+      } else {
+        toast.error('DigiLocker verification failed');
+      }
+    } catch (error) {
+      toast.error('DigiLocker verification failed');
+    } finally {
+      setVerifyingAadhaar(false);
+    }
+  };
 
   const validDynamicSteps = config?.steps?.filter(s => s.fields && s.fields.length > 0)
     .map((s, index) => ({ ...s, stepNumber: index + 2 })) || [];
@@ -180,6 +224,88 @@ export default function EngineerSignup() {
     });
   };
 
+  const handleSendOtp = async (phone) => {
+    if (!phone || phone.length < 10) {
+      toast.error('Please enter a valid 10-digit mobile number');
+      return;
+    }
+    try {
+      const res = await engineerAuthService.sendOTP(phone);
+      if (res.success) {
+        setOtpSent(true);
+        toast.success('OTP sent successfully');
+      } else {
+        toast.error(res.message || 'Failed to send OTP');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to send OTP');
+    }
+  };
+
+  const handleVerifyOtp = async (phone) => {
+    if (!otp || otp.length !== 6) {
+      toast.error('Please enter a valid 6-digit OTP');
+      return;
+    }
+    setVerifyingOtp(true);
+    try {
+      const res = await engineerAuthService.verifyLogin({ phone, otp });
+      if (res.success) {
+        setIsPhoneVerified(true);
+        toast.success('Phone verified successfully!');
+      } else {
+        toast.error(res.message || 'Invalid OTP');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Invalid OTP');
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
+  const handleInitiateDigiLocker = async () => {
+    const mobile = formData.phone || formData.mobile;
+    if (!mobile) {
+      toast.error('Mobile number is missing. Please go back to step 2 and verify OTP.');
+      return;
+    }
+    setVerifyingAadhaar(true);
+    try {
+      const redirectUrl = `${window.location.origin}${window.location.pathname}?step=${additionalDetailsStep}`;
+      const res = await engineerAuthService.initiateDigiLockerSignup(mobile, redirectUrl);
+      if (res.success && res.data?.url) {
+        window.location.href = res.data.url;
+      } else {
+        toast.error('Failed to initiate DigiLocker flow');
+        setVerifyingAadhaar(false);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to initiate DigiLocker flow');
+      setVerifyingAadhaar(false);
+    }
+  };
+
+  const handleVerifyPan = async () => {
+    if (!formData.panNumber || !formData.panFullName || !formData.panDob) {
+      toast.error('Please provide PAN number, Full Name, and Date of Birth');
+      return;
+    }
+    setVerifyingPan(true);
+    try {
+      const res = await engineerAuthService.verifyPanSignup(formData.panNumber, formData.panFullName, formData.panDob);
+      if (res.success) {
+        setIsPanVerified(true);
+        toast.success('PAN verified successfully!');
+      } else {
+        toast.error(res.message || 'PAN verification failed');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'PAN verification failed');
+    } finally {
+      setVerifyingPan(false);
+    }
+  };
+
   const validateStep = (step) => {
     if (step === typeStep) {
       if (formData.engineerType === 'vendor_engineer' && !formData.vendorCode) {
@@ -195,6 +321,10 @@ export default function EngineerSignup() {
         for (const field of stepData.fields) {
           if (field.required && !formData[field.key]) {
             toast.error(`Please provide ${field.label}`);
+            return false;
+          }
+          if (field.type === 'tel' && formData[field.key] && !isPhoneVerified) {
+            toast.error(`Please verify your ${field.label} using OTP before proceeding`);
             return false;
           }
           if (field.validation && formData[field.key]) {
@@ -226,6 +356,18 @@ export default function EngineerSignup() {
       const docsConfig = config?.documents || [];
       for (const dc of docsConfig) {
         if (dc.isRequired) {
+          const isAadhaar = dc.key.toLowerCase().includes('aadhaar') || dc.key.toLowerCase().includes('aadhar');
+          const isPan = dc.key.toLowerCase().includes('pan');
+          
+          if (isAadhaar && !isAadhaarVerified) {
+            toast.error(`Please verify your Aadhaar number before proceeding`);
+            return false;
+          }
+          if (isPan && !isPanVerified) {
+            toast.error(`Please verify your PAN before proceeding`);
+            return false;
+          }
+
           const ud = formData.uploadedDocuments.find(d => d.key === dc.key);
           if (!ud || !ud.url) {
             toast.error(`Please upload ${dc.title}`);
@@ -528,18 +670,54 @@ export default function EngineerSignup() {
                       <label className="block text-sm font-bold text-gray-700 mb-2">{field.label} {field.required && '*'}</label>
                       <div className="relative">
                         {field.type === 'tel' ? (
-                          <div className="relative flex">
-                            <div className="flex items-center justify-center bg-gray-100 border border-gray-200 border-r-0 rounded-l-xl px-4 text-gray-500 font-medium text-sm">
-                              +91
+                          <div className="flex flex-col gap-2">
+                            <div className="relative flex">
+                              <div className="flex items-center justify-center bg-gray-100 border border-gray-200 border-r-0 rounded-l-xl px-4 text-gray-500 font-medium text-sm">
+                                +91
+                              </div>
+                              <input 
+                                name={field.key} 
+                                value={formData[field.key] || ''} 
+                                onChange={(e) => setFormData(p => ({...p, [field.key]: e.target.value.replace(/\\D/g, '').slice(0, 10)}))} 
+                                type="tel" 
+                                disabled={isPhoneVerified}
+                                className={`w-full bg-gray-50 border border-gray-200 ${!isPhoneVerified ? 'rounded-none border-r-0' : 'rounded-r-xl'} py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all disabled:opacity-70`} 
+                                placeholder="10-digit number" 
+                              />
+                              {!isPhoneVerified && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendOtp(formData[field.key])}
+                                  className="px-4 bg-[#4F46E5] text-white rounded-r-xl font-medium transition-colors hover:bg-indigo-700 whitespace-nowrap"
+                                >
+                                  {otpSent ? 'Resend OTP' : 'Send OTP'}
+                                </button>
+                              )}
                             </div>
-                            <input 
-                              name={field.key} 
-                              value={formData[field.key] || ''} 
-                              onChange={(e) => setFormData(p => ({...p, [field.key]: e.target.value.replace(/\D/g, '').slice(0, 10)}))} 
-                              type="tel" 
-                              className="w-full bg-gray-50 border border-gray-200 rounded-r-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all" 
-                              placeholder="10-digit number" 
-                            />
+                            {isPhoneVerified && (
+                              <div className="flex items-center text-sm font-medium text-green-600 mt-1">
+                                <FiCheckCircle className="mr-1.5" /> Verified
+                              </div>
+                            )}
+                            {otpSent && !isPhoneVerified && (
+                              <div className="flex gap-2 animate-fadeIn mt-1">
+                                <input
+                                  type="text"
+                                  value={otp}
+                                  onChange={(e) => setOtp(e.target.value.replace(/\\D/g, '').slice(0, 6))}
+                                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5]"
+                                  placeholder="Enter 6-digit OTP"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyOtp(formData[field.key])}
+                                  disabled={verifyingOtp || otp.length !== 6}
+                                  className="px-4 bg-gray-900 text-white rounded-xl font-medium hover:bg-black transition-colors disabled:opacity-50"
+                                >
+                                  {verifyingOtp ? 'Verifying...' : 'Verify'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ) : field.type === 'select' ? (
                           <select
@@ -635,10 +813,104 @@ export default function EngineerSignup() {
                   <div className="space-y-4">
                     {config?.documents?.map(doc => {
                        const uDoc = formData.uploadedDocuments.find(d => d.key === doc.key);
+                       const isAadhaar = doc.key.toLowerCase().includes('aadhaar') || doc.key.toLowerCase().includes('aadhar');
+                       const isPan = doc.key.toLowerCase().includes('pan');
+
                        return (
                          <div key={doc.key} className="border border-gray-200 rounded-xl p-4 bg-gray-50">
                             <h3 className="font-bold text-gray-800 mb-1">{doc.title} {doc.isRequired && '*'}</h3>
                             <p className="text-xs text-gray-500 mb-3">{doc.description}</p>
+                            
+                            {isAadhaar && (
+                              <div className="mb-4 bg-white p-4 rounded-xl border border-gray-200">
+                                 <div className="flex items-center justify-between mb-2">
+                                   <label className="block text-sm font-semibold text-gray-700">DigiLocker Aadhaar Verification *</label>
+                                   <span className="text-[10px] font-bold px-2 py-1 bg-blue-100 text-blue-700 rounded-full uppercase tracking-wider">Most Secure</span>
+                                 </div>
+                                 <p className="text-xs text-gray-500 mb-4">You will be redirected to the official DigiLocker portal to securely authenticate your Aadhaar.</p>
+                                 
+                                 {isAadhaarVerified ? (
+                                   <div className="flex flex-col bg-green-50 p-3 rounded-xl border border-green-200">
+                                     <div className="flex items-center text-green-700 font-bold mb-1">
+                                       <FiCheckCircle className="mr-2 h-5 w-5" /> Successfully Verified!
+                                     </div>
+                                     <div className="text-xs text-green-600 font-medium">Aadhaar: <span className="font-mono tracking-wider">{formData.aadhaarNumber}</span></div>
+                                   </div>
+                                 ) : (
+                                   <button 
+                                     type="button" 
+                                     onClick={handleInitiateDigiLocker} 
+                                     disabled={verifyingAadhaar}
+                                     className="w-full py-3 flex items-center justify-center gap-2 bg-[#4F46E5] text-white text-sm font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50"
+                                   >
+                                     {verifyingAadhaar ? (
+                                       <>
+                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                         Connecting to DigiLocker...
+                                       </>
+                                     ) : (
+                                       <>
+                                         <FiLock /> Verify with DigiLocker
+                                       </>
+                                     )}
+                                   </button>
+                                 )}
+                              </div>
+                            )}
+
+                            {isPan && (
+                              <div className="mb-4 bg-white p-3 rounded-xl border border-gray-200 space-y-3">
+                                 <div>
+                                   <label className="block text-xs font-semibold text-gray-700 mb-1">PAN Number *</label>
+                                   <input 
+                                     type="text" 
+                                     value={formData.panNumber} 
+                                     onChange={(e) => setFormData(p => ({ ...p, panNumber: e.target.value.toUpperCase().slice(0, 10)}))}
+                                     disabled={isPanVerified}
+                                     placeholder="10-character PAN Number"
+                                     className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] disabled:opacity-70"
+                                   />
+                                 </div>
+                                 <div>
+                                   <label className="block text-xs font-semibold text-gray-700 mb-1">Full Name (As on PAN) *</label>
+                                   <input 
+                                     type="text" 
+                                     value={formData.panFullName} 
+                                     onChange={(e) => setFormData(p => ({ ...p, panFullName: e.target.value}))}
+                                     disabled={isPanVerified}
+                                     placeholder="John Doe"
+                                     className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] disabled:opacity-70"
+                                   />
+                                 </div>
+                                 <div>
+                                   <label className="block text-xs font-semibold text-gray-700 mb-1">Date of Birth *</label>
+                                   <div className="flex gap-2">
+                                     <input 
+                                       type="date" 
+                                       value={formData.panDob} 
+                                       onChange={(e) => setFormData(p => ({ ...p, panDob: e.target.value}))}
+                                       disabled={isPanVerified}
+                                       className="flex-1 bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] disabled:opacity-70"
+                                     />
+                                     {!isPanVerified ? (
+                                       <button 
+                                         type="button" 
+                                         onClick={handleVerifyPan} 
+                                         disabled={verifyingPan || !formData.panNumber || !formData.panFullName || !formData.panDob}
+                                         className="px-4 bg-[#4F46E5] text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                       >
+                                         {verifyingPan ? 'Verifying...' : 'Verify'}
+                                       </button>
+                                     ) : (
+                                       <div className="px-4 flex items-center justify-center bg-green-50 border border-green-200 text-green-600 text-sm font-medium rounded-lg">
+                                         <FiCheckCircle className="mr-1" /> Verified
+                                       </div>
+                                     )}
+                                   </div>
+                                 </div>
+                              </div>
+                            )}
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div>
                                 <label className="block text-xs font-semibold text-gray-600 mb-2">Front Side</label>

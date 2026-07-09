@@ -10,7 +10,8 @@ const {
   getTicketById,
   sendMessage,
   closeTicket,
-  uploadSupportAttachment
+  uploadSupportAttachment,
+  handleChatbotMessage
 } = require('../../controllers/b2bControllers/b2bSupportController');
 
 // All endpoints are JWT authenticated and B2B approved status protected
@@ -25,5 +26,8 @@ router.patch('/tickets/:ticketId/close', closeTicket);
 
 // Direct attachment upload trigger
 router.post('/tickets/:ticketId/attachments', uploadGenericFile, handleMulterError, uploadSupportAttachment);
+
+// Chatbot
+router.post('/chatbot', handleChatbotMessage);
 
 module.exports = router;

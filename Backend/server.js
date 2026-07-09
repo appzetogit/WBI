@@ -284,6 +284,7 @@ app.use('/api/engineers/fcm-tokens', require('./routes/engineer-routes/fcmToken.
 app.use('/api/engineers/projects', require('./routes/engineer-routes/project.routes'));
 app.use('/api/engineers/execution', require('./routes/engineer-routes/engineerJobExecution.routes'));
 app.use('/api/engineers/digital', require('./routes/engineer-routes/digital.routes'));
+app.use('/api/engineers/b2b-jobs', require('./routes/engineer-routes/b2bJob.routes'));
 
 // B2B routes
 app.use('/api/b2b', require('./routes/b2b-routes/auth.routes'));
@@ -516,6 +517,10 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const { startUrgencyScheduler } = require('./services/urgencyScheduler');
         startUrgencyScheduler();
         console.log('[Server] Urgency Scheduler initialized');
+
+        // Initialize Daily B2B MIS Email Cron (fires at 11:59 PM IST)
+        const { startMISCronScheduler } = require('./services/misCronScheduler');
+        startMISCronScheduler();
 
         // Initialize Scheduled Booking Scheduler for upcoming slots
         const { initializeScheduledScheduler } = require('./services/scheduledBookingScheduler');

@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { getConfig, createDraft, updateDraft, submitRegistration } = require('../../controllers/vendorControllers/vendorRegistrationController');
+const { 
+  getConfig, 
+  createDraft, 
+  updateDraft, 
+  submitRegistration,
+  verifyKyc,
+  verifyBankPennyDrop,
+  completeInduction,
+  activateAccount
+} = require('../../controllers/vendorControllers/vendorRegistrationController');
 const { uploadGenericFile, handleMulterError } = require('../../middleware/uploadMiddleware');
 
 router.post('/upload', uploadGenericFile, handleMulterError, async (req, res) => {
@@ -18,5 +27,10 @@ router.get('/registration-config', getConfig);
 router.post('/registration-draft', createDraft);
 router.patch('/registration-draft/:id', updateDraft);
 router.post('/registration-submit', submitRegistration);
+
+router.post('/verify-kyc', verifyKyc);
+router.post('/verify-bank-penny-drop', verifyBankPennyDrop);
+router.post('/complete-induction', completeInduction);
+router.post('/activate-account', activateAccount);
 
 module.exports = router;

@@ -45,13 +45,15 @@ const b2bJobSchema = new mongoose.Schema({
   },
   state: {
     type: String,
-    required: true,
-    trim: true
+    required: false,
+    trim: true,
+    default: ''
   },
   pincode: {
     type: String,
-    required: true,
-    trim: true
+    required: false,
+    trim: true,
+    default: ''
   },
   coordinates: {
     type: {
@@ -96,7 +98,7 @@ const b2bJobSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['pending', 'searching_engineer', 'assigned', 'in_progress', 'completed', 'cancelled', 'failed'], 
+    enum: ['pending', 'pending_wallet', 'searching_engineer', 'assigned', 'in_progress', 'completed', 'cancelled', 'failed'], 
     default: 'pending' 
   },
   trackingStatus: {
@@ -123,6 +125,43 @@ const b2bJobSchema = new mongoose.Schema({
   charge: { 
     type: Number, 
     default: 0 
+  },
+  slaTarget: {
+    type: Number, // SLA target in hours
+    default: 24
+  },
+  deviceId: {
+    type: String,
+    default: null,
+    trim: true
+  },
+  siteId: {
+    type: String,
+    default: null,
+    trim: true
+  },
+  startOtp: {
+    type: String,
+    default: null
+  },
+  endOtp: {
+    type: String,
+    default: null
+  },
+  beforePhotos: [{
+    type: String
+  }],
+  afterPhotos: [{
+    type: String
+  }],
+  quoteApprovalId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'QuoteApproval',
+    default: null
+  },
+  incompleteReason: {
+    type: String,
+    default: null
   },
   paymentStatus: {
     type: String,

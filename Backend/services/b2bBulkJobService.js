@@ -239,39 +239,57 @@ const processValidation = async (batchId, app) => {
         errors.push('Missing address');
       }
 
-      // E. Validate City & Pincode
+      // E. Validate City (required) & Pincode (optional — geocoding will handle missing)
       if (!mapped.city) {
         errors.push('Missing city');
       }
-      if (!mapped.pincode) {
-        errors.push('Missing pincode');
-      }
 
-      // F. Service Validation
+      // F. Service Validation — soft warning only, don't block row (B2B clients use custom service names)
       if (!mapped.service) {
         errors.push('Missing service type');
-      } else {
-        const cleanService = String(mapped.service).toLowerCase().trim();
-        if (!serviceCache.has(cleanService)) {
-          errors.push(`Unknown or inactive service type: "${mapped.service}"`);
-        }
       }
+      // Note: We no longer reject rows for unknown service names.
+      // B2B clients may use custom/internal service descriptions that differ from platform catalog.
 
-      // G. Date Validation
+      // G. Date Validation — supports Excel serial, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, and ISO formats
       if (!mapped.preferredDate) {
-        errors.push('Missing preferred date');
+        // Date is optional — default to 3 days from now if missing
+        mapped.preferredDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       } else {
-        // Excel stores dates as serial numbers or standard strings
-        let parsedDate;
+        let parsedDate = null;
+
         if (typeof mapped.preferredDate === 'number') {
-          // Excel date serial number
+          // Excel serial date number
           parsedDate = new Date((mapped.preferredDate - 25569) * 86400 * 1000);
         } else {
-          parsedDate = new Date(mapped.preferredDate);
+          const dateStr = String(mapped.preferredDate).trim();
+
+          // Try DD/MM/YYYY or DD-MM-YYYY (Indian format — most common in Indian B2B sheets)
+          const indianFmt = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+          if (indianFmt) {
+            const [, dd, mm, yyyy] = indianFmt;
+            parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+          }
+
+          // Try YYYY/MM/DD
+          if (!parsedDate || isNaN(parsedDate.getTime())) {
+            const isoSlash = dateStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+            if (isoSlash) {
+              const [, yyyy, mm, dd] = isoSlash;
+              parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+            }
+          }
+
+          // Fallback: standard Date parsing
+          if (!parsedDate || isNaN(parsedDate.getTime())) {
+            parsedDate = new Date(dateStr);
+          }
         }
 
-        if (isNaN(parsedDate.getTime())) {
-          errors.push('Invalid date format (use YYYY-MM-DD)');
+        if (!parsedDate || isNaN(parsedDate.getTime())) {
+          // Don't block the row — default to 3 days from now and log warning
+          console.warn(`[Validation] Could not parse date "${mapped.preferredDate}" — defaulting to +3 days`);
+          mapped.preferredDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
         } else {
           mapped.preferredDate = parsedDate;
         }
@@ -386,13 +404,17 @@ const processValidation = async (batchId, app) => {
     batch.status = 'validated';
     await batch.save();
 
-    // 10. Write validation reports reference
-    await UploadReport.create({
-      batchId: batch._id,
-      reportType: 'error_report',
-      fileName: `validation_errors_${batch.batchId}.xlsx`,
-      fileUrl: `/api/b2b/bulk-jobs/errors/${batch._id}/download`
-    });
+    // 10. Write validation reports reference (non-critical — don't fail the batch if this errors)
+    try {
+      await UploadReport.create({
+        batchId: batch._id,
+        reportType: 'error_report',
+        fileName: `validation_errors_${batch.batchId}.xlsx`,
+        fileUrl: `/api/b2b/bulk-jobs/errors/${batch._id}/download`
+      });
+    } catch (reportErr) {
+      console.warn(`[Validation] UploadReport creation failed for batch ${batchId} (non-critical):`, reportErr.message);
+    }
 
     console.log(`[Validation] Completed Batch: ${batchId}. Valid: ${validRows}, Invalid: ${invalidRows}`);
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:validationCompleted', {
@@ -451,13 +473,12 @@ const processJobCreation = async (batchId, app) => {
   try {
     // 1. Double check wallet balance
     const wallet = await B2BWallet.findOne({ companyId: batch.companyId });
-    if (!wallet || wallet.balance < batch.estimatedCost) {
-      throw new Error(`Insufficient wallet balance. Required: ₹${batch.estimatedCost}, Balance: ₹${wallet ? wallet.balance : 0}`);
-    }
+    const isInsufficient = !wallet || wallet.balance < batch.estimatedCost;
 
+    // Company existence check only — approval already verified at upload time
     const company = await B2BCompany.findById(batch.companyId);
-    if (!company || company.verificationStatus !== 'approved' || !company.isActive) {
-      throw new Error('Your company account is currently inactive or not approved by WBI Admins');
+    if (!company) {
+      throw new Error('Company account not found. Please re-login.');
     }
 
     // 2. Parse file to retrieve valid rows
@@ -478,12 +499,30 @@ const processJobCreation = async (batchId, app) => {
       const rawRow = rawRows[index];
       const mapped = mapHeaders(rawRow);
 
-      // Re-read preferredDate & coordinates derived during validation stage
-      let parsedDate;
+      // Robust date parsing — handles Excel serial, DD/MM/YYYY, YYYY-MM-DD, ISO etc.
+      let parsedDate = null;
       if (typeof mapped.preferredDate === 'number') {
         parsedDate = new Date((mapped.preferredDate - 25569) * 86400 * 1000);
-      } else {
-        parsedDate = new Date(mapped.preferredDate);
+      } else if (mapped.preferredDate) {
+        const dateStr = String(mapped.preferredDate).trim();
+        const indianFmt = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (indianFmt) {
+          const [, dd, mm, yyyy] = indianFmt;
+          parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+        }
+        if (!parsedDate || isNaN(parsedDate.getTime())) {
+          const isoSlash = dateStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+          if (isoSlash) {
+            const [, yyyy, mm, dd] = isoSlash;
+            parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+          }
+        }
+        if (!parsedDate || isNaN(parsedDate.getTime())) {
+          parsedDate = new Date(dateStr);
+        }
+      }
+      if (!parsedDate || isNaN(parsedDate.getTime())) {
+        parsedDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // default +3 days
       }
       mapped.preferredDate = parsedDate;
 
@@ -499,29 +538,32 @@ const processJobCreation = async (batchId, app) => {
       throw new Error('No valid jobs found in this batch to create');
     }
 
-    // 3. Deduct Wallet Balance (Atomic transaction updates)
-    wallet.balance = parseFloat((wallet.balance - batch.estimatedCost).toFixed(2));
-    wallet.totalSpent = parseFloat((wallet.totalSpent + batch.estimatedCost).toFixed(2));
-    wallet.lastUpdatedAt = new Date();
-    await wallet.save();
+    let newTxn = null;
+    // 3. Deduct Wallet Balance ONLY if sufficient funds (Atomic transaction updates)
+    if (!isInsufficient) {
+      wallet.balance = parseFloat((wallet.balance - batch.estimatedCost).toFixed(2));
+      wallet.totalSpent = parseFloat((wallet.totalSpent + batch.estimatedCost).toFixed(2));
+      wallet.lastUpdatedAt = new Date();
+      await wallet.save();
 
-    // Sync B2B Company walletBalance
-    company.walletBalance = wallet.balance;
-    await company.save();
+      // Sync B2B Company walletBalance
+      company.walletBalance = wallet.balance;
+      await company.save();
 
-    // Log Wallet Debit transaction
-    const transactionId = `TXN-BULK-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-    const newTxn = await B2BWalletTransaction.create({
-      companyId: batch.companyId,
-      walletId: wallet._id,
-      transactionId,
-      type: 'job_deduction',
-      amount: -batch.estimatedCost,
-      totalAmount: -batch.estimatedCost,
-      status: 'success',
-      paymentMethod: 'wallet',
-      remark: `Auto-deduction for bulk jobs creation (Batch ID: ${batch.batchId}, Rows: ${validParsedRows.length})`
-    });
+      // Log Wallet Debit transaction
+      const transactionId = `TXN-BULK-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      newTxn = await B2BWalletTransaction.create({
+        companyId: batch.companyId,
+        walletId: wallet._id,
+        transactionId,
+        type: 'job_deduction',
+        amount: -batch.estimatedCost,
+        totalAmount: -batch.estimatedCost,
+        status: 'success',
+        paymentMethod: 'wallet',
+        remark: `Auto-deduction for bulk jobs creation (Batch ID: ${batch.batchId}, Rows: ${validParsedRows.length})`
+      });
+    }
 
     // 4. Generate Job objects and build bulkWrite writes
     const jobWrites = [];
@@ -537,6 +579,23 @@ const processJobCreation = async (batchId, app) => {
 
       jobIdsList.push(jobMongoId);
 
+      // Smart fallbacks for optional/missing fields
+      const cityStateMap = {
+        'mumbai': 'Maharashtra', 'pune': 'Maharashtra', 'thane': 'Maharashtra',
+        'navi mumbai': 'Maharashtra', 'nashik': 'Maharashtra', 'nagpur': 'Maharashtra',
+        'delhi': 'Delhi', 'new delhi': 'Delhi', 'gurgaon': 'Haryana', 'noida': 'Uttar Pradesh',
+        'bangalore': 'Karnataka', 'bengaluru': 'Karnataka', 'mysore': 'Karnataka',
+        'hyderabad': 'Telangana', 'chennai': 'Tamil Nadu', 'kolkata': 'West Bengal',
+        'ahmedabad': 'Gujarat', 'surat': 'Gujarat', 'jaipur': 'Rajasthan',
+        'lucknow': 'Uttar Pradesh', 'kanpur': 'Uttar Pradesh', 'indore': 'Madhya Pradesh',
+        'bhopal': 'Madhya Pradesh', 'patna': 'Bihar', 'chandigarh': 'Chandigarh',
+        'kochi': 'Kerala', 'coimbatore': 'Tamil Nadu', 'visakhapatnam': 'Andhra Pradesh',
+      };
+      const cleanCity = (row.city || '').toLowerCase().trim();
+      const derivedState = row.state || cityStateMap[cleanCity] || 'India';
+      const derivedPincode = row.pincode ? String(row.pincode).replace(/[^0-9]/g, '') : '';
+      const derivedService = row.service || 'General Service';
+
       const jobDoc = {
         _id: jobMongoId,
         companyId: batch.companyId,
@@ -547,20 +606,20 @@ const processJobCreation = async (batchId, app) => {
         email: row.email || '',
         address: row.address,
         city: row.city,
-        state: row.state,
-        pincode: row.pincode,
+        state: derivedState,
+        pincode: derivedPincode,
         coordinates: {
           type: 'Point',
           coordinates: [row.longitude, row.latitude] // longitude first in GeoJSON
         },
-        service: row.service,
+        service: derivedService,
         subService: row.subService || '',
         priority: row.priority || 'Medium',
         preferredDate: row.preferredDate,
         preferredTime: row.preferredTime || 'Anytime',
-        status: 'searching_engineer', // Automatically sends to matching queue
+        status: isInsufficient ? 'pending_wallet' : 'searching_engineer', // Determines if queue triggers
         charge: batch.perJobCharge,
-        paymentStatus: 'deducted',
+        paymentStatus: isInsufficient ? 'pending_deduction' : 'deducted',
         date: new Date()
       };
 
@@ -574,8 +633,8 @@ const processJobCreation = async (batchId, app) => {
       // Prepare Job History
       historyLogs.push({
         jobId: jobMongoId,
-        status: 'searching_engineer',
-        remark: `Job initialized via Bulk Upload (Batch ID: ${batch.batchId})`,
+        status: isInsufficient ? 'pending_wallet' : 'searching_engineer',
+        remark: `Job initialized via Bulk Upload (Batch ID: ${batch.batchId})${isInsufficient ? ' - Awaiting Wallet Top-up' : ''}`,
         role: 'system'
       });
     }
@@ -615,16 +674,20 @@ const processJobCreation = async (batchId, app) => {
     await batch.save();
 
     // Update transactions with the real job MongoDB references
-    newTxn.relatedJobIds = jobIdsList;
-    await newTxn.save();
+    if (newTxn) {
+      newTxn.relatedJobIds = jobIdsList;
+      await newTxn.save();
+    }
 
-    // 7. Trigger the Engineer Allocation matching queue for each job
-    const b2bMatchingService = require('./b2bMatchingService');
-    for (const jobMongoId of jobIdsList) {
-      // Trigger matching async in background
-      b2bMatchingService.queueJobMatching(jobMongoId, app).catch(err => {
-        console.error(`[Matching Trigger Error] Job ID ${jobMongoId} allocation failed:`, err);
-      });
+    // 7. Trigger the Engineer Allocation matching queue for each job ONLY if wallet was sufficient
+    if (!isInsufficient) {
+      const b2bMatchingService = require('./b2bMatchingService');
+      for (const jobMongoId of jobIdsList) {
+        // Trigger matching async in background
+        b2bMatchingService.queueJobMatching(jobMongoId, app).catch(err => {
+          console.error(`[Matching Trigger Error] Job ID ${jobMongoId} allocation failed:`, err);
+        });
+      }
     }
 
     // 8. Emit final completions

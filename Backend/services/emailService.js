@@ -392,5 +392,71 @@ module.exports = {
   sendBookingEmails,
   sendBookingCompletionEmails,
   sendWithdrawalApprovedEmail,
-  sendDuesPaymentApprovedEmail
+  sendDuesPaymentApprovedEmail,
+  sendB2BJobCompletionEmail
 };
+
+/**
+ * Send B2B Job Completion Thank-You Notification Email
+ */
+async function sendB2BJobCompletionEmail(companyEmail, companyName, job, engineerName) {
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.log(`[EMAIL] B2B job completion email skipped (no email config) for ${companyEmail}`);
+      return;
+    }
+
+    const content = `
+      <div class="badge badge-success">✅ Job Completed</div>
+      <h2>Task Successfully Completed!</h2>
+      <p>Dear <strong>${companyName}</strong>, we're pleased to inform you that the following service request has been successfully closed.</p>
+      
+      <div class="card">
+        <div class="card-title">Job Closure Summary</div>
+        <div class="data-row">
+          <span style="color:#64748b;font-size:14px;font-weight:600;">Job ID</span>
+          <span style="color:#0f172a;font-size:14px;font-weight:700;">${job.jobId}</span>
+        </div>
+        <div class="data-row">
+          <span style="color:#64748b;font-size:14px;font-weight:600;">Service</span>
+          <span style="color:#0f172a;font-size:14px;font-weight:700;">${job.service}</span>
+        </div>
+        <div class="data-row">
+          <span style="color:#64748b;font-size:14px;font-weight:600;">Location</span>
+          <span style="color:#0f172a;font-size:14px;font-weight:700;">${job.city}</span>
+        </div>
+        <div class="data-row">
+          <span style="color:#64748b;font-size:14px;font-weight:600;">Engineer</span>
+          <span style="color:#0f172a;font-size:14px;font-weight:700;">${engineerName || 'TazkY Field Expert'}</span>
+        </div>
+        <div class="data-row">
+          <span style="color:#64748b;font-size:14px;font-weight:600;">Completed At</span>
+          <span style="color:#0f172a;font-size:14px;font-weight:700;">${new Date().toLocaleString('en-IN')}</span>
+        </div>
+        <div class="data-row" style="border-top:1px solid #e2e8f0;padding-top:12px;margin-top:8px;">
+          <span style="color:#64748b;font-size:14px;font-weight:600;">Amount Settled</span>
+          <span style="color:#10b981;font-size:16px;font-weight:800;">₹${(job.charge || 0).toLocaleString('en-IN')}</span>
+        </div>
+      </div>
+
+      <p>We look forward to continuing our partnership. Please rate the service experience in your B2B portal — your feedback helps us improve the quality of our engineers.</p>
+      <p style="background:#f0fdfa;border:1px solid #10AFA5;border-radius:12px;padding:16px;font-size:13px;color:#0f766e;">
+        <strong>🙏 Thank you for choosing TazkY!</strong><br>
+        Your trust drives our commitment to operational excellence.
+      </p>
+    `;
+
+    const transporter = createTransporter();
+    await transporter.sendMail({
+      from: `"TazkY Operations" <${process.env.EMAIL_USER}>`,
+      to: companyEmail,
+      subject: `✅ Job Completed — ${job.jobId} | TazkY B2B Platform`,
+      html: emailWrapper(content, 'Job Completed', `Your service request ${job.jobId} has been completed.`)
+    });
+
+    console.log(`[EMAIL] B2B completion thank-you sent to ${companyEmail} for Job ${job.jobId}`);
+  } catch (error) {
+    console.error('[EMAIL] B2B completion email failed (non-blocking):', error.message);
+  }
+}
+

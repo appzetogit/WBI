@@ -15,9 +15,6 @@ const RATE_LIMIT_WINDOW = parseInt(process.env.OTP_RATE_WINDOW) || 600;
  * Generate 6-digit OTP
  */
 const generateOTP = () => {
-  if (process.env.USE_DEFAULT_OTP === 'true') {
-    return '123456';
-  }
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 

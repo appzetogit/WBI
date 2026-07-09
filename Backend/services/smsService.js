@@ -8,11 +8,7 @@ const axios = require('axios');
  */
 const sendSMS = async (phone, message) => {
   try {
-    // Check for Test Mode
-    if (process.env.USE_DEFAULT_OTP === 'true') {
-      console.log(`[SMS MOCK] To: ${phone}, Msg: ${message}`);
-      return { success: true, data: 'Mock Success' };
-    }
+    // MOCK mode removed for production
 
     // Check if SMS credentials are configured
     if (!process.env.SMS_INDIA_HUB_API_KEY || !process.env.SMS_INDIA_HUB_SENDER_ID) {

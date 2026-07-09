@@ -15,15 +15,22 @@ router.get('/export', b2bJobController.exportJobs);
 // Job Actions
 router.post('/reassign', b2bJobController.reassignEngineer);
 
+// Quote / Dispute Approval Routes
+router.get('/quotes/pending', b2bJobController.getPendingQuotes);
+router.post('/quotes/:quoteId/approve', b2bJobController.approveQuote);
+router.post('/quotes/:quoteId/reject', b2bJobController.rejectQuote);
+
 // Core CRUD and Job specific getters
 router.get('/', b2bJobController.getJobs);
 router.get('/:id', b2bJobController.getJobDetails);
 router.patch('/:id', b2bJobController.updateJob);
 router.delete('/:id', b2bJobController.cancelJob);
 
-// Tracking and Timelines
+// Tracking, Timelines, and Ratings
 router.get('/timeline/:id', b2bJobController.getJobTimeline);
 router.get('/live/:id', b2bJobController.getLiveTracking);
 router.get('/logs/:id', b2bJobController.getJobLogs);
+router.post('/:jobId/rating', b2bJobController.submitEngineerRating);
 
 module.exports = router;
+

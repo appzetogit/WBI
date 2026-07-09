@@ -46,8 +46,19 @@ const Settings = () => {
           localStorage.setItem('workerSettings', JSON.stringify(res.worker.settings));
 
           // Also sync engineerData for global utility usage
-          const engineerData = JSON.parse(localStorage.getItem('engineerData') || '{}');
-          localStorage.setItem('engineerData', JSON.stringify({ ...engineerData, settings: res.worker.settings }));
+          let engineerData = {};
+          try {
+            const stored = localStorage.getItem('engineerData');
+            if (stored && stored !== 'undefined') {
+              engineerData = JSON.parse(stored);
+            }
+          } catch(e) {}
+          
+          const newEngineerData = {
+            ...engineerData,
+            settings: res.worker.settings
+          };
+          localStorage.setItem('engineerData', JSON.stringify(newEngineerData));
         }
         setLoading(false);
       } catch (error) {
@@ -66,8 +77,19 @@ const Settings = () => {
         localStorage.setItem('workerSettings', JSON.stringify(newSettings));
 
         // Also sync engineerData for global utility usage
-        const engineerData = JSON.parse(localStorage.getItem('engineerData') || '{}');
-        localStorage.setItem('engineerData', JSON.stringify({ ...engineerData, settings: newSettings }));
+        let engineerData = {};
+        try {
+          const stored = localStorage.getItem('engineerData');
+          if (stored && stored !== 'undefined') {
+            engineerData = JSON.parse(stored);
+          }
+        } catch(e){}
+        
+        const newEngineerData = {
+          ...engineerData,
+          settings: newSettings
+        };
+        localStorage.setItem('engineerData', JSON.stringify(newEngineerData));
 
         return true;
       }

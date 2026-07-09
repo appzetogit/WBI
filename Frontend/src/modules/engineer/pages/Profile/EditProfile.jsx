@@ -130,7 +130,15 @@ const EditProfile = () => {
       toast.success('Profile updated successfully');
 
       // Update local storage to keep session in sync if needed
-      const currentWorker = JSON.parse(localStorage.getItem('engineerData') || '{}');
+      let currentWorker = {};
+      try {
+        const stored = localStorage.getItem('engineerData');
+        if (stored && stored !== 'undefined') {
+          currentWorker = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.error('Failed to parse engineerData from localStorage', e);
+      }
       localStorage.setItem('engineerData', JSON.stringify({
         ...currentWorker,
         ...payload,

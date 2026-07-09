@@ -55,7 +55,12 @@ const {
   getWalletBalance,
   getEngineers,
   getUsers,
-  getCompanyJobs
+  getCompanyJobs,
+  getExecutiveMetrics,
+  getGeoTaskAnalytics,
+  getHardwareHealth,
+  getFinancialLogs,
+  getWorkforceQuality
 } = require('../../controllers/b2bControllers/b2bDashboardController');
 
 const {
@@ -82,6 +87,11 @@ router.get('/dashboard/summary', authenticate, isApprovedB2B, getDashboardSummar
 router.get('/dashboard/jobs-overview', authenticate, isApprovedB2B, getJobsOverview);
 router.get('/dashboard/jobs-status', authenticate, isApprovedB2B, getJobsStatusDistribution);
 router.get('/dashboard/recent-jobs', authenticate, isApprovedB2B, getRecentJobs);
+router.get('/dashboard/executive-metrics', authenticate, isApprovedB2B, getExecutiveMetrics);
+router.get('/dashboard/geo-task-analytics', authenticate, isApprovedB2B, getGeoTaskAnalytics);
+router.get('/dashboard/hardware-health', authenticate, isApprovedB2B, getHardwareHealth);
+router.get('/dashboard/financial-logs', authenticate, isApprovedB2B, getFinancialLogs);
+router.get('/dashboard/workforce-quality', authenticate, isApprovedB2B, getWorkforceQuality);
 
 // Wallet endpoints
 router.get('/wallet/balance', authenticate, isApprovedB2B, getWalletBalance);

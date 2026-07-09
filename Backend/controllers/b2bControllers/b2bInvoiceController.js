@@ -31,7 +31,8 @@ const writeAuditLog = async (companyId, action, invoiceId, details) => {
  */
 const getInvoiceSummary = async (req, res) => {
   try {
-    const companyId = new mongoose.Types.ObjectId(req.user.id);
+    const rawCompanyId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawCompanyId);
 
     // Aggregate paid, pending, overdue counts and total amounts
     const stats = await B2BInvoice.aggregate([
@@ -96,7 +97,7 @@ const getInvoiceSummary = async (req, res) => {
  */
 const getInvoices = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { 
       page = 1, 
       limit = 10, 
@@ -195,7 +196,8 @@ const getInvoiceById = async (req, res) => {
     }
 
     // Ownership check
-    if (invoice.companyId.toString() !== req.user.id.toString()) {
+    const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+    if (invoice.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not own this invoice.'
@@ -243,7 +245,8 @@ const downloadInvoicePdf = async (req, res) => {
     }
 
     // Ownership check
-    if (invoice.companyId.toString() !== req.user.id.toString()) {
+    const authCompanyId = req.companyId || req.user.companyId || req.user.id;
+    if (invoice.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Access denied. You do not own this invoice.'
@@ -283,7 +286,7 @@ const downloadInvoicePdf = async (req, res) => {
  */
 const exportInvoicesCsv = async (req, res) => {
   try {
-    const companyId = req.user.id;
+    const companyId = req.companyId || req.user.companyId || req.user.id;
     const { search = '', status = '', startDate = '', endDate = '' } = req.query;
 
     const query = { companyId: new mongoose.Types.ObjectId(companyId) };
