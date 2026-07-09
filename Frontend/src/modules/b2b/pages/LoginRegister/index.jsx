@@ -9,6 +9,7 @@ import Logo from '../../../../components/common/Logo';
 import api from '../../../../services/api';
 import toast from 'react-hot-toast';
 import truckImg from '../../../../assets/b2b_warehouse_truck.png';
+import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
 
 const LoginRegister = ({ defaultTab = 'login' }) => {
   const navigate = useNavigate();
@@ -61,14 +62,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
   const [branchPincode, setBranchPincode] = useState('');
   const [branchContactPerson, setBranchContactPerson] = useState('');
 
-  // Step 4: Documents Upload states
-  const [documents, setDocuments] = useState({
-    gstCertificate: { fileUrl: '', fileKey: '', fileName: '', uploading: false },
-    panCard: { fileUrl: '', fileKey: '', fileName: '', uploading: false },
-    companyRegistrationCertificate: { fileUrl: '', fileKey: '', fileName: '', uploading: false },
-    cancelledCheque: { fileUrl: '', fileKey: '', fileName: '', uploading: false },
-    addressProof: { fileUrl: '', fileKey: '', fileName: '', uploading: false }
-  });
+  const [verifications, setVerifications] = useState(null);
+  const kycRef = useRef(null);
 
   const fileInputRefs = {
     logo: useRef(null),
@@ -224,10 +219,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
         return;
       }
     } else if (currentStep === 4) {
-      // Check if all files uploaded
-      const missingDocs = Object.keys(documents).filter(key => !documents[key].fileUrl);
-      if (missingDocs.length > 0) {
-        toast.error('Please upload all required documents');
+      if (kycRef.current && !kycRef.current.validate()) {
         return;
       }
     }
@@ -242,11 +234,13 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
   // B2B Submit Registration
   const handleSubmitRegistration = async () => {
     setLoading(true);
-    const docsPayload = Object.keys(documents).map(key => ({
+    
+    // Map verifications to old documents payload structure for backward compatibility with B2B backend
+    const docsPayload = verifications ? Object.keys(verifications).map(key => ({
       documentType: key,
-      fileUrl: documents[key].fileUrl,
-      fileKey: documents[key].fileKey
-    }));
+      fileUrl: verifications[key]?.fileUrl || verifications[key]?.url || '',
+      fileKey: '' // We might not have fileKey from the unified service, backend should handle it
+    })).filter(doc => doc.fileUrl) : [];
 
     const payload = {
       companyName,
@@ -1122,75 +1116,12 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                   {/* Step 4: Documents Upload wizard */}
                   {currentStep === 4 && (
                     <div className="space-y-6">
-                      
-                      <div className="bg-[#F0FDFA] border border-[#10AFA5]/10 rounded-2xl p-4 text-[#10AFA5] text-xs font-semibold flex gap-3 items-center">
-                        <FiShield className="w-6 h-6 shrink-0" />
-                        <p>Upload clear digital scans/photos of your corporate documentation. PDF, PNG, and JPG formats are accepted up to 5MB.</p>
-                      </div>
-
-                      <div className="space-y-4">
-                        {[
-                          { key: 'gstCertificate', label: 'GST Certificate *', type: 'gstCertificate' },
-                          { key: 'panCard', label: 'Company PAN Card *', type: 'panCard' },
-                          { key: 'companyRegistrationCertificate', label: 'Incorporation / Company Registration Certificate *', type: 'companyRegistrationCertificate' },
-                          { key: 'cancelledCheque', label: 'Cancelled Cheque *', type: 'cancelledCheque' },
-                          { key: 'addressProof', label: 'Registered Address Proof *', type: 'addressProof' }
-                        ].map((docItem) => {
-                          const stateVal = documents[docItem.key];
-                          return (
-                            <div key={docItem.key} className="border border-gray-100 rounded-2xl p-4 bg-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                              <div className="flex items-center gap-3">
-                                <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
-                                  stateVal.fileUrl ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-gray-50 text-gray-400 border border-gray-100'
-                                }`}>
-                                  <FiFileText className="w-5 h-5" />
-                                </div>
-                                <div>
-                                  <p className="text-xs font-bold text-gray-800">{docItem.label}</p>
-                                  {stateVal.fileUrl ? (
-                                    <span className="text-[10px] font-bold text-green-600 truncate max-w-[200px] block mt-0.5">
-                                      {stateVal.fileName || 'Uploaded'}
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-gray-400 font-medium mt-0.5 block">Not uploaded</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div>
-                                <input 
-                                  type="file" 
-                                  className="hidden" 
-                                  ref={fileInputRefs[docItem.key]}
-                                  onChange={(e) => handleDocumentUpload(e, docItem.key)}
-                                />
-                                <button 
-                                  type="button"
-                                  onClick={() => fileInputRefs[docItem.key].current.click()}
-                                  className={`text-xs px-4 py-2 font-bold rounded-xl border flex items-center gap-1.5 transition-colors ${
-                                    stateVal.fileUrl 
-                                      ? 'bg-green-50 border-green-200 text-green-600 hover:bg-green-100' 
-                                      : 'bg-white border-gray-200 text-[#10AFA5] hover:bg-[#F0FDFA] hover:border-[#10AFA5]/30'
-                                  }`}
-                                >
-                                  {stateVal.uploading ? (
-                                    'Uploading...'
-                                  ) : stateVal.fileUrl ? (
-                                    <>
-                                      <FiCheck /> Change File
-                                    </>
-                                  ) : (
-                                    <>
-                                      <FiUpload /> Upload File
-                                    </>
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
+                      <KYCVerificationStep 
+                        ref={kycRef}
+                        role="b2b" 
+                        mobileNumber={authPhone}
+                        onComplete={(data) => setVerifications(data)}
+                      />
                     </div>
                   )}
 
@@ -1240,7 +1171,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                             <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100 space-y-2 md:col-span-2">
                               <h4 className="text-sm font-black text-gray-800 border-l-3 border-[#10AFA5] pl-1.5 mb-3 uppercase tracking-wider">Uploaded Documents</h4>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {Object.keys(documents).map(k => (
+                                {verifications && Object.keys(verifications).map(k => (
                                   <div key={k} className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-gray-100">
                                     <FiCheck className="text-green-500 w-4 h-4 shrink-0" />
                                     <span className="font-bold text-[10px] text-gray-700 capitalize truncate">

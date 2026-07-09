@@ -4,6 +4,7 @@ import { FiUser, FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowRight, FiArrowLe
 import { toast } from 'react-hot-toast';
 import LogoLoader from '../../../components/common/LogoLoader';
 import { engineerAuthService } from '../../../services/authService';
+import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import Logo from '../../../components/common/Logo';
 
 // Helper to load Razorpay Script
@@ -23,6 +24,7 @@ export default function EngineerSignup() {
   const [config, setConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const kycRef = React.useRef(null);
 
   // OTP Verification State
   const [otpSent, setOtpSent] = useState(false);
@@ -60,6 +62,18 @@ export default function EngineerSignup() {
     localStorage.removeItem('engineerAccessToken');
     localStorage.removeItem('engineerRefreshToken');
     localStorage.removeItem('engineerData');
+
+    try {
+      const draftStr = sessionStorage.getItem('engineerSignupDraft');
+      if (draftStr) {
+        const draft = JSON.parse(draftStr);
+        if (draft.formData) setFormData(draft.formData);
+        if (draft.isPhoneVerified) setIsPhoneVerified(draft.isPhoneVerified);
+        if (draft.otpSent) setOtpSent(draft.otpSent);
+      }
+    } catch (e) {
+      console.error('Failed to parse signup draft', e);
+    }
     
     const loadConfig = async () => {
       try {
@@ -272,6 +286,13 @@ export default function EngineerSignup() {
     setVerifyingAadhaar(true);
     try {
       const redirectUrl = `${window.location.origin}${window.location.pathname}?step=${additionalDetailsStep}`;
+      
+      sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
+        formData,
+        isPhoneVerified,
+        otpSent
+      }));
+
       const res = await engineerAuthService.initiateDigiLockerSignup(mobile, redirectUrl);
       if (res.success && res.data?.url) {
         window.location.href = res.data.url;
@@ -352,32 +373,8 @@ export default function EngineerSignup() {
       }
     }
     if (step === additionalDetailsStep) {
-      // 1. Validate Documents
-      const docsConfig = config?.documents || [];
-      for (const dc of docsConfig) {
-        if (dc.isRequired) {
-          const isAadhaar = dc.key.toLowerCase().includes('aadhaar') || dc.key.toLowerCase().includes('aadhar');
-          const isPan = dc.key.toLowerCase().includes('pan');
-          
-          if (isAadhaar && !isAadhaarVerified) {
-            toast.error(`Please verify your Aadhaar number before proceeding`);
-            return false;
-          }
-          if (isPan && !isPanVerified) {
-            toast.error(`Please verify your PAN before proceeding`);
-            return false;
-          }
-
-          const ud = formData.uploadedDocuments.find(d => d.key === dc.key);
-          if (!ud || !ud.url) {
-            toast.error(`Please upload ${dc.title}`);
-            return false;
-          }
-          if (dc.requiresFrontAndBack && !ud.backUrl) {
-            toast.error(`Please upload the back side of ${dc.title}`);
-            return false;
-          }
-        }
+      if (kycRef.current && !kycRef.current.validate()) {
+        return false;
       }
       
       // 2. Validate Operational Details
@@ -556,6 +553,7 @@ export default function EngineerSignup() {
 
       const response = await engineerAuthService.register(payload);
       if (response.success) {
+        sessionStorage.removeItem('engineerSignupDraft');
         toast.success(
           <div className="flex flex-col">
             <span className="font-bold">Welcome Onboard!</span>
@@ -808,146 +806,12 @@ export default function EngineerSignup() {
             {currentStep === additionalDetailsStep && (
               <div className="space-y-8 animate-fadeIn">
                 {/* 1. KYC Documents */}
-                <div>
-                  <h2 className="text-xl font-bold mb-4">KYC Documents</h2>
-                  <div className="space-y-4">
-                    {config?.documents?.map(doc => {
-                       const uDoc = formData.uploadedDocuments.find(d => d.key === doc.key);
-                       const isAadhaar = doc.key.toLowerCase().includes('aadhaar') || doc.key.toLowerCase().includes('aadhar');
-                       const isPan = doc.key.toLowerCase().includes('pan');
-
-                       return (
-                         <div key={doc.key} className="border border-gray-200 rounded-xl p-4 bg-gray-50">
-                            <h3 className="font-bold text-gray-800 mb-1">{doc.title} {doc.isRequired && '*'}</h3>
-                            <p className="text-xs text-gray-500 mb-3">{doc.description}</p>
-                            
-                            {isAadhaar && (
-                              <div className="mb-4 bg-white p-4 rounded-xl border border-gray-200">
-                                 <div className="flex items-center justify-between mb-2">
-                                   <label className="block text-sm font-semibold text-gray-700">DigiLocker Aadhaar Verification *</label>
-                                   <span className="text-[10px] font-bold px-2 py-1 bg-blue-100 text-blue-700 rounded-full uppercase tracking-wider">Most Secure</span>
-                                 </div>
-                                 <p className="text-xs text-gray-500 mb-4">You will be redirected to the official DigiLocker portal to securely authenticate your Aadhaar.</p>
-                                 
-                                 {isAadhaarVerified ? (
-                                   <div className="flex flex-col bg-green-50 p-3 rounded-xl border border-green-200">
-                                     <div className="flex items-center text-green-700 font-bold mb-1">
-                                       <FiCheckCircle className="mr-2 h-5 w-5" /> Successfully Verified!
-                                     </div>
-                                     <div className="text-xs text-green-600 font-medium">Aadhaar: <span className="font-mono tracking-wider">{formData.aadhaarNumber}</span></div>
-                                   </div>
-                                 ) : (
-                                   <button 
-                                     type="button" 
-                                     onClick={handleInitiateDigiLocker} 
-                                     disabled={verifyingAadhaar}
-                                     className="w-full py-3 flex items-center justify-center gap-2 bg-[#4F46E5] text-white text-sm font-bold rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50"
-                                   >
-                                     {verifyingAadhaar ? (
-                                       <>
-                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                         Connecting to DigiLocker...
-                                       </>
-                                     ) : (
-                                       <>
-                                         <FiLock /> Verify with DigiLocker
-                                       </>
-                                     )}
-                                   </button>
-                                 )}
-                              </div>
-                            )}
-
-                            {isPan && (
-                              <div className="mb-4 bg-white p-3 rounded-xl border border-gray-200 space-y-3">
-                                 <div>
-                                   <label className="block text-xs font-semibold text-gray-700 mb-1">PAN Number *</label>
-                                   <input 
-                                     type="text" 
-                                     value={formData.panNumber} 
-                                     onChange={(e) => setFormData(p => ({ ...p, panNumber: e.target.value.toUpperCase().slice(0, 10)}))}
-                                     disabled={isPanVerified}
-                                     placeholder="10-character PAN Number"
-                                     className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] disabled:opacity-70"
-                                   />
-                                 </div>
-                                 <div>
-                                   <label className="block text-xs font-semibold text-gray-700 mb-1">Full Name (As on PAN) *</label>
-                                   <input 
-                                     type="text" 
-                                     value={formData.panFullName} 
-                                     onChange={(e) => setFormData(p => ({ ...p, panFullName: e.target.value}))}
-                                     disabled={isPanVerified}
-                                     placeholder="John Doe"
-                                     className="w-full bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] disabled:opacity-70"
-                                   />
-                                 </div>
-                                 <div>
-                                   <label className="block text-xs font-semibold text-gray-700 mb-1">Date of Birth *</label>
-                                   <div className="flex gap-2">
-                                     <input 
-                                       type="date" 
-                                       value={formData.panDob} 
-                                       onChange={(e) => setFormData(p => ({ ...p, panDob: e.target.value}))}
-                                       disabled={isPanVerified}
-                                       className="flex-1 bg-gray-50 border border-gray-200 rounded-lg py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] disabled:opacity-70"
-                                     />
-                                     {!isPanVerified ? (
-                                       <button 
-                                         type="button" 
-                                         onClick={handleVerifyPan} 
-                                         disabled={verifyingPan || !formData.panNumber || !formData.panFullName || !formData.panDob}
-                                         className="px-4 bg-[#4F46E5] text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                                       >
-                                         {verifyingPan ? 'Verifying...' : 'Verify'}
-                                       </button>
-                                     ) : (
-                                       <div className="px-4 flex items-center justify-center bg-green-50 border border-green-200 text-green-600 text-sm font-medium rounded-lg">
-                                         <FiCheckCircle className="mr-1" /> Verified
-                                       </div>
-                                     )}
-                                   </div>
-                                 </div>
-                              </div>
-                            )}
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-600 mb-2">Front Side</label>
-                                <div className="relative border-2 border-dashed border-gray-300 rounded-xl h-28 flex items-center justify-center bg-white overflow-hidden hover:border-[#4F46E5] transition-colors cursor-pointer">
-                                  {uDoc?.url ? (
-                                    <img src={uDoc.url} alt="Front" className="w-full h-full object-cover" />
-                                  ) : (
-                                    <div className="text-center">
-                                      <FiUploadCloud className="w-5 h-5 mx-auto text-gray-400 mb-1" />
-                                      <span className="text-xs text-gray-500 font-medium">Upload Image</span>
-                                    </div>
-                                  )}
-                                  <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileRead(e, val => handleDocumentChange(doc.key, 'url', val))} />
-                                </div>
-                              </div>
-                              {doc.requiresFrontAndBack && (
-                                <div>
-                                  <label className="block text-xs font-semibold text-gray-600 mb-2">Back Side</label>
-                                  <div className="relative border-2 border-dashed border-gray-300 rounded-xl h-28 flex items-center justify-center bg-white overflow-hidden hover:border-[#4F46E5] transition-colors cursor-pointer">
-                                    {uDoc?.backUrl ? (
-                                      <img src={uDoc.backUrl} alt="Back" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <div className="text-center">
-                                        <FiUploadCloud className="w-5 h-5 mx-auto text-gray-400 mb-1" />
-                                        <span className="text-xs text-gray-500 font-medium">Upload Image</span>
-                                      </div>
-                                    )}
-                                    <input type="file" accept="image/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileRead(e, val => handleDocumentChange(doc.key, 'backUrl', val))} />
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                         </div>
-                       );
-                    })}
-                  </div>
-                </div>
+                <KYCVerificationStep 
+                  ref={kycRef}
+                  role="engineer" 
+                  mobileNumber={formData.phone || formData.mobile}
+                  onComplete={(verifications) => setFormData(prev => ({ ...prev, verifications }))}
+                />
 
                 <div className="border-t border-gray-200"></div>
 

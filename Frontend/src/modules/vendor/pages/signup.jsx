@@ -16,7 +16,7 @@ import {
 } from '../components/registration/WizardSteps';
 
 const STEPS = [
-  'Account', 'Services & Location', 'Digital KYC', 'Bank Verification', 'Review'
+  'Account', 'Services & Location', 'KYC & Bank Details', 'Review'
 ];
 
 const VendorSignup = () => {
@@ -24,6 +24,7 @@ const VendorSignup = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [config, setConfig] = useState(null);
+  const kycRef = React.useRef(null);
   
   const [formData, setFormData] = useState({
     ownerName: '',
@@ -101,6 +102,9 @@ const VendorSignup = () => {
         newErrors.isPhoneVerified = 'Required';
       }
     }
+    if (step === 3 && kycRef.current) {
+      if (!kycRef.current.validate()) return false;
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -116,7 +120,7 @@ const VendorSignup = () => {
   };
 
   const handleSubmit = async () => {
-    if (!validateStep(5)) return;
+    if (!validateStep(4)) return;
     setIsLoading(true);
     try {
       const res = await api.post('/vendor/registration-submit', formData);
@@ -139,9 +143,8 @@ const VendorSignup = () => {
     switch (currentStep) {
       case 1: return <Step1Account data={formData} updateData={updateData} errors={errors} />;
       case 2: return <Step2ServiceGeo data={formData} updateData={updateData} />;
-      case 3: return <Step3KYC data={formData} updateData={updateData} />;
-      case 4: return <Step4BankDetails data={formData} updateData={updateData} />;
-      case 5: return <Step5Review data={formData} />;
+      case 3: return <Step3KYC data={formData} updateData={updateData} kycRef={kycRef} />;
+      case 4: return <Step5Review data={formData} />;
       default: return null;
     }
   };

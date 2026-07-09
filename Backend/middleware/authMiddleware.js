@@ -137,7 +137,7 @@ const authenticate = async (req, res, next) => {
     }
 
     if (!user) {
-      console.error('User not found for ID:', decoded.userId);
+      // console.error('User not found for ID:', decoded.userId); // Commented out to prevent log spam from old tokens
       return res.status(401).json({
         success: false,
         message: 'User not found. Please login again.'

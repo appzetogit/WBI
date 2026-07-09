@@ -200,6 +200,8 @@ app.get('/api/test/redis', async (req, res) => {
 
 // API Routes
 
+// Public / Global routes
+app.use('/api/kyc', require('./routes/kyc.routes'));
 app.use('/api', require('./routes/public-routes/categoriesQuery.routes'));
 app.use('/api/service-categories', require('./routes/public-routes/serviceCategory.routes'));
 app.use('/api/sub-services', require('./routes/public-routes/subServicesPublic.routes'));

@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import { workerAuthService } from '../../../services/authService';
 import Logo from '../../../components/common/Logo';
 import LogoLoader from '../../../components/common/LogoLoader';
+import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import { z } from "zod";
 
 export default function WorkerSignup() {
@@ -13,6 +14,7 @@ export default function WorkerSignup() {
   const [config, setConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const kycRef = React.useRef(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -121,11 +123,20 @@ export default function WorkerSignup() {
       }
     }
 
-    const totalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2);
-    if (step === totalSteps && config?.categories?.length > 0) {
+    const configTotalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2);
+    const totalSteps = configTotalSteps + 1; // +1 for KYC step
+    const kycStep = totalSteps;
+
+    if (step === configTotalSteps && config?.categories?.length > 0) {
       if (formData.serviceCategories.length === 0) {
         toast.error("Please select at least one service category");
         return false;
+      }
+    }
+
+    if (step === kycStep) {
+      if (kycRef.current) {
+        return kycRef.current.validate();
       }
     }
     return true;
@@ -208,7 +219,9 @@ export default function WorkerSignup() {
     }
 
     const currentStepData = config?.steps?.find(s => s.step === currentStep);
-    const totalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2); // At least 2 steps (fields + categories)
+    const configTotalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2); // At least 2 steps (fields + categories)
+    const totalSteps = configTotalSteps + 1; // +1 for KYC step
+    const kycStep = totalSteps;
 
     const getFieldIcon = (key, type) => {
       const iconClass = "w-4 h-4";
@@ -301,8 +314,8 @@ export default function WorkerSignup() {
               </div>
             )}
 
-            {/* Final Step: Services (If config has categories) */}
-            {currentStep === totalSteps && config?.categories?.length > 0 && (
+            {/* Services Step (If config has categories) */}
+            {currentStep === configTotalSteps && config?.categories?.length > 0 && (
               <div className="space-y-6 animate-fadeIn">
                 <div className="text-center mb-8">
                   <h2 className="text-2xl font-black text-gray-800">Services Offered</h2>
@@ -350,6 +363,22 @@ export default function WorkerSignup() {
                     })}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* KYC Step */}
+            {currentStep === kycStep && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="text-center mb-8">
+                  <h2 className="text-2xl font-black text-gray-800">Document Verification</h2>
+                  <p className="text-sm text-gray-500 mt-2">Please complete the required verifications</p>
+                </div>
+                <KYCVerificationStep 
+                  ref={kycRef}
+                  role="worker" 
+                  mobileNumber={formData.phone}
+                  onComplete={(verifications) => setFormData(prev => ({ ...prev, verifications }))}
+                />
               </div>
             )}
 

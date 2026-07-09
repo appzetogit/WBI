@@ -214,7 +214,7 @@ class CgpeService {
         requestId: `req_dl_init_${Date.now()}`,
         status: 'SUCCESS',
         data: {
-          url: data.redirectUrl ? `${data.redirectUrl}?recordId=mock_record_12345` : 'http://localhost:5174/mock-digilocker-redirect?recordId=mock_record_12345',
+          url: data.redirectUrl ? (data.redirectUrl.includes('?') ? `${data.redirectUrl}&recordId=mock_record_12345` : `${data.redirectUrl}?recordId=mock_record_12345`) : 'http://localhost:5174/mock-digilocker-redirect?recordId=mock_record_12345',
           recordId: 'mock_record_12345'
         }
       };

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FiCheckCircle, FiUpload, FiMapPin, FiCreditCard, FiUser, FiBriefcase, FiZap, FiLayers } from 'react-icons/fi';
+import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
 
 export const Step1Account = ({ data, updateData, errors }) => {
   const [otpSent, setOtpSent] = useState(false);
@@ -144,132 +145,16 @@ export const Step2ServiceGeo = ({ data, updateData }) => {
   );
 };
 
-// Step 3 (was Step 9)
-export const Step3KYC = ({ data, updateData }) => {
-  const [digiLockerLoading, setDigiLockerLoading] = useState(false);
-  const [faceMatchLoading, setFaceMatchLoading] = useState(false);
-  const [gstLoading, setGstLoading] = useState(false);
-
-  const simulateDigiLocker = () => {
-    setDigiLockerLoading(true);
-    setTimeout(() => {
-      setDigiLockerLoading(false);
-      updateData({ 
-        aadhaarUrl: 'https://simulated-digilocker-aadhaar.pdf',
-        aadhaarVerified: true
-      });
-    }, 2500);
-  };
-
-  const simulateFaceMatch = () => {
-    setFaceMatchLoading(true);
-    setTimeout(() => {
-      setFaceMatchLoading(false);
-      updateData({ 
-        ownerSelfieUrl: 'https://simulated-webcam-capture.jpg',
-        faceMatchScore: 98,
-        faceMatchVerified: true
-      });
-    }, 3000);
-  };
-
-  const simulateGstPan = () => {
-    setGstLoading(true);
-    setTimeout(() => {
-      setGstLoading(false);
-      updateData({ 
-        panUrl: 'https://simulated-pan.pdf',
-        panVerified: true,
-        gstCertificateUrl: 'https://simulated-gst.pdf',
-        gstVerified: true
-      });
-    }, 2000);
-  };
-
+// Step 3 (KYC & Bank)
+export const Step3KYC = ({ data, updateData, kycRef }) => {
   return (
     <div className="space-y-6">
-      <h3 className="text-xl font-bold">Secure Digital KYC & Verification</h3>
-      
-      {/* Aadhaar / DigiLocker */}
-      <div className="p-4 border rounded-xl bg-white shadow-sm">
-        <h4 className="font-bold text-gray-800 mb-2">1. Identity Verification (DigiLocker)</h4>
-        <p className="text-sm text-gray-500 mb-4">Connect with DigiLocker to securely fetch your Aadhaar details.</p>
-        
-        {data.aadhaarVerified ? (
-          <div className="flex items-center p-3 bg-green-50 text-green-700 rounded-lg border border-green-200">
-            <FiCheckCircle className="mr-2" /> Aadhaar Verified via API Setu
-          </div>
-        ) : (
-          <button 
-            type="button" 
-            onClick={simulateDigiLocker}
-            disabled={digiLockerLoading}
-            className={`flex items-center px-4 py-2 rounded-lg font-medium text-white transition-colors ${digiLockerLoading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-          >
-            {digiLockerLoading ? (
-              <><span className="animate-spin mr-2 border-2 border-white border-t-transparent rounded-full w-4 h-4"></span> Fetching from DigiLocker...</>
-            ) : 'Fetch via DigiLocker'}
-          </button>
-        )}
-      </div>
-
-      {/* Face Match */}
-      <div className="p-4 border rounded-xl bg-white shadow-sm">
-        <h4 className="font-bold text-gray-800 mb-2">2. Live Face-Match Verification</h4>
-        <p className="text-sm text-gray-500 mb-4">Take a live selfie to match with your Aadhaar photo. Prevents fraud & account sharing.</p>
-        
-        {data.faceMatchVerified ? (
-          <div className="flex flex-col gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
-            <div className="flex items-center text-green-700 font-bold">
-              <FiCheckCircle className="mr-2" /> Live Biometrics Verified
-            </div>
-            <p className="text-sm text-green-600">AI Face Match Score: {data.faceMatchScore}%</p>
-          </div>
-        ) : (
-          <div className="flex flex-col items-start gap-3">
-            <div className="w-full h-32 bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center text-gray-400">
-              <FiUser className="w-8 h-8" />
-              <span className="ml-2">Webcam Preview Placeholder</span>
-            </div>
-            <button 
-              type="button" 
-              onClick={simulateFaceMatch}
-              disabled={faceMatchLoading || !data.aadhaarVerified}
-              className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${!data.aadhaarVerified ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : faceMatchLoading ? 'bg-teal-400 text-white cursor-not-allowed' : 'bg-[#0D8A72] text-white hover:bg-teal-700'}`}
-            >
-              {faceMatchLoading ? (
-                <><span className="animate-spin mr-2 border-2 border-current border-t-transparent rounded-full w-4 h-4"></span> Scanning Face...</>
-              ) : 'Capture & Verify'}
-            </button>
-            {!data.aadhaarVerified && <p className="text-xs text-red-500">Please verify Aadhaar first</p>}
-          </div>
-        )}
-      </div>
-
-      {/* GST / PAN Validation */}
-      <div className="p-4 border rounded-xl bg-white shadow-sm">
-        <h4 className="font-bold text-gray-800 mb-2">3. Tax & Business Validation</h4>
-        <p className="text-sm text-gray-500 mb-4">Instant verification against NSDL & GST Portal.</p>
-        
-        {data.panVerified && data.gstVerified ? (
-          <div className="flex flex-col gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
-             <div className="flex items-center text-green-700 font-bold">
-              <FiCheckCircle className="mr-2" /> PAN & GST Verified
-            </div>
-          </div>
-        ) : (
-          <button 
-            type="button" 
-            onClick={simulateGstPan}
-            disabled={gstLoading}
-            className={`flex items-center px-4 py-2 rounded-lg font-medium transition-colors ${gstLoading ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-gray-800 text-white hover:bg-gray-900'}`}
-          >
-            {gstLoading ? (
-              <><span className="animate-spin mr-2 border-2 border-current border-t-transparent rounded-full w-4 h-4"></span> Validating with GST Portal...</>
-            ) : 'Verify PAN & GSTIN'}
-          </button>
-        )}
-      </div>
+      <KYCVerificationStep 
+        ref={kycRef}
+        role="vendor" 
+        mobileNumber={data.mobile}
+        onComplete={(verifications) => updateData({ verifications, aadhaarVerified: verifications?.aadhaar?.status === 'verified', bankStatus: verifications?.bank?.status === 'verified' ? 'verified' : 'pending' })}
+      />
     </div>
   );
 };
