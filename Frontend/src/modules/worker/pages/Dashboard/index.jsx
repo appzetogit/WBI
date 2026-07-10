@@ -4,7 +4,9 @@ import { FiChevronRight, FiAlertCircle, FiClock, FiMapPin } from 'react-icons/fi
 import { FaWallet, FaBriefcase, FaCheckCircle, FaProjectDiagram } from 'react-icons/fa';
 import Header from '../../components/layout/Header';
 import workerService from '../../../../services/workerService';
-import { registerFCMToken } from '../../../../services/pushNotificationService';
+const getPushService = () => import('../../../../services/pushNotificationService');
+const registerFCMToken = async (...args) => (await getPushService()).registerFCMToken(...args);
+;
 import { SkeletonProfileHeader, SkeletonDashboardStats, SkeletonList } from '../../../../components/common/SkeletonLoaders';
 import OptimizedImage from '../../../../components/common/OptimizedImage';
 import { useSocket } from '../../../../context/SocketContext';

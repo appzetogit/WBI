@@ -1,5 +1,8 @@
 import api from './api';
-import { registerFCMToken, removeFCMToken } from './pushNotificationService';
+const getPushService = () => import('./pushNotificationService');
+const registerFCMToken = async (...args) => (await getPushService()).registerFCMToken(...args);
+const removeFCMToken = async (...args) => (await getPushService()).removeFCMToken(...args);
+;
 
 /**
  * Notify Flutter WebView about successful login

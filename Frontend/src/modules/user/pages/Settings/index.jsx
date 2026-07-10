@@ -5,7 +5,10 @@ import { FaWhatsapp } from 'react-icons/fa';
 import { toast } from 'react-hot-toast';
 import { themeColors } from '../../../../theme';
 import { userAuthService } from '../../../../services/authService';
-import { registerFCMToken, removeFCMToken } from '../../../../services/pushNotificationService';
+const getPushService = () => import('../../../../services/pushNotificationService');
+const registerFCMToken = async (...args) => (await getPushService()).registerFCMToken(...args);
+const removeFCMToken = async (...args) => (await getPushService()).removeFCMToken(...args);
+;
 import BottomNav from '../../components/layout/BottomNav';
 
 const Settings = () => {

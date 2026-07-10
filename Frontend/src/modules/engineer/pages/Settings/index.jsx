@@ -6,7 +6,10 @@ import { workerTheme as themeColors } from '../../../../theme';
 import { engineerAuthService } from '../../../../services/authService';
 import Header from '../../components/layout/Header';
 import engineerService from '../../../../services/engineerService';
-import { registerFCMToken, removeFCMToken } from '../../../../services/pushNotificationService';
+const getPushService = () => import('../../../../services/pushNotificationService');
+const registerFCMToken = async (...args) => (await getPushService()).registerFCMToken(...args);
+const removeFCMToken = async (...args) => (await getPushService()).removeFCMToken(...args);
+;
 
 const Settings = () => {
   const navigate = useNavigate();
