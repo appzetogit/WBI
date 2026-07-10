@@ -358,3 +358,55 @@ exports.uploadDocument = async (req, res) => {
     res.status(400).json({ success: false, message: error.message || 'Failed to upload document' });
   }
 };
+
+exports.verifyAadhaar = async (req, res) => {
+  try {
+    const { role, entityId, aadhaarNumber } = req.body;
+    if (!aadhaarNumber) return res.status(400).json({ success: false, message: 'Aadhaar number is required' });
+    
+    if (entityId) {
+      // Check cache to prevent duplicate calls
+      const existing = await KYCVerification.findOne({ role, entityId, documentType: 'aadhaar' });
+      if (existing && existing.status === 'verified') {
+        await logAudit(role, entityId, 'AADHAAR_VERIFY_SKIPPED', 'aadhaar', 'cgpe', 'verified', 'Skipped duplicate Aadhaar verification', req);
+        return res.json({ success: true, message: 'Aadhaar already verified', data: existing });
+      }
+    }
+    
+    const result = await cgpeService.verifyAadhaar(aadhaarNumber);
+    
+    if (entityId) {
+      const kycRec = await KYCVerification.findOneAndUpdate(
+        { role, entityId, documentType: 'aadhaar' },
+        {
+          documentNumberMasked: 'XXXX-XXXX-' + aadhaarNumber.slice(-4),
+          provider: 'cgpe',
+          providerTransactionId: result.requestId,
+          verificationMode: 'api',
+          status: 'verified',
+          extractedName: result.data?.fullName,
+          verifiedName: result.data?.fullName,
+          rawResponseEncrypted: result.data,
+          verifiedAt: new Date()
+        },
+        { upsert: true, new: true }
+      );
+      
+      await syncToLegacy(role, entityId, 'aadhaar', 'verified', null, null, {
+        documentNumberMasked: kycRec.documentNumberMasked,
+        transactionId: result.requestId,
+        rawResponse: result.data
+      });
+      
+      await logAudit(role, entityId, 'AADHAAR_VERIFY_SUCCESS', 'aadhaar', 'cgpe', 'verified', 'Aadhaar verified successfully', req);
+    }
+    
+    res.json({ success: true, data: result.data });
+  } catch (error) {
+    console.error('[KYC] verifyAadhaar Error:', error);
+    if (req.body.entityId) {
+      await logAudit(req.body.role, req.body.entityId, 'AADHAAR_VERIFY_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
+    }
+    res.status(400).json({ success: false, message: error.message || 'Aadhaar verification failed' });
+  }
+};

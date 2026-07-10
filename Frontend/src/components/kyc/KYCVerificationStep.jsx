@@ -3,7 +3,7 @@ import { FiCheckCircle, FiAlertCircle, FiUpload, FiLoader, FiShield } from 'reac
 import { toast } from 'react-hot-toast';
 import { kycService } from '../../services/kycService';
 
-const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId, onComplete }, ref) => {
+const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId, redirectUrl, onComplete, onBeforeDigiLockerInitiate }, ref) => {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [verifications, setVerifications] = useState({});
@@ -52,13 +52,31 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
         toast.error('Mobile number is required for DigiLocker');
         return;
       }
-      const redirectUrl = window.location.href; // Will include ?step=... automatically
-      const res = await kycService.initiateDigiLocker({ role, mobileNumber, redirectUrl, entityId, draftId });
+      if (onBeforeDigiLockerInitiate) {
+        await onBeforeDigiLockerInitiate();
+      }
+      const finalRedirectUrl = redirectUrl || window.location.href; // Use prop if provided
+      const res = await kycService.initiateDigiLocker({ role, mobileNumber, redirectUrl: finalRedirectUrl, entityId, draftId });
       if (res.success && res.data?.authorizationUrl) {
         window.location.href = res.data.authorizationUrl;
       }
     } catch (err) {
       toast.error(err.message || 'Failed to initiate DigiLocker');
+    }
+  };
+
+  const handleVerifyAadhaar = async (aadhaarNumber) => {
+    if (!aadhaarNumber || aadhaarNumber.length !== 12) return toast.error('Valid 12-digit Aadhaar required');
+    try {
+      setVerifications(p => ({ ...p, aadhaar: { status: 'verifying' } }));
+      const res = await kycService.verifyAadhaar({ role, entityId, aadhaarNumber });
+      if (res.success) {
+        toast.success('Aadhaar verified successfully');
+        setVerifications(p => ({ ...p, aadhaar: { status: 'verified', data: res.data } }));
+      }
+    } catch (err) {
+      toast.error(err.message || 'Aadhaar verification failed');
+      setVerifications(p => ({ ...p, aadhaar: { status: 'failed', error: err.message, otpSent: false } }));
     }
   };
 
@@ -170,11 +188,38 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
 
               {!isVerified && (
                 <div className="mt-2">
-                  {rule.verificationMode === 'digilocker' && (
-                    <button onClick={handleDigiLockerInitiate} className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex justify-center items-center gap-2">
-                      <img src="https://upload.wikimedia.org/wikipedia/commons/6/61/DigiLocker_Logo.svg" alt="DigiLocker" className="h-4 brightness-0 invert" />
-                      Verify via DigiLocker
-                    </button>
+                  {(rule.verificationMode === 'digilocker' || rule.documentType === 'aadhaar') && (
+                    <div className="space-y-3">
+                      <input type="text" id="aadhaarInput" placeholder="Enter 12-digit Aadhaar Number" maxLength="12" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border" />
+                      {!vState.otpSent ? (
+                        <button 
+                          onClick={() => {
+                            const val = document.getElementById('aadhaarInput').value;
+                            if(val.length !== 12 || isNaN(val)) return toast.error('Enter valid 12-digit Aadhaar');
+                            setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, otpSent: true } }));
+                            toast.success('OTP sent to Aadhaar linked mobile number');
+                          }}
+                          className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+                        >
+                          Get OTP
+                        </button>
+                      ) : (
+                        <>
+                          <input type="text" id="aadhaarOtp" placeholder="Enter OTP" maxLength="6" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border mt-2" />
+                          <button 
+                            onClick={() => {
+                               const otp = document.getElementById('aadhaarOtp').value;
+                               if(otp.length < 4) return toast.error('Enter valid OTP');
+                               handleVerifyAadhaar(document.getElementById('aadhaarInput').value);
+                            }}
+                            disabled={vState.status === 'verifying'}
+                            className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                          >
+                            {vState.status === 'verifying' ? 'Verifying...' : 'Verify OTP & Aadhaar'}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   )}
 
                   {rule.verificationMode === 'api' && rule.documentType === 'pan' && (

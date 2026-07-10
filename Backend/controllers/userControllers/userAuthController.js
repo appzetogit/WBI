@@ -24,12 +24,20 @@ const sendOTP = async (req, res) => {
     const { phone, email, type } = req.body;
 
     // Check existing user for login
-    if (type === 'login' || !type) {
+    if (type === 'login') {
         const existingUser = await findUserAcrossCollections(phone, 'user');
         if (!existingUser || existingUser.role !== 'user') {
             return res.status(404).json({
                 success: false,
                 message: 'User is not registered. Please create an account first.'
+            });
+        }
+    } else if (type === 'register') {
+        const existingUser = await User.findOne({ phone });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'User already exists. Please login instead.'
             });
         }
     }

@@ -12,7 +12,7 @@ import { z } from "zod";
 
 // Zod schema
 const phoneSchema = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/, "Please enter a valid 10-digit Indian phone number"),
+  phone: z.string().regex(/^\d{10}$/, "Please enter a valid 10-digit phone number"),
 });
 
 const Login = () => {

@@ -15,6 +15,7 @@ router.post('/digilocker/complete', kycController.completeDigiLocker);
 // 3. API Verifications
 router.post('/pan/verify', kycController.verifyPan);
 router.post('/bank/verify', kycController.verifyBank);
+router.post('/aadhaar/verify', kycController.verifyAadhaar);
 
 // 4. File uploads (Selfie, DL, etc)
 router.post('/document/upload', kycController.uploadDocument);

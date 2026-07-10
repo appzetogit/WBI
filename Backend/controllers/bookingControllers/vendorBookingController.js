@@ -840,7 +840,7 @@ const startSelfJob = async (req, res) => {
     }
 
     // Generate Visit OTP
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const otp = process.env.USE_DEFAULT_OTP === 'true' ? '1234' : Math.floor(1000 + Math.random() * 9000).toString();
 
     // Update booking
     booking.status = BOOKING_STATUS.JOURNEY_STARTED;
@@ -1185,7 +1185,8 @@ const completeSelfJob = async (req, res) => {
     booking.vendorBillId = bill._id;
 
     // Reuse existing Payment OTP for cash collection or generate new one
-    const payOtp = booking.paymentOtp || Math.floor(1000 + Math.random() * 9000).toString();
+    const defaultOtp = process.env.USE_DEFAULT_OTP === 'true' ? '1234' : Math.floor(1000 + Math.random() * 9000).toString();
+    const payOtp = booking.paymentOtp || defaultOtp;
     booking.paymentOtp = payOtp;
 
     if (workPhotos) booking.workPhotos = workPhotos;

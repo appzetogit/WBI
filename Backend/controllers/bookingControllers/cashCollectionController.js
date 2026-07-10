@@ -66,7 +66,8 @@ exports.initiateOnlineCollection = async (req, res) => {
     }
 
     // Reuse existing OTP or generate new one
-    const otp = booking.paymentOtp || Math.floor(1000 + Math.random() * 9000).toString();
+    const defaultOtp = process.env.USE_DEFAULT_OTP === 'true' ? '1234' : Math.floor(1000 + Math.random() * 9000).toString();
+    const otp = booking.paymentOtp || defaultOtp;
     booking.customerConfirmationOTP = otp;
     booking.paymentOtp = otp;
 
@@ -190,7 +191,8 @@ exports.initiateCashCollection = async (req, res) => {
     }
 
     // Reuse existing OTP or generate new one
-    const otp = booking.paymentOtp || Math.floor(1000 + Math.random() * 9000).toString();
+    const defaultOtp = process.env.USE_DEFAULT_OTP === 'true' ? '1234' : Math.floor(1000 + Math.random() * 9000).toString();
+    const otp = booking.paymentOtp || defaultOtp;
     booking.customerConfirmationOTP = otp;
     booking.paymentOtp = otp;
     await booking.save();

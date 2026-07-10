@@ -60,7 +60,7 @@ exports.updateStatus = async (req, res) => {
 
     if (status === 'arrived') {
       // Generate OTP
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpCode = process.env.USE_DEFAULT_OTP === 'true' ? '123456' : Math.floor(100000 + Math.random() * 900000).toString();
       
       // Save OTP to Redis with 15 mins TTL
       const redis = getRedis();

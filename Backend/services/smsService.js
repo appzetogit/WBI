@@ -92,6 +92,7 @@ const sendOTP = async (phone, otp) => {
 
   console.log(`[SMS] Attempting to send OTP to ${phone}`);
   console.log(`[SMS] Message: ${message}`);
+ 
 
   const result = await sendSMS(phone, message);
 

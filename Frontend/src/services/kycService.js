@@ -37,6 +37,15 @@ export const kycService = {
     }
   },
 
+  verifyAadhaar: async (payload) => {
+    try {
+      const response = await api.post('/kyc/aadhaar/verify', payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { success: false, message: 'Aadhaar verification failed' };
+    }
+  },
+
   verifyBank: async (payload) => {
     try {
       const response = await api.post('/kyc/bank/verify', payload);

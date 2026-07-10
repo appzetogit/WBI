@@ -13,7 +13,7 @@ import { z } from "zod";
 const signupSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters").regex(/^[a-zA-Z\s]+$/, "Name can only contain letters"),
   email: z.string().optional().refine(val => !val || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val), "Invalid email address"),
-  phoneNumber: z.string().regex(/^[6-9]\d{9}$/, "Please enter a valid 10-digit Indian phone number"),
+  phoneNumber: z.string().regex(/^\d{10}$/, "Please enter a valid 10-digit phone number"),
 });
 
 const Signup = () => {

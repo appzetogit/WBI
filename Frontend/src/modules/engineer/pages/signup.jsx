@@ -62,18 +62,9 @@ export default function EngineerSignup() {
     localStorage.removeItem('engineerAccessToken');
     localStorage.removeItem('engineerRefreshToken');
     localStorage.removeItem('engineerData');
+    sessionStorage.removeItem('engineerSignupDraft');
 
-    try {
-      const draftStr = sessionStorage.getItem('engineerSignupDraft');
-      if (draftStr) {
-        const draft = JSON.parse(draftStr);
-        if (draft.formData) setFormData(draft.formData);
-        if (draft.isPhoneVerified) setIsPhoneVerified(draft.isPhoneVerified);
-        if (draft.otpSent) setOtpSent(draft.otpSent);
-      }
-    } catch (e) {
-      console.error('Failed to parse signup draft', e);
-    }
+    // Draft loading removed since DigiLocker redirect is replaced with inline API flow
     
     const loadConfig = async () => {
       try {
@@ -810,6 +801,14 @@ export default function EngineerSignup() {
                   ref={kycRef}
                   role="engineer" 
                   mobileNumber={formData.phone || formData.mobile}
+                  redirectUrl={`${window.location.origin}${window.location.pathname}?step=${additionalDetailsStep}`}
+                  onBeforeDigiLockerInitiate={() => {
+                    sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
+                      formData,
+                      isPhoneVerified,
+                      otpSent
+                    }));
+                  }}
                   onComplete={(verifications) => setFormData(prev => ({ ...prev, verifications }))}
                 />
 
