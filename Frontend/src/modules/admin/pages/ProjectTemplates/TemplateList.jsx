@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiPlus, FiSearch, FiEdit2, FiCopy, FiTrash2, FiEye, FiGrid } from 'react-icons/fi';
-import { templateApi } from '../../../../services/projectOS.api';
+import { templateApi } from '../../../project-os/services/projectOS.api';
 import toast from 'react-hot-toast';
 
 const STATUS_COLORS = {

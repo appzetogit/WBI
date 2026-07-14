@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FiArrowLeft, FiSave, FiCheck, FiSettings, FiGrid, FiFlag, FiCheckSquare, FiDollarSign, FiMapPin, FiAlertCircle, FiPackage } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import { templateApi } from '../../../../services/projectOS.api';
+import { templateApi } from '../../../project-os/services/projectOS.api';
 
 const MODULES = [
   { key: 'SITES', label: 'Sites & Locations', icon: FiMapPin, desc: 'Manage physical locations for the project' },
