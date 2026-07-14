@@ -6,6 +6,8 @@ import { workerAuthService } from '../../../services/authService';
 import Logo from '../../../components/common/Logo';
 import LogoLoader from '../../../components/common/LogoLoader';
 import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
+import ValidatedInput from '../../../components/common/ValidatedInput';
+import { validators } from '../../../utils/validationUtils';
 import { z } from "zod";
 
 export default function WorkerSignup() {
@@ -24,6 +26,8 @@ export default function WorkerSignup() {
     subServices: [],
     address: { city: '', pincode: '' }
   });
+
+  const [validationState, setValidationState] = useState({});
 
   useEffect(() => {
     localStorage.removeItem('workerAccessToken');
@@ -48,8 +52,19 @@ export default function WorkerSignup() {
   }, []);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    
+    // Also track validation state
+    if (type !== 'checkbox') {
+      const validatorFn = validators[name] || validators[type] || null;
+      if (validatorFn) {
+        setValidationState(prev => ({
+          ...prev,
+          [name]: validatorFn(value).isValid
+        }));
+      }
+    }
   };
 
   const handleNestedChange = (section, e) => {
@@ -107,16 +122,10 @@ export default function WorkerSignup() {
           toast.error(`Please provide your ${field.label}.`);
           return false;
         }
-        if (field.validation) {
-          if (field.validation.pattern) {
-            const regex = new RegExp(field.validation.pattern);
-            if (!regex.test(formData[field.key])) {
-              toast.error(field.validation.errorMessage || `Invalid format for ${field.label}`);
-              return false;
-            }
-          }
-          if (field.validation.min && formData[field.key]?.length < field.validation.min) {
-            toast.error(field.validation.errorMessage || `${field.label} must be at least ${field.validation.min} characters`);
+        if (field.required && (validators[field.key] || validators[field.type])) {
+          const validator = validators[field.key] || validators[field.type];
+          if (validator && !validator(formData[field.key]).isValid) {
+            toast.error(`Invalid value for ${field.label}`);
             return false;
           }
         }
@@ -298,13 +307,15 @@ export default function WorkerSignup() {
                             ))}
                           </select>
                         ) : (
-                          <input 
+                          <ValidatedInput 
+                            label=""
                             name={field.key} 
                             value={formData[field.key] || ''} 
                             onChange={handleChange} 
-                            type={field.type === 'password' ? 'password' : field.type === 'email' ? 'email' : 'text'} 
-                            className="w-full bg-gray-50 border border-gray-100 rounded-2xl py-3.5 px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-black/20 focus:border-black/30 transition-all" 
+                            type={field.type === 'password' ? 'password' : field.type === 'email' ? 'email' : field.key === 'phone' ? 'tel' : 'text'} 
                             placeholder={`Enter ${field.label}`} 
+                            required={field.required}
+                            validator={validators[field.key] || validators[field.type]}
                           />
                         )}
                       </div>

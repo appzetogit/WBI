@@ -305,12 +305,29 @@ const engineerSchema = new mongoose.Schema({
     pan: String,
     certificates: [String],
     aadhaarFrontUrl: String,
-    aadhaarBackUrl: String,
     status: {
       type: String,
       enum: ['Pending', 'Approved', 'Rejected'],
       default: 'Pending'
     }
+  },
+  licenseVerificationStatus: {
+    type: String,
+    enum: ['pending', 'uploaded', 'verified', 'rejected'],
+    default: 'pending'
+  },
+  licenseUrl: {
+    type: String,
+    default: null
+  },
+  educationCertificateStatus: {
+    type: String,
+    enum: ['pending', 'uploaded', 'verified', 'rejected'],
+    default: 'pending'
+  },
+  educationCertificateUrl: {
+    type: String,
+    default: null
   },
   // Dynamic Documents from Config
   uploadedDocuments: [{

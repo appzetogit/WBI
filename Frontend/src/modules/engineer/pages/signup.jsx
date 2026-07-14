@@ -6,6 +6,14 @@ import LogoLoader from '../../../components/common/LogoLoader';
 import { engineerAuthService } from '../../../services/authService';
 import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import Logo from '../../../components/common/Logo';
+import ValidatedInput from '../../../components/common/ValidatedInput';
+import { validators } from '../../../utils/validationUtils';
+
+const generateObjectId = () => {
+  const timestamp = Math.floor(new Date().getTime() / 1000).toString(16);
+  const randomHex = 'xxxxxxxxxxxxxxxx'.replace(/[x]/g, () => Math.floor(Math.random() * 16).toString(16));
+  return (timestamp + randomHex).toLowerCase();
+};
 
 // Helper to load Razorpay Script
 const loadRazorpay = () => {
@@ -40,6 +48,7 @@ export default function EngineerSignup() {
 
   // Form State
   const [formData, setFormData] = useState({
+    tempEntityId: generateObjectId(),
     engineerType: 'freelancer',
     vendorCode: '',
     serviceCategories: [],
@@ -52,8 +61,10 @@ export default function EngineerSignup() {
     aadhaarNumber: '', panNumber: '', panFullName: '', panDob: ''
   });
 
-  // Joining Fee State
-  const [couponCode, setCouponCode] = useState('');
+  const [validationState, setValidationState] = useState({});
+
+  // Dynamic step rendering state
+  const [dynamicSteps, setDynamicSteps] = useState([]);
   const [paymentData, setPaymentData] = useState(null);
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
@@ -62,9 +73,29 @@ export default function EngineerSignup() {
     localStorage.removeItem('engineerAccessToken');
     localStorage.removeItem('engineerRefreshToken');
     localStorage.removeItem('engineerData');
-    sessionStorage.removeItem('engineerSignupDraft');
 
-    // Draft loading removed since DigiLocker redirect is replaced with inline API flow
+    const navigationEntries = window.performance.getEntriesByType('navigation');
+    const isReload = navigationEntries.length > 0 && navigationEntries[0].type === 'reload';
+
+    if (!isReload) {
+      sessionStorage.removeItem('engineerSignupDraft');
+    } else {
+      const draft = sessionStorage.getItem('engineerSignupDraft');
+      if (draft) {
+        try {
+          const parsed = JSON.parse(draft);
+          if (parsed.formData) {
+            setFormData(prev => ({ ...prev, ...parsed.formData }));
+          }
+          if (parsed.currentStep) setCurrentStep(parsed.currentStep);
+          if (parsed.isPhoneVerified) setIsPhoneVerified(parsed.isPhoneVerified);
+          if (parsed.otpSent) setOtpSent(parsed.otpSent);
+          if (parsed.isAadhaarVerified) setIsAadhaarVerified(parsed.isAadhaarVerified);
+          if (parsed.isPanVerified) setIsPanVerified(parsed.isPanVerified);
+          if (parsed.isPaymentSuccess) setIsPaymentSuccess(parsed.isPaymentSuccess);
+        } catch(e) {}
+      }
+    }
     
     const loadConfig = async () => {
       try {
@@ -100,6 +131,19 @@ export default function EngineerSignup() {
     };
     loadConfig();
   }, []);
+
+  // Continuous auto-save to draft
+  useEffect(() => {
+    sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
+      formData,
+      currentStep,
+      isPhoneVerified,
+      otpSent,
+      isAadhaarVerified,
+      isPanVerified,
+      isPaymentSuccess
+    }));
+  }, [formData, currentStep, isPhoneVerified, otpSent, isAadhaarVerified, isPanVerified, isPaymentSuccess]);
 
   const completeDigiLockerVerification = async (recordId, stepStr) => {
     setVerifyingAadhaar(true);
@@ -142,6 +186,17 @@ export default function EngineerSignup() {
       ...prev, 
       [name]: type === 'checkbox' ? checked : value 
     }));
+    
+    // Also track validation state
+    if (type !== 'checkbox') {
+      const validatorFn = validators[name] || validators[type] || null;
+      if (validatorFn) {
+        setValidationState(prev => ({
+          ...prev,
+          [name]: validatorFn(value).isValid
+        }));
+      }
+    }
   };
 
   const handleDocumentChange = (key, field, value) => {
@@ -318,37 +373,31 @@ export default function EngineerSignup() {
     }
   };
 
-  const validateStep = (step) => {
-    if (step === typeStep) {
+  const validateStep = (stepIndex) => {
+    if (stepIndex === typeStep) {
+      if (!formData.engineerType) {
+        toast.error('Please select an engineer type');
+        return false;
+      }
       if (formData.engineerType === 'vendor_engineer' && !formData.vendorCode) {
-        toast.error('Please enter the Vendor/Company Code');
+        toast.error('Vendor code is required');
         return false;
       }
       return true;
     }
-
-    if (step > 1 && step <= configMaxStep) {
-      const stepData = validDynamicSteps.find(s => (s.stepNumber || s.step) === step);
-      if (stepData && stepData.fields) {
-        for (const field of stepData.fields) {
+    
+    if (stepIndex > typeStep && stepIndex <= configMaxStep) {
+      const currentStepData = validDynamicSteps.find(s => s.stepNumber === stepIndex);
+      if (currentStepData) {
+        for (const field of currentStepData.fields) {
           if (field.required && !formData[field.key]) {
-            toast.error(`Please provide ${field.label}`);
+            toast.error(`Please fill ${field.label}`);
             return false;
           }
-          if (field.type === 'tel' && formData[field.key] && !isPhoneVerified) {
-            toast.error(`Please verify your ${field.label} using OTP before proceeding`);
-            return false;
-          }
-          if (field.validation && formData[field.key]) {
-            if (field.validation.pattern) {
-              const regex = new RegExp(field.validation.pattern);
-              if (!regex.test(formData[field.key])) {
-                toast.error(field.validation.errorMessage || `Invalid ${field.label}`);
-                return false;
-              }
-            }
-            if (field.validation.min && formData[field.key]?.length < field.validation.min) {
-              toast.error(field.validation.errorMessage || `${field.label} must be at least ${field.validation.min} characters`);
+          if (field.required && (validators[field.key] || validators[field.type])) {
+            const validator = validators[field.key] || validators[field.type];
+            if (validator && !validator(formData[field.key]).isValid) {
+              toast.error(`Invalid value for ${field.label}`);
               return false;
             }
           }
@@ -357,13 +406,13 @@ export default function EngineerSignup() {
       return true;
     }
 
-    if (step === servicesStep) {
+    if (stepIndex === servicesStep) {
       if (formData.serviceCategories.length === 0) {
         toast.error('Please select at least one service category');
         return false;
       }
     }
-    if (step === additionalDetailsStep) {
+    if (stepIndex === additionalDetailsStep) {
       if (kycRef.current && !kycRef.current.validate()) {
         return false;
       }
@@ -388,7 +437,7 @@ export default function EngineerSignup() {
         return false;
       }
     }
-    if (step === feeStep) {
+    if (stepIndex === feeStep) {
       if (config?.engineerConfig?.joiningFeeEnabled && !isPaymentSuccess) {
          toast.error('Please complete the joining fee payment to proceed');
          return false;
@@ -396,11 +445,6 @@ export default function EngineerSignup() {
     }
     return true;
   };
-
-  const nextStep = () => {
-    if (validateStep(currentStep)) setCurrentStep(prev => prev + 1);
-  };
-  const prevStep = () => setCurrentStep(prev => prev - 1);
 
   // --- Payment & Coupon Logic ---
   const applyCoupon = async () => {
@@ -447,7 +491,7 @@ export default function EngineerSignup() {
         if (res.isFree) {
           setIsPaymentSuccess(true);
           toast.success('Registration fee waived!');
-          nextStep();
+          setCurrentStep(prev => prev + 1);
           return;
         }
 
@@ -590,7 +634,7 @@ export default function EngineerSignup() {
         <div className="bg-white rounded-2xl shadow-sm border p-6">
           
           {/* Stepper Header */}
-          <div className="flex items-center justify-between mb-8 overflow-x-auto pb-4 scrollbar-hide">
+          <div className="flex items-center justify-between mb-8 overflow-x-auto pb-4 pt-2 scrollbar-hide">
             {Array.from({length: totalSteps}, (_, i) => i + 1).map((step) => (
               <React.Fragment key={step}>
                 <div className={`w-9 h-9 flex items-center justify-center rounded-full font-bold text-sm shrink-0 shadow-sm transition-all ${currentStep >= step ? 'bg-[#4F46E5] text-white ring-4 ring-[#4F46E5]/20' : 'bg-gray-100 text-gray-400'}`}>
@@ -656,81 +700,32 @@ export default function EngineerSignup() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {currentStepData.fields.map(field => (
                     <div key={field.key}>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">{field.label} {field.required && '*'}</label>
-                      <div className="relative">
-                        {field.type === 'tel' ? (
-                          <div className="flex flex-col gap-2">
-                            <div className="relative flex">
-                              <div className="flex items-center justify-center bg-gray-100 border border-gray-200 border-r-0 rounded-l-xl px-4 text-gray-500 font-medium text-sm">
-                                +91
+                      <ValidatedInput 
+                        label={field.label}
+                        name={field.key} 
+                        value={formData[field.key] || ''} 
+                        onChange={handleChange} 
+                        type={field.type} 
+                        placeholder={`Enter ${field.label}`} 
+                        required={field.required}
+                        validator={validators[field.key] || validators[field.type]}
+                      />
+                      {field.type === 'tel' && (
+                        <div className="mt-2">
+                           {!isPhoneVerified && (
+                             <button type="button" onClick={() => handleSendOtp(formData[field.key])} className="text-sm text-[#4F46E5] font-semibold">
+                               {otpSent ? 'Resend OTP' : 'Send OTP'}
+                             </button>
+                           )}
+                           {otpSent && !isPhoneVerified && (
+                              <div className="mt-2 flex gap-2">
+                                <input type="text" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full p-2 border rounded-lg" placeholder="6-digit OTP" />
+                                <button type="button" onClick={() => handleVerifyOtp(formData[field.key])} className="px-4 bg-gray-900 text-white rounded-lg font-medium">Verify</button>
                               </div>
-                              <input 
-                                name={field.key} 
-                                value={formData[field.key] || ''} 
-                                onChange={(e) => setFormData(p => ({...p, [field.key]: e.target.value.replace(/\\D/g, '').slice(0, 10)}))} 
-                                type="tel" 
-                                disabled={isPhoneVerified}
-                                className={`w-full bg-gray-50 border border-gray-200 ${!isPhoneVerified ? 'rounded-none border-r-0' : 'rounded-r-xl'} py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all disabled:opacity-70`} 
-                                placeholder="10-digit number" 
-                              />
-                              {!isPhoneVerified && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSendOtp(formData[field.key])}
-                                  className="px-4 bg-[#4F46E5] text-white rounded-r-xl font-medium transition-colors hover:bg-indigo-700 whitespace-nowrap"
-                                >
-                                  {otpSent ? 'Resend OTP' : 'Send OTP'}
-                                </button>
-                              )}
-                            </div>
-                            {isPhoneVerified && (
-                              <div className="flex items-center text-sm font-medium text-green-600 mt-1">
-                                <FiCheckCircle className="mr-1.5" /> Verified
-                              </div>
-                            )}
-                            {otpSent && !isPhoneVerified && (
-                              <div className="flex gap-2 animate-fadeIn mt-1">
-                                <input
-                                  type="text"
-                                  value={otp}
-                                  onChange={(e) => setOtp(e.target.value.replace(/\\D/g, '').slice(0, 6))}
-                                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl py-2 px-3 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5]"
-                                  placeholder="Enter 6-digit OTP"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleVerifyOtp(formData[field.key])}
-                                  disabled={verifyingOtp || otp.length !== 6}
-                                  className="px-4 bg-gray-900 text-white rounded-xl font-medium hover:bg-black transition-colors disabled:opacity-50"
-                                >
-                                  {verifyingOtp ? 'Verifying...' : 'Verify'}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ) : field.type === 'select' ? (
-                          <select
-                            name={field.key}
-                            value={formData[field.key] || ''}
-                            onChange={handleChange}
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all"
-                          >
-                            <option value="">Select {field.label}</option>
-                            {field.options?.map(opt => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input 
-                            name={field.key} 
-                            value={formData[field.key] || ''} 
-                            onChange={handleChange} 
-                            type={field.type === 'password' ? 'password' : field.type === 'email' ? 'email' : 'text'} 
-                            className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all" 
-                            placeholder={`Enter ${field.label}`} 
-                          />
-                        )}
-                      </div>
+                           )}
+                           {isPhoneVerified && <span className="text-green-600 text-sm font-medium">Verified</span>}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -801,6 +796,7 @@ export default function EngineerSignup() {
                   ref={kycRef}
                   role="engineer" 
                   mobileNumber={formData.phone || formData.mobile}
+                  entityId={formData.tempEntityId}
                   redirectUrl={`${window.location.origin}${window.location.pathname}?step=${additionalDetailsStep}`}
                   onBeforeDigiLockerInitiate={() => {
                     sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
@@ -1002,19 +998,41 @@ export default function EngineerSignup() {
           </div>
 
           {/* Navigation Buttons */}
-          <div className="flex gap-3 pt-6 border-t mt-8">
-            {currentStep > 1 && (
-              <button type="button" onClick={prevStep} disabled={isSubmitting} className="flex-none px-4 sm:px-6 py-3.5 border-2 border-gray-200 text-gray-900 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-[0.98] transition-all disabled:opacity-50">
-                <FiChevronLeft className="w-5 h-5" /> <span className="hidden sm:inline">Back</span>
+          <div className="flex justify-between items-center mt-10 border-t pt-6">
+            {currentStep > 1 ? (
+              <button
+                type="button"
+                onClick={() => setCurrentStep(prev => prev - 1)}
+                disabled={isSubmitting || verifyingOtp}
+                className="flex items-center px-6 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium transition-colors disabled:opacity-50"
+              >
+                <FiArrowLeft className="mr-2" /> Back
               </button>
-            )}
+            ) : <div></div>}
+
             {currentStep < totalSteps ? (
-              <button type="button" onClick={nextStep} disabled={isSubmitting} className="flex-1 py-3.5 bg-gray-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-black active:scale-[0.98] shadow-lg shadow-gray-900/20 transition-all text-sm sm:text-base whitespace-nowrap disabled:opacity-50">
-                Next Step <FiArrowRight className="w-5 h-5" />
+              <button
+                type="button"
+                onClick={() => {
+                  if (validateStep(currentStep)) setCurrentStep(prev => prev + 1);
+                }}
+                disabled={isSubmitting || verifyingOtp}
+                className="flex items-center px-8 py-2.5 bg-[#4F46E5] text-white rounded-xl font-semibold hover:bg-[#4338ca] shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next <FiArrowRight className="ml-2" />
               </button>
             ) : (
-              <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="flex-1 py-3.5 bg-[#4F46E5] text-white rounded-xl font-bold flex items-center justify-center gap-1.5 sm:gap-2 hover:bg-[#4338ca] active:scale-[0.98] shadow-lg shadow-[#4F46E5]/30 transition-all disabled:opacity-70 text-sm sm:text-base whitespace-nowrap">
-                {isSubmitting ? 'Submitting Application...' : 'Complete Registration'} <FiCheckCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="flex items-center px-10 py-3 bg-black text-white rounded-xl font-bold hover:bg-gray-900 shadow-sm transition-all disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <><LogoLoader fullScreen={false} /> Submitting...</>
+                ) : (
+                  <>Submit Registration <FiCheckCircle className="ml-2 w-5 h-5" /></>
+                )}
               </button>
             )}
           </div>

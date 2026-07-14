@@ -48,6 +48,22 @@ const syncToLegacy = async (role, entityId, documentType, status, fileUrl, fileK
         docData,
         { upsert: true, new: true }
       );
+      
+      if (role === 'engineer') {
+        const Engineer = require('../models/Engineer');
+        const updateData = {};
+        if (documentType === 'license') {
+          updateData.licenseVerificationStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'uploaded');
+          if (fileUrl) updateData.licenseUrl = fileUrl;
+        } else if (documentType === 'education_certificate') {
+          updateData.educationCertificateStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'uploaded');
+          if (fileUrl) updateData.educationCertificateUrl = fileUrl;
+        }
+        
+        if (Object.keys(updateData).length > 0) {
+          await Engineer.findByIdAndUpdate(entityId, updateData);
+        }
+      }
     } else if (role === 'vendor') {
       const updateData = {};
       if (documentType === 'aadhaar') {
@@ -96,6 +112,19 @@ exports.getDocumentRules = async (req, res) => {
       ];
       await DocumentRule.insertMany(defaultRules);
       rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
+    }
+    
+    // Inject Engineer specific rules if missing
+    if (role === 'engineer') {
+      const hasLicense = rules.find(r => r.documentType === 'license');
+      if (!hasLicense) {
+        const engineerRules = [
+          { role: 'engineer', documentType: 'license', label: 'Professional License', required: true, verificationMode: 'upload_only', sortOrder: 5 },
+          { role: 'engineer', documentType: 'education_certificate', label: 'Education Certificate', required: true, verificationMode: 'upload_only', sortOrder: 6 }
+        ];
+        await DocumentRule.insertMany(engineerRules);
+        rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
+      }
     }
     
     res.json({ success: true, data: rules });
@@ -469,22 +498,30 @@ exports.verifySelfieMatch = async (req, res) => {
       status: 'verified' 
     });
     
-    if (!idRec || !idRec.fileUrl) {
+    if (!idRec) {
+      // If no ID is available to match against (e.g. config doesn't require Aadhaar/PAN),
+      // just mark selfie as verified/uploaded since we can't do face match.
+      const kycRec = await KYCVerification.findOneAndUpdate(
+        { role, entityId, documentType: 'selfie' },
+        { status: 'verified', verificationMode: 'manual', metadata: { note: 'No ID to match against, marked verified' } },
+        { new: true }
+      );
+      await syncToLegacy(role, entityId, 'selfie', 'verified', selfieRec.fileUrl);
+      return res.json({ success: true, message: 'Selfie uploaded successfully (No ID available for face match)' });
+    }
+
+    if (!idRec.fileUrl) {
       // Note: If digilocker or API was used, fileUrl might not be present.
       // But we will attempt the match if the provider returned an image.
-      // For now, if no fileUrl exists on ID, fallback to returning a manual review status.
-      if (!idRec) {
-        return res.status(400).json({ success: false, message: 'Please verify Aadhaar or PAN first for face comparison' });
-      }
     }
 
     // Call CGPE API. (Using a dummy ID image if idRec.fileUrl is not available, just to complete the flow in Sandbox).
     const idUrl = idRec.fileUrl || 'dummy_id_image_url';
-    const result = await cgpeService.verifySelfie(selfieRec.fileUrl, idUrl);
+    const result = await cgpeService.verifyFaceMatch(selfieRec.fileUrl, idUrl);
     
     const minScore = 70;
-    const matchScore = result.data?.matchScore || 0;
-    const isMatched = matchScore >= minScore;
+    const matchScore = result.data?.matchScore || result.data?.match || 0;
+    const isMatched = result.data?.isMatch !== undefined ? result.data.isMatch : (matchScore >= minScore);
 
     const kycRec = await KYCVerification.findOneAndUpdate(
       { role, entityId, documentType: 'selfie' },

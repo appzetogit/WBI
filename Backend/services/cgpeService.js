@@ -218,10 +218,62 @@ class CgpeService {
   }
 
   /**
-   * Verify face matching between selfie and document photo
+   * Verify face matching between selfie and document photo using face_match API
+   */
+  async verifyFaceMatch(selfieUrl, docImageUrl) {
+    const isMock = !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
+    if (isMock) {
+      return this.simulateSandboxResponse('/api/v1/verify/face_match', { selfieUrl, docImageUrl });
+    }
+
+    try {
+      const FormData = require('form-data');
+      const formData = new FormData();
+
+      // Download selfie image into buffer or parse base64
+      let image1Buffer;
+      if (selfieUrl.startsWith('data:image')) {
+        const base64Data = selfieUrl.replace(/^data:image\/\w+;base64,/, "");
+        image1Buffer = Buffer.from(base64Data, 'base64');
+      } else {
+        const image1Response = await axios.get(selfieUrl, { responseType: 'arraybuffer' });
+        image1Buffer = Buffer.from(image1Response.data, 'binary');
+      }
+      
+      // Append the downloaded file stream with a filename
+      formData.append('image1', image1Buffer, { filename: 'selfie.jpg', contentType: 'image/jpeg' });
+      
+      // Pass the doc image URL as image2_url (ensure it is a valid url or omit it for testing)
+      if (docImageUrl && docImageUrl.startsWith('http')) {
+        formData.append('image2_url', docImageUrl);
+      }
+
+      const headers = {
+        ...formData.getHeaders(),
+        'x-merchant-id': this.clientId,
+        'x-api-key': this.apiKey,
+        'x-secret-key': this.clientSecret || ''
+      };
+
+      const response = await axios.post(`${this.baseUrl}/api/v1/verify/face_match`, formData, { headers });
+
+      if (response.data && (response.data.status === 'FAILED' || response.data.success === false)) {
+        const errorMsg = response.data.message || response.data.error || 'Face match verification failed at provider end';
+        throw new Error(errorMsg);
+      }
+
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || 'Face match verification failed.';
+      throw new Error(`Face Match Failed: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Verify face matching between selfie and document photo (Legacy)
    */
   async verifySelfie(selfieUrl, docImageUrl) {
-    return this.makeRequest('/verify/selfie', { selfieUrl, docImageUrl });
+    return this.verifyFaceMatch(selfieUrl, docImageUrl);
   }
 
   /**
@@ -303,13 +355,14 @@ class CgpeService {
       };
     }
 
-    if (endpoint.includes('selfie')) {
+    if (endpoint.includes('selfie') || endpoint.includes('face_match')) {
       return {
         success: true,
         requestId: `req_slf_${Date.now()}`,
         status: 'SUCCESS',
         data: {
           matchScore: 88.4,
+          isMatch: true,
           faceDetected: true,
           status: 'MATCHED'
         }

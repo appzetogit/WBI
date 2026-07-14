@@ -33,6 +33,18 @@ const getRegistrationConfig = async (req, res) => {
 
     // 6. Fetch Tools
     let tools = await EngineerTool.find({ isActive: true }).sort({ sortOrder: 1 }).lean();
+    
+    if (tools.length === 0) {
+      tools = [
+        { name: 'Screwdriver Set', icon: 'FiTool' },
+        { name: 'Multimeter', icon: 'FiActivity' },
+        { name: 'Drill Machine', icon: 'FiTool' },
+        { name: 'Wire Stripper', icon: 'FiScissors' },
+        { name: 'Safety Gloves', icon: 'FiShield' },
+        { name: 'Ladder', icon: 'FiList' },
+        { name: 'Other', icon: 'FiPlus' }
+      ];
+    }
 
     // 7. Fetch Form Fields for Dynamic Steps
     const fields = await FormConfig.find({ 

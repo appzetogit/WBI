@@ -12,15 +12,22 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // Stop camera when component unmounts
-  useEffect(() => {
-    return () => stopCamera();
-  }, []);
-
   const stopCamera = useCallback(() => {
     if (videoStream) {
       videoStream.getTracks().forEach(track => track.stop());
       setVideoStream(null);
+    }
+  }, [videoStream]);
+
+  // Stop camera when component unmounts
+  useEffect(() => {
+    return () => stopCamera();
+  }, [stopCamera]);
+
+  // Bind stream to video element when it mounts
+  useEffect(() => {
+    if (videoStream && videoRef.current) {
+      videoRef.current.srcObject = videoStream;
     }
   }, [videoStream]);
 
@@ -333,54 +340,12 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
                     </div>
                   )}
 
-                  {rule.documentType === 'selfie' && (
-                    <div className="space-y-4">
-                      <div className="bg-gray-100 rounded-lg overflow-hidden aspect-video relative flex items-center justify-center">
-                        {!videoStream ? (
-                          <div className="text-center p-6">
-                            <FiUpload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                            <p className="text-sm font-medium text-gray-600 mb-4">Live photo required for face match</p>
-                            <button 
-                              onClick={startCamera}
-                              className="bg-black text-white text-sm font-semibold py-2 px-4 rounded-lg hover:bg-gray-800"
-                            >
-                              Start Camera
-                            </button>
-                          </div>
-                        ) : (
-                          <>
-                            <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
-                            <canvas ref={canvasRef} className="hidden" />
-                          </>
-                        )}
-                      </div>
-                      
-                      {videoStream && (
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={stopCamera}
-                            className="flex-1 bg-red-100 text-red-700 text-sm font-semibold py-2.5 rounded-lg hover:bg-red-200"
-                          >
-                            Cancel
-                          </button>
-                          <button 
-                            onClick={() => captureAndVerifySelfie(rule)}
-                            disabled={vState.status === 'verifying'}
-                            className="flex-1 bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
-                          >
-                            {vState.status === 'verifying' ? 'Verifying...' : 'Capture & Verify'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {rule.documentType !== 'selfie' && (rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') && (
+                  {(rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') && (
                     <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-6 hover:bg-gray-50 transition-colors text-center">
-                      <input type="file" accept={rule.allowedMimeTypes.join(',')} onChange={(e) => handleFileUpload(e, rule)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                      <input type="file" accept={rule.allowedMimeTypes ? rule.allowedMimeTypes.join(',') : 'image/*'} onChange={(e) => handleFileUpload(e, rule)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                       <FiUpload className="w-6 h-6 text-gray-400 mx-auto mb-2" />
                       <p className="text-sm font-medium text-gray-600">Click or drag file to upload</p>
-                      <p className="text-xs text-gray-400 mt-1">Max size: {rule.maxFileSize / (1024 * 1024)}MB</p>
+                      <p className="text-xs text-gray-400 mt-1">Max size: {(rule.maxFileSize || (5 * 1024 * 1024)) / (1024 * 1024)}MB</p>
                       {activeUploads[rule.documentType] && <div className="mt-2 text-xs text-blue-600 font-bold">Uploading...</div>}
                     </div>
                   )}
