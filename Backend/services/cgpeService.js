@@ -25,7 +25,7 @@ class CgpeService {
       }
     }
 
-    const isMock = !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
+    const isMock = process.env.USE_MOCK_KYC === 'true' || !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
     if (isMock) {
       return this.simulateSandboxResponse(endpoint, data);
     }
@@ -162,6 +162,30 @@ class CgpeService {
         isValid: bankResult.is_valid
       },
       requestId: result.tranx_id || `req_${Date.now()}`
+    };
+  }
+
+  /**
+   * Verify Driving License via CGPE
+   */
+  async verifyDrivingLicense(dlNumber, dob) {
+    const result = await this.makeRequest('/api/v1/verify/driving_license', {
+      dlNumber,
+      dob
+    });
+
+    if (result.status === 'FAILED' || !result.success) {
+      throw new Error(result.message || 'Driving License verification failed');
+    }
+
+    return {
+      success: true,
+      data: {
+        fullName: result.data?.name || 'Verified User',
+        dlNumberMasked: dlNumber.slice(0, 4) + 'XXXX' + dlNumber.slice(-4),
+        status: result.data?.status || 'ACTIVE'
+      },
+      requestId: result.requestId || `req_dl_${Date.now()}`
     };
   }
 
@@ -396,6 +420,23 @@ class CgpeService {
             pincode: '123456',
             careOf: 'Mock C/O'
           }
+        }
+      };
+    }
+
+    if (endpoint.includes('driving_license') || endpoint.includes('license')) {
+      const num = (data.dlNumber || 'DL1420110012345').toUpperCase();
+      if (num === 'DL0000000000000') {
+        throw new Error('Driving License is invalid or not active');
+      }
+      return {
+        success: true,
+        requestId: `req_dlv_${Date.now()}`,
+        status: 'SUCCESS',
+        data: {
+          name: 'John Doe',
+          status: 'ACTIVE',
+          dob: data.dob || '1990-01-01'
         }
       };
     }

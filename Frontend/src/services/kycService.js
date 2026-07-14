@@ -64,6 +64,15 @@ export const kycService = {
     }
   },
 
+  verifyLicense: async (payload) => {
+    try {
+      const response = await api.post('/kyc/license/verify', payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { success: false, message: 'License verification failed' };
+    }
+  },
+
   uploadDocument: async (payload) => {
     try {
       const response = await api.post('/kyc/document/upload', payload);

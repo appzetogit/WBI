@@ -18,6 +18,7 @@ router.post('/bank/verify', kycController.verifyBank);
 router.post('/aadhaar/generate-otp', kycController.generateAadhaarOtp);
 router.post('/aadhaar/verify', kycController.verifyAadhaar);
 router.post('/selfie/verify', kycController.verifySelfieMatch);
+router.post('/license/verify', kycController.verifyLicense);
 
 // 4. File uploads (Selfie, DL, etc)
 router.post('/document/upload', kycController.uploadDocument);

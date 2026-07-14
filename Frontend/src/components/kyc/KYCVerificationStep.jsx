@@ -200,6 +200,21 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
     }
   };
 
+  const handleVerifyLicense = async (dlNumber, dob) => {
+    if (!dlNumber || !dob) return toast.error('License Number and DOB are required');
+    try {
+      setVerifications(p => ({ ...p, license: { status: 'verifying' } }));
+      const res = await kycService.verifyLicense({ role, entityId, dlNumber, dob });
+      if (res.success) {
+        toast.success('License verified successfully');
+        setVerifications(p => ({ ...p, license: { status: 'verified', data: res.data } }));
+      }
+    } catch (err) {
+      toast.error(err.message || 'License verification failed');
+      setVerifications(p => ({ ...p, license: { status: 'failed', error: err.message } }));
+    }
+  };
+
   const handleFileUpload = async (e, rule) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -336,6 +351,20 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
                         className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
                       >
                         {vState.status === 'verifying' ? 'Verifying...' : 'Verify Bank Account'}
+                      </button>
+                    </div>
+                  )}
+
+                  {rule.verificationMode === 'api' && rule.documentType === 'license' && (
+                    <div className="space-y-3">
+                      <input type="text" id="dlNumber" placeholder="Driving License Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black uppercase" />
+                      <input type="date" id="dlDob" placeholder="Date of Birth" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
+                      <button 
+                        onClick={() => handleVerifyLicense(document.getElementById('dlNumber').value, document.getElementById('dlDob').value)}
+                        disabled={vState.status === 'verifying'}
+                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                      >
+                        {vState.status === 'verifying' ? 'Verifying...' : 'Verify License'}
                       </button>
                     </div>
                   )}

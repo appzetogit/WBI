@@ -119,7 +119,7 @@ exports.getDocumentRules = async (req, res) => {
       const hasLicense = rules.find(r => r.documentType === 'license');
       if (!hasLicense) {
         const engineerRules = [
-          { role: 'engineer', documentType: 'license', label: 'Professional License', required: true, verificationMode: 'upload_only', sortOrder: 5 },
+          { role: 'engineer', documentType: 'license', label: 'Professional License', required: true, verificationMode: 'api', sortOrder: 5 },
           { role: 'engineer', documentType: 'education_certificate', label: 'Education Certificate', required: true, verificationMode: 'upload_only', sortOrder: 6 }
         ];
         await DocumentRule.insertMany(engineerRules);
@@ -551,5 +551,46 @@ exports.verifySelfieMatch = async (req, res) => {
       await logAudit(req.body.role, req.body.entityId, 'SELFIE_VERIFY_FAILED', 'selfie', 'cgpe', 'failed', error.message, req);
     }
     res.status(400).json({ success: false, message: error.message || 'Selfie verification failed' });
+  }
+};
+
+exports.verifyLicense = async (req, res) => {
+  try {
+    const { role, entityId, dlNumber, dob } = req.body;
+    if (!dlNumber || !dob) {
+      return res.status(400).json({ success: false, message: 'License Number and DOB are required' });
+    }
+
+    const result = await cgpeService.verifyDrivingLicense(dlNumber, dob);
+
+    const kycRec = await KYCVerification.findOneAndUpdate(
+      { role, entityId, documentType: 'license' },
+      {
+        provider: 'cgpe',
+        providerTransactionId: result.requestId,
+        verificationMode: 'api',
+        status: 'verified',
+        rawResponseEncrypted: result.data,
+        verifiedAt: new Date()
+      },
+      { upsert: true, new: true }
+    );
+    
+    await syncToLegacy(role, entityId, 'license', 'verified', null, null, {
+      transactionId: result.requestId,
+      ...result.data
+    });
+    
+    if (entityId) {
+      await logAudit(role, entityId, 'LICENSE_VERIFIED', 'license', 'cgpe', 'verified', 'License verified successfully via API', req);
+    }
+    
+    res.json({ success: true, data: result.data });
+  } catch (error) {
+    console.error('[KYC] verifyLicense Error:', error);
+    if (req.body.entityId) {
+      await logAudit(req.body.role, req.body.entityId, 'LICENSE_VERIFY_FAILED', 'license', 'cgpe', 'failed', error.message, req);
+    }
+    res.status(400).json({ success: false, message: error.message || 'License verification failed' });
   }
 };
