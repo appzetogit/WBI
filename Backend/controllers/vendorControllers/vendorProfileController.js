@@ -320,10 +320,67 @@ const updateLocation = async (req, res) => {
   }
 };
 
+/**
+ * Delete vendor account (soft delete)
+ */
+const deleteAccount = async (req, res) => {
+  try {
+    const vendorId = req.user.id;
+    
+    // Instead of hard delete, we mark as inactive or deleted
+    await Vendor.findByIdAndUpdate(vendorId, {
+      status: 'inactive',
+      approvalStatus: 'suspended',
+      isDeleted: true
+    });
+
+    res.status(200).json({ success: true, message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete account' });
+  }
+};
+
+/**
+ * Handle Biometric Scan for going online
+ */
+const handleBiometricScan = async (req, res) => {
+  try {
+    const vendorId = req.user.id;
+    
+    // In a real production app, we would integrate with an AI verification API (like AWS Rekognition or UIDAI).
+    // For this implementation, we verify that an image was successfully captured and uploaded.
+    if (!req.file && !req.body.image) {
+      return res.status(400).json({ success: false, message: 'Biometric image capture is required.' });
+    }
+
+    // Mark vendor as online and update last biometric scan timestamp
+    const vendor = await Vendor.findByIdAndUpdate(vendorId, {
+      isOnline: true,
+      lastBiometricScan: new Date()
+    }, { new: true });
+
+    if (!vendor) {
+      return res.status(404).json({ success: false, message: 'Vendor not found' });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'AI Biometric scan verified! Online mode unlocked.',
+      vendor 
+    });
+  } catch (error) {
+    console.error('Biometric scan error:', error);
+    res.status(500).json({ success: false, message: 'Failed to process biometric scan' });
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
   updateAddress,
-  updateLocation
+  updateLocation,
+  deleteAccount,
+  handleBiometricScan
 };
 

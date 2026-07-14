@@ -228,18 +228,36 @@ const SiteTestingEnquiries = () => {
             <div className="p-6 overflow-y-auto custom-scrollbar">
               
               {/* Status Update Banner */}
-              <div className="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-xl mb-6">
+              <div className="flex flex-col md:flex-row items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-xl mb-6 gap-4">
                 <div>
-                  <h4 className="text-sm font-bold text-gray-700">Current Status</h4>
-                  <p className="text-xs text-gray-500">Update the progress of this request</p>
+                  <h4 className="text-sm font-bold text-gray-700">Action Center</h4>
+                  <p className="text-xs text-gray-500">Update progress or broadcast to vendors</p>
                 </div>
-                <select 
-                  value={selectedEnquiry.status} 
-                  onChange={(e) => handleStatusChange(selectedEnquiry._id, e.target.value)}
-                  className={`text-sm font-bold px-4 py-2 rounded-lg border outline-none cursor-pointer ${getStatusColor(selectedEnquiry.status)}`}
-                >
-                  {validStatuses.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <select 
+                    value={selectedEnquiry.status} 
+                    onChange={(e) => handleStatusChange(selectedEnquiry._id, e.target.value)}
+                    className={`text-sm font-bold px-4 py-2 rounded-lg border outline-none cursor-pointer ${getStatusColor(selectedEnquiry.status)} flex-1 md:flex-none`}
+                  >
+                    {validStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <button 
+                    onClick={async () => {
+                      if (!window.confirm('Broadcast this enquiry to nearby vendors?')) return;
+                      try {
+                        const res = await api.post(`/admin/sitetesting-enquiries/${selectedEnquiry._id}/broadcast`);
+                        if (res.data.success) {
+                          toast.success('Successfully broadcasted to Vendor Radar!');
+                        }
+                      } catch (err) {
+                        toast.error('Failed to broadcast job');
+                      }
+                    }}
+                    className="px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg shadow-sm hover:bg-black transition-colors whitespace-nowrap"
+                  >
+                    🚀 Broadcast to Radar
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

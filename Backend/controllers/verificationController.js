@@ -246,14 +246,14 @@ exports.submitRequest = async (req, res) => {
 };
 
 /**
- * Trigger Aadhaar Verification using CGPE
+ * Trigger Aadhaar Verification using CGPE (Generate OTP)
  */
-exports.verifyAadhaar = async (req, res) => {
+exports.generateAadhaarOtp = async (req, res) => {
   const logData = {
     ownerId: req.user.id,
     ownerType: req.userRole.toLowerCase() === 'engineer' ? 'engineer' : 'worker',
     documentType: 'aadhaar',
-    apiType: 'aadhaar_verify'
+    apiType: 'aadhaar_generate_otp'
   };
 
   try {
@@ -264,7 +264,50 @@ exports.verifyAadhaar = async (req, res) => {
 
     logData.requestPayload = { aadhaarNumberMasked: maskDocNumber('aadhaar', aadhaarNumber) };
 
-    const cgpeResult = await cgpeService.verifyAadhaar(aadhaarNumber);
+    const cgpeResult = await cgpeService.generateAadhaarOtp(aadhaarNumber);
+
+    logData.responsePayload = cgpeResult;
+    logData.status = 'success';
+    await VerificationLog.create(logData);
+
+    res.json({
+      success: true,
+      data: {
+        clientId: cgpeResult.data.clientId,
+        message: 'OTP sent successfully to Aadhaar registered mobile number'
+      }
+    });
+
+  } catch (error) {
+    logData.status = 'failed';
+    logData.errorMessage = error.message;
+    await VerificationLog.create(logData);
+
+    console.error('Aadhaar generate OTP error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to generate Aadhaar OTP' });
+  }
+};
+
+/**
+ * Trigger Aadhaar Verification using CGPE (Submit OTP)
+ */
+exports.verifyAadhaar = async (req, res) => {
+  const logData = {
+    ownerId: req.user.id,
+    ownerType: req.userRole.toLowerCase() === 'engineer' ? 'engineer' : 'worker',
+    documentType: 'aadhaar',
+    apiType: 'aadhaar_verify'
+  };
+
+  try {
+    const { clientId, otp } = req.body;
+    if (!clientId || !otp) {
+      return res.status(400).json({ success: false, message: 'Client ID and OTP are required' });
+    }
+
+    logData.requestPayload = { clientId, otpProvided: true };
+
+    const cgpeResult = await cgpeService.verifyAadhaarOtp(clientId, otp);
 
     logData.responsePayload = cgpeResult;
     logData.status = 'success';
@@ -295,7 +338,7 @@ exports.verifyAadhaar = async (req, res) => {
     // Sync to profile
     const ProfileModel = getOwnerModel(logData.ownerType);
     await ProfileModel.findByIdAndUpdate(logData.ownerId, {
-      'aadhar.number': maskDocNumber('aadhaar', aadhaarNumber) // Masked
+      'aadhar.number': cgpeResult.data.aadhaarNumberMasked || 'Verified' // Fallback masked
     });
 
     res.status(200).json({

@@ -32,6 +32,7 @@ router.get('/my-status', authenticate, isWorkerOrEngineer, verificationControlle
 router.post('/submit', authenticate, isWorkerOrEngineer, verificationController.submitRequest);
 
 // 4. CGPE Instant Verification Endpoints
+router.post('/aadhaar/generate-otp', authenticate, isWorkerOrEngineer, verificationLimiter, verificationController.generateAadhaarOtp);
 router.post('/aadhaar/verify', authenticate, isWorkerOrEngineer, verificationLimiter, verificationController.verifyAadhaar);
 router.post('/pan/verify', authenticate, isWorkerOrEngineer, verificationLimiter, verificationController.verifyPan);
 router.post('/bank/verify', authenticate, isWorkerOrEngineer, verificationLimiter, verificationController.verifyBankDetails);

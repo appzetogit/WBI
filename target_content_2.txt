@@ -1,0 +1,50 @@
+export const StepProjectServices = ({ data, updateData }) => {
+  const categories = [
+    { name: "CCTV & Surveillance (C01)", services: ["CCTV Camera Installation", "CCTV Maintenance & AMC", "CCTV Repair & Troubleshooting", "DVR/NVR Setup", "CCTV Cabling & Wiring", "Remote Viewing Setup", "Camera Relocation", "Old to New Migration"] },
+    { name: "IT & Computer Services (C02)", services: ["Desktop Repair", "Laptop Repair", "OS Installation", "Virus Removal", "Data Recovery", "Hardware Upgrade", "Printer Repair", "Software Installation", "Computer AMC", "Server Setup"] },
+    { name: "Networking & Internet (C03)", services: ["Router & Modem Setup", "WiFi Range Extension", "Structured Cabling", "Switch & Access Point Installation", "Network Troubleshooting", "VPN Setup", "CCTV-Network Integration", "Office Network Setup"] },
+    { name: "Energy & Power Backup (C04)", services: ["Solar Panel Installation", "Solar Maintenance", "Inverter Installation", "UPS Installation", "Battery Replacement", "Generator Installation", "Stabilizer Installation", "Solar Inspection"] },
+    { name: "Banking & Financial Devices (C05)", services: ["ATM Maintenance", "POS Machine Installation", "Biometric Device Setup", "Cash Recycler/Kiosk Support", "Passbook Printer Service", "Currency Counting Machine Repair"] },
+    { name: "Security Systems (C07)", services: ["Access Control Systems", "Video Door Phone Installation", "Burglar Alarm Systems", "Fire Alarm Systems", "Boom Barrier Installation", "Intercom Systems", "Smart Lock Installation"] },
+    { name: "Telecom & Communication (C08)", services: ["Landline Installation", "EPABX Setup & Repair", "Fiber/Broadband Installation", "Mobile Tower Maintenance", "Telephone Exchange Service", "Intercom System Repair"] },
+    { name: "Healthcare Equipment (C10)", services: ["Oxygen Concentrator Service", "Wheelchair & Mobility Aid Repair", "Hospital Bed Maintenance", "BP Monitor/Glucometer Calibration", "Nebulizer Repair", "Medical Refrigerator Service", "Diagnostic Equipment AMC"] },
+    { name: "Agricultural Machinery (C11)", services: ["Tractor Repair", "Power Tiller Repair", "Water Pump Installation", "Irrigation System Setup", "Agricultural Drone Service", "Sprayer & Duster Repair", "Rice Mill & Thresher Maintenance", "Borewell Motor Repair"] },
+    { name: "Office & Commercial Equipment (C15)", services: ["Printer/Copier AMC", "EPABX & Intercom Setup", "Biometric Attendance System", "Projector Installation & Repair", "Shredder Repair", "Scanner Setup"] },
+    { name: "Industrial Machinery & Automation (C16)", services: ["PLC/Automation Repair", "Motor Rewinding", "Compressor Repair", "Generator/DG Set Service", "Conveyor System Maintenance", "Industrial Electrical AMC"] },
+    { name: "Elevator & Lift Services (C18)", services: ["Lift Installation", "Lift AMC & Repair", "Escalator Maintenance"] },
+    { name: "Fire & Safety Equipment (C19)", services: ["Fire Extinguisher Refill/Service", "Smoke Detector Installation", "Sprinkler System Maintenance", "Fire Hydrant System Check"] },
+    { name: "Educational & Institutional Equipment (C20)", services: ["Smart Board & Projector Setup", "Biometric Attendance Systems", "Computer Lab AMC", "Public Address System Setup"] },
+    { name: "Retail & POS Equipment (C21)", services: ["Billing Software Setup", "Barcode Scanner/Printer Repair", "POS Terminal Maintenance", "Weighing Scale Calibration"] },
+    { name: "Smart Home Automation (C23)", services: ["Smart Lighting Setup", "Home Automation Panel Installation", "Smart Switch & Sensor Setup", "Voice Assistant Integration"] }
+  ];
+
+  const selected = data.projectServices || [];
+  
+  const toggle = (srv) => {
+    if (selected.includes(srv)) updateData({ projectServices: selected.filter(s => s !== srv) });
+    else updateData({ projectServices: [...selected, srv] });
+  };
+
+  return (
+    <div className="space-y-4 animate-fade-in flex flex-col h-full">
+      <h3 className="text-xl font-bold">Project Expertise</h3>
+      <p className="text-gray-500 text-sm mb-4">Select the large-scale projects you are equipped to handle.</p>
+      
+      <div className="flex-1 overflow-y-auto p-4 border rounded-xl bg-gray-50 space-y-6 max-h-[50vh]">
+        {categories.map((cat, idx) => (
+          <div key={idx}>
+            <h4 className="font-bold text-[#0D8A72] mb-3 border-b pb-2">{cat.name}</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {cat.services.map(srv => (
+                <label key={srv} className="flex items-center p-3 border rounded-lg cursor-pointer bg-white hover:bg-gray-50 transition-colors shadow-sm">
+                  <input type="checkbox" checked={selected.includes(srv)} onChange={() => toggle(srv)} className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded" />
+                  <span className="text-sm font-medium text-gray-700">{srv}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};

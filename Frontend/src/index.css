@@ -6,6 +6,15 @@
   --color-brand-dark: #0D9488;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 /* Slide up animation for modal */
 @keyframes slide-up {
   from {

@@ -408,26 +408,30 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FCFC] flex items-center justify-center p-4 lg:p-8 font-sans">
-      <div className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-[#E6F4F2] flex items-center justify-center p-4 lg:p-8 font-sans relative overflow-hidden">
+      {/* Decorative blurred background circles */}
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-teal-400/20 rounded-full blur-[100px] pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] bg-blue-400/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+      <div className="w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-stretch relative z-10">
         
         {/* Left Card: Welcome Back & Login / Illustration */}
-        <div className="lg:col-span-4 bg-white rounded-3xl border border-[#E6F4F2] shadow-xl shadow-teal-500/5 p-6 flex flex-col justify-between min-h-[750px] relative overflow-hidden">
+        <div className="lg:col-span-5 bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-8 lg:p-12 flex flex-col justify-between min-h-[750px] relative overflow-hidden">
           
           <div>
             {/* Header Brand */}
-            <div className="flex items-center gap-3 mb-8">
-              <Logo className="h-9 w-auto" />
+            <div className="flex items-center gap-3.5 mb-10">
+              <Logo className="h-10 w-auto" />
               <div className="flex flex-col">
-                <span className="text-sm font-black text-gray-900 tracking-wide">WBI</span>
-                <span className="text-[10px] text-gray-500 font-bold -mt-1">B2B Service Platform</span>
+                <span className="text-base font-black text-slate-800 tracking-wide uppercase">WBI</span>
+                <span className="text-[11px] text-[#10AFA5] font-bold uppercase tracking-widest -mt-1">B2B Portal</span>
               </div>
             </div>
 
             {/* Switch between rejected re-upload and standard login */}
             {isRejectedMode ? (
               <div className="animate-fade-in">
-                <h2 className="text-2xl font-black text-gray-800 tracking-tight">Onboarding Rejected</h2>
+                <h2 className="text-3xl font-black text-slate-900 tracking-tight">Action Required</h2>
                 <p className="text-gray-500 text-sm mt-1.5 leading-relaxed">
                   Please correct and re-upload the rejected documents to submit your company profile for review.
                 </p>
@@ -511,116 +515,127 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
             ) : (
               // Standard Login
               <div className="animate-fade-in">
-                <h2 className="text-3xl font-black text-gray-800 tracking-tight">Welcome Back!</h2>
-                <p className="text-gray-500 text-sm mt-1">Login to access your B2B dashboard</p>
+                <h2 className="text-[2.5rem] leading-tight font-black text-slate-900 tracking-tight mb-2">Welcome Back.</h2>
+                <p className="text-slate-500 text-sm font-medium">Sign in to manage your B2B operations.</p>
 
                 {/* Login Form */}
-                <form onSubmit={handleLoginSubmit} className="mt-8 space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-gray-700 block mb-1.5">Email Address or Mobile</label>
-                    <div className="relative">
-                      <FiMail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <form onSubmit={handleLoginSubmit} className="mt-10 space-y-5">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">Email Address / Mobile</label>
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <FiMail className="text-slate-400 group-focus-within:text-[#10AFA5] transition-colors w-5 h-5" />
+                      </div>
                       <input 
                         type="text" 
                         required
                         value={loginEmailOrMobile}
                         onChange={(e) => setLoginEmailOrMobile(e.target.value)}
-                        placeholder="Enter email or mobile" 
-                        className="w-full h-11 bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-xl pl-10 pr-4 focus:ring-2 focus:ring-[#10AFA5]/20 focus:border-[#10AFA5] transition-all"
+                        placeholder="Enter your email or mobile" 
+                        className="w-full h-14 bg-white border border-slate-200 text-slate-800 text-sm rounded-2xl pl-12 pr-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
                       />
                     </div>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center mb-1.5">
-                      <label className="text-xs font-bold text-gray-700">Password</label>
-                      <Link to="/b2b/forgot-password" className="text-xs font-bold text-[#10AFA5] hover:underline">Forgot Password?</Link>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center ml-1">
+                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Password</label>
+                      <Link to="/b2b/forgot-password" className="text-xs font-bold text-[#10AFA5] hover:text-[#0D9488] transition-colors">Forgot Password?</Link>
                     </div>
-                    <div className="relative">
-                      <FiLock className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <div className="relative group">
+                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <FiLock className="text-slate-400 group-focus-within:text-[#10AFA5] transition-colors w-5 h-5" />
+                      </div>
                       <input 
                         type={showPassword ? 'text' : 'password'} 
                         required
                         value={loginPassword}
                         onChange={(e) => setLoginPassword(e.target.value)}
-                        placeholder="Enter password" 
-                        className="w-full h-11 bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-xl pl-10 pr-10 focus:ring-2 focus:ring-[#10AFA5]/20 focus:border-[#10AFA5] transition-all"
+                        placeholder="••••••••" 
+                        className="w-full h-14 bg-white border border-slate-200 text-slate-800 text-sm rounded-2xl pl-12 pr-12 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all font-medium tracking-wide"
                       />
                       <button 
                         type="button" 
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                        className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none"
                       >
-                        {showPassword ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+                        {showPassword ? <FiEyeOff className="w-5 h-5" /> : <FiEye className="w-5 h-5" />}
                       </button>
                     </div>
                   </div>
 
                   {/* Remember Me */}
-                  <label className="flex items-center gap-2 cursor-pointer mt-1 select-none">
-                    <input 
-                      type="checkbox" 
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="w-4 h-4 text-[#10AFA5] border-gray-300 rounded focus:ring-[#10AFA5] cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-gray-600">Remember Me</span>
+                  <label className="flex items-center gap-3 cursor-pointer mt-2 select-none w-max">
+                    <div className="relative flex items-center">
+                      <input 
+                        type="checkbox" 
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="peer w-5 h-5 text-[#10AFA5] bg-slate-50 border-slate-300 rounded focus:ring-2 focus:ring-[#10AFA5]/30 cursor-pointer transition-all"
+                      />
+                    </div>
+                    <span className="text-sm font-semibold text-slate-600">Remember me for 30 days</span>
                   </label>
 
                   {/* Login Button */}
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-[#10AFA5] hover:bg-[#0D9488] disabled:bg-gray-300 text-white text-sm font-bold h-11 rounded-xl shadow-lg shadow-teal-500/10 flex items-center justify-center gap-2 mt-6 transition-all"
+                    className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white text-base font-bold h-14 rounded-2xl shadow-[0_8px_20px_rgb(15,23,42,0.15)] flex items-center justify-center gap-2 mt-8 transition-all hover:-translate-y-0.5 active:translate-y-0"
                   >
-                    {loading ? 'Verifying...' : 'Login'}
-                    <FiArrowRight />
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                      <>Sign In <FiArrowRight className="w-5 h-5" /></>
+                    )}
                   </button>
 
-                  <div className="relative flex py-2 items-center">
-                    <div className="flex-grow border-t border-gray-100"></div>
-                    <span className="flex-shrink mx-4 text-gray-400 text-[10px] font-bold uppercase tracking-wider">or continue with</span>
-                    <div className="flex-grow border-t border-gray-100"></div>
+                  <div className="relative flex py-5 items-center">
+                    <div className="flex-grow border-t border-slate-200"></div>
+                    <span className="flex-shrink mx-4 text-slate-400 text-[10px] font-bold uppercase tracking-widest">Or Continue With</span>
+                    <div className="flex-grow border-t border-slate-200"></div>
                   </div>
 
                   {/* SSO Sign Ins */}
-                  <button 
-                    type="button"
-                    onClick={() => toast.success('Google corporate integration coming soon')}
-                    className="w-full bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 text-xs font-bold h-11 rounded-xl flex items-center justify-center gap-3 transition-colors"
-                  >
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-                    </svg>
-                    Continue with Google
-                  </button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button 
+                      type="button"
+                      onClick={() => toast.success('Google corporate integration coming soon')}
+                      className="w-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-sm font-bold h-12 rounded-2xl flex items-center justify-center gap-2.5 transition-colors shadow-sm"
+                    >
+                      <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                      </svg>
+                      Google
+                    </button>
 
-                  <button 
-                    type="button"
-                    onClick={() => toast.success('Microsoft Active Directory coming soon')}
-                    className="w-full bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 text-xs font-bold h-11 rounded-xl flex items-center justify-center gap-3 transition-colors"
-                  >
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 23 23">
-                      <path fill="#F25022" d="M0 0h11v11H0z"/>
-                      <path fill="#7FBA00" d="M12 0h11v11H12z"/>
-                      <path fill="#00A4EF" d="M0 12h11v11H0z"/>
-                      <path fill="#FFB900" d="M12 12h11v11H12z"/>
-                    </svg>
-                    Continue with Microsoft
-                  </button>
+                    <button 
+                      type="button"
+                      onClick={() => toast.success('Microsoft Active Directory coming soon')}
+                      className="w-full bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-sm font-bold h-12 rounded-2xl flex items-center justify-center gap-2.5 transition-colors shadow-sm"
+                    >
+                      <svg className="w-5 h-5 shrink-0" viewBox="0 0 23 23">
+                        <path fill="#F25022" d="M0 0h11v11H0z"/>
+                        <path fill="#7FBA00" d="M12 0h11v11H12z"/>
+                        <path fill="#00A4EF" d="M0 12h11v11H0z"/>
+                        <path fill="#FFB900" d="M12 12h11v11H12z"/>
+                      </svg>
+                      Microsoft
+                    </button>
+                  </div>
 
                   {/* Sign Up Redirect */}
-                  <p className="text-center text-xs font-semibold text-gray-500 mt-5">
+                  <p className="text-center text-sm font-semibold text-slate-500 mt-6 pt-4">
                     Don't have a company account?{' '}
                     <button 
                       type="button"
                       onClick={() => setActiveTab('register')}
-                      className="text-[#10AFA5] font-black hover:underline"
+                      className="text-[#10AFA5] font-black hover:text-[#0D9488] transition-colors ml-1"
                     >
-                      Sign Up
+                      Apply Now
                     </button>
                   </p>
                 </form>
@@ -628,53 +643,51 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
             )}
           </div>
 
-          {/* Bottom Illustration & Marketing Seal */}
-          <div className="mt-8 relative shrink-0">
-            <img 
-              src={truckImg} 
-              alt="WBI Warehouse logistics" 
-              className="w-full h-auto object-contain rounded-2xl border border-[#F0FDFA]" 
-            />
-          </div>
-
         </div>
 
         {/* Right Card: Multi-step Registration Wizard */}
-        <div className="lg:col-span-8 bg-white rounded-3xl border border-[#E6F4F2] shadow-xl shadow-teal-500/5 p-6 lg:p-8 min-h-[750px] flex flex-col justify-between">
+        <div className="lg:col-span-7 bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-8 lg:p-12 min-h-[750px] flex flex-col justify-between relative overflow-hidden">
           {activeTab === 'login' && !isRejectedMode ? (
             // Landing state if activeTab is login: provide quick register wizard introduction
-            <div className="flex flex-col justify-center items-center h-full text-center py-20 animate-fade-in">
-              <div className="h-16 w-16 bg-[#F0FDFA] text-[#10AFA5] rounded-2xl flex items-center justify-center mb-6 shadow-sm">
-                <FiBriefcase className="w-8 h-8" />
+            <>
+              <div className="absolute inset-0 z-0 bg-gradient-to-br from-[#10AFA5] to-slate-900 overflow-hidden">
+                <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '32px 32px' }}></div>
+                <div className="absolute top-1/4 right-0 w-[600px] h-[600px] bg-teal-400/20 rounded-full blur-[100px]"></div>
               </div>
-              <h2 className="text-3xl font-black text-gray-900 tracking-tight">Need a Partner Account?</h2>
-              <p className="text-gray-500 text-sm max-w-md mt-2 leading-relaxed">
-                Unlock instant booking of skilled industrial teams, logistics matching, and bulk job execution features with a single verified partner panel.
+              
+              <div className="flex flex-col justify-center items-center h-full text-center py-20 animate-fade-in relative z-10 px-8 text-white">
+              <div className="h-20 w-20 bg-white/10 backdrop-blur-md text-white rounded-3xl flex items-center justify-center mb-8 shadow-[0_8px_30px_rgb(0,0,0,0.1)] border border-white/20">
+                <FiBriefcase className="w-10 h-10" />
+              </div>
+              <h2 className="text-4xl lg:text-5xl font-black tracking-tight mb-4 leading-tight">Empower Your <br/><span className="text-teal-200">B2B Network</span></h2>
+              <p className="text-teal-50/80 text-base max-w-lg leading-relaxed mb-10">
+                Join our premium partner ecosystem. Unlock instant booking of skilled industrial teams, intelligent logistics matching, and bulk job execution features with a single verified panel.
               </p>
               
               <button
                 type="button"
                 onClick={() => setActiveTab('register')}
-                className="mt-8 bg-[#10AFA5] hover:bg-[#0D9488] text-white text-sm font-bold px-8 py-3 rounded-xl shadow-lg shadow-teal-500/10 flex items-center gap-2 transition-all hover:scale-102"
+                className="bg-white hover:bg-slate-50 text-slate-900 text-base font-bold px-10 py-4 rounded-2xl shadow-[0_8px_20px_rgb(0,0,0,0.2)] flex items-center gap-3 transition-all hover:scale-105 active:scale-95"
               >
-                Start Onboarding
-                <FiArrowRight />
+                Become a Partner
+                <FiArrowRight className="w-5 h-5 text-[#10AFA5]" />
               </button>
             </div>
+            </>
           ) : (
             // Active Registration Wizard
             <div className="flex flex-col justify-between h-full flex-grow animate-fade-in">
               
               {/* Onboarding Wizard Header */}
               <div>
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#F0FDFA] pb-6 mb-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-6 mb-6">
                   <div>
-                    <h2 className="text-2xl font-black text-gray-900 tracking-tight">Create Your B2B Account</h2>
-                    <p className="text-gray-500 text-xs mt-0.5 font-medium">Register your company to start managing bulk jobs & services</p>
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tight">Create Your B2B Account</h2>
+                    <p className="text-slate-500 text-sm mt-1 font-medium">Register your company to start managing bulk jobs & services</p>
                   </div>
                   
                   {/* Step status badge */}
-                  <div className="bg-[#F0FDFA] text-[#10AFA5] text-[10px] font-bold px-3 py-1.5 rounded-full self-start md:self-auto border border-[#E6F4F2]">
+                  <div className="bg-teal-50 text-[#10AFA5] text-xs font-bold px-4 py-2 rounded-full self-start md:self-auto border border-teal-100 shadow-sm">
                     Progress: Step {currentStep} of 5 ({getProgressPercentage()}%)
                   </div>
                 </div>
@@ -730,68 +743,68 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                   
                   {/* Step 1: Company Information & Addresses */}
                   {currentStep === 1 && (
-                    <div className="space-y-6">
-                      <h3 className="text-sm font-bold text-gray-800 border-l-4 border-[#10AFA5] pl-2 uppercase tracking-wide">Company Information</h3>
+                    <div className="space-y-8">
+                      <h3 className="text-sm font-bold text-slate-800 border-l-[3px] border-[#10AFA5] pl-3 uppercase tracking-wider">Company Information</h3>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1">Company Name *</label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">Company Name *</label>
                           <input 
                             type="text" 
                             value={companyName}
                             onChange={(e) => setCompanyName(e.target.value)}
                             placeholder="Enter company name"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
                           />
                         </div>
 
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1">GST Number *</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">GST Number *</label>
                           <input 
                             type="text" 
                             value={gstNumber}
                             onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
                             placeholder="Enter GST number"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
                           />
                         </div>
 
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1">PAN Number *</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">PAN Number *</label>
                           <input 
                             type="text" 
                             value={panNumber}
                             onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
                             placeholder="Enter PAN number"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
                           />
                         </div>
 
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1">TAN Number *</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">TAN Number *</label>
                           <input 
                             type="text" 
                             value={tanNumber}
                             onChange={(e) => setTanNumber(e.target.value.toUpperCase())}
                             placeholder="Enter TAN number"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
                           />
                         </div>
 
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1">CIN Number (Optional)</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">CIN Number (Optional)</label>
                           <input 
                             type="text" 
                             value={cinNumber}
                             onChange={(e) => setCinNumber(e.target.value.toUpperCase())}
                             placeholder="Enter CIN number"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
                           />
                         </div>
 
                         {/* Logo Upload Box */}
-                        <div>
-                          <label className="text-xs font-bold text-gray-700 block mb-1">Company Logo *</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">Company Logo *</label>
                           <input 
                             type="file" 
                             ref={fileInputRefs.logo}

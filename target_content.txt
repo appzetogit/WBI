@@ -1,0 +1,66 @@
+export const StepOneTimeServices = ({ data, updateData }) => {
+  const categories = [
+    {
+      name: "Home Appliances (C06)",
+      services: ["AC Installation & Service", "Refrigerator Repair", "Washing Machine Repair", "Microwave Repair", "Geyser Repair", "Chimney & Hob Service", "Dishwasher Repair", "Air Cooler Service"]
+    },
+    {
+      name: "Mobile & Gadget Service (C09)",
+      services: ["Mobile Screen Repair", "Battery Replacement", "Software/Flashing", "Tablet Repair", "Smartwatch Repair", "Mobile Accessory Setup"]
+    },
+    {
+      name: "Electrical Services (C12)",
+      services: ["House Wiring", "Switchboard & MCB Repair", "Electrical Fault Finding", "Earthing Installation", "Ceiling Fan & Light Fitting"]
+    },
+    {
+      name: "Plumbing & Water Systems (C13)",
+      services: ["Pipe Leak Repair", "Water Tank Cleaning", "Bathroom Fitting Installation", "Borewell/Motor Pump Repair", "Drainage Cleaning", "Water Purifier & RO Service"]
+    },
+    {
+      name: "HVAC & Cold Storage (C14)",
+      services: ["Split/Window AC Service", "Central AC Maintenance", "Cold Storage Repair", "Chiller Maintenance", "Duct Cleaning"]
+    },
+    {
+      name: "Audio-Video & Entertainment (C17)",
+      services: ["Home Theatre Installation", "TV Mounting & Repair", "Projector & Screen Setup", "Sound System Installation", "DJ Equipment Setup"]
+    },
+    {
+      name: "Automobile & EV Services (C22)",
+      services: ["EV Charger Installation", "Car Electrical Repair", "Vehicle Battery Replacement", "GPS Tracker Installation"]
+    },
+    {
+      name: "Water Purifier & RO Systems (C24)",
+      services: ["RO Installation", "Filter Replacement", "RO Repair & AMC", "Water Softener Installation"]
+    }
+  ];
+
+  const selected = data.oneTimeServices || [];
+  
+  const toggle = (srv) => {
+    if (selected.includes(srv)) updateData({ oneTimeServices: selected.filter(s => s !== srv) });
+    else updateData({ oneTimeServices: [...selected, srv] });
+  };
+
+  return (
+    <div className="space-y-4 animate-fade-in flex flex-col h-full">
+      <h3 className="text-xl font-bold">One-Time Services</h3>
+      <p className="text-gray-500 text-sm mb-4">Select the quick services you provide.</p>
+      
+      <div className="flex-1 overflow-y-auto p-4 border rounded-xl bg-gray-50 space-y-6 max-h-[50vh]">
+        {categories.map((cat, idx) => (
+          <div key={idx}>
+            <h4 className="font-bold text-[#0D8A72] mb-3 border-b pb-2">{cat.name}</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {cat.services.map(srv => (
+                <label key={srv} className="flex items-center p-3 border rounded-lg cursor-pointer bg-white hover:bg-gray-50 transition-colors shadow-sm">
+                  <input type="checkbox" checked={selected.includes(srv)} onChange={() => toggle(srv)} className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded" />
+                  <span className="text-sm font-medium text-gray-700">{srv}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};

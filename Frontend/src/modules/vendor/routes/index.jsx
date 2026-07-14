@@ -74,6 +74,10 @@ const DigitalProfile = lazyLoad(() => import('../pages/Profile/DigitalProfile'))
 const DigitalTeamEngineers = lazyLoad(() => import('../pages/WorkersList/DigitalTeamEngineers'));
 const DigitalServices = lazyLoad(() => import('../pages/DigitalServices/DigitalServices'));
 
+// ── WBI Project OS (standalone fullscreen — has its own sidebar) ───────────────
+const ProjectOSList = lazyLoad(() => import('../../project-os/pages/ProjectList'));
+const ProjectOSDashboard = lazyLoad(() => import('../../project-os/pages/ProjectDashboard'));
+
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F8FCFC]" />
 );
@@ -83,8 +87,8 @@ const VendorRoutes = () => {
   return (
     <ErrorBoundary>
       <Suspense fallback={<LoadingFallback />}>
-          <AnimatePresence mode="wait">
-            <Routes location={location || undefined} key={location ? location.pathname : 'routes'}>
+          <AnimatePresence mode="sync">
+            <Routes location={location || undefined}>
             {/* Public routes */}
             <Route path="login" element={<AnimatedPage><PublicRoute userType="vendor"><Login /></PublicRoute></AnimatedPage>} />
             <Route path="signup" element={<AnimatedPage><PublicRoute userType="vendor"><Signup /></PublicRoute></AnimatedPage>} />
@@ -95,7 +99,7 @@ const VendorRoutes = () => {
             <Route path="/" element={<Navigate to="digital-solution/dashboard" replace />} />
 
             {/* Digital Solution specific routes (Main Vendor Layout now) */}
-            <Route element={<AnimatedPage><ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute></AnimatedPage>}>
+            <Route element={<ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute>}>
               <Route path="digital-solution/dashboard" element={<AnimatedPage><Dashboard /></AnimatedPage>} />
               <Route path="digital-solution/my-profile" element={<AnimatedPage><DigitalProfile /></AnimatedPage>} />
               <Route path="digital-solution/booking-alerts" element={<AnimatedPage><BookingAlerts /></AnimatedPage>} />
@@ -131,6 +135,10 @@ const VendorRoutes = () => {
               <Route path="digital-solution/about-wbi" element={<AnimatedPage><AboutWBI /></AnimatedPage>} />
               <Route path="digital-solution/*" element={<Navigate to="/vendor/digital-solution/dashboard" replace />} />
             </Route>
+
+            {/* ── Project OS — standalone (no VendorLayout wrapper) ─────── */}
+            <Route path="project-os" element={<ProtectedRoute userType="vendor"><ProjectOSList /></ProtectedRoute>} />
+            <Route path="project-os/:id/*" element={<ProtectedRoute userType="vendor"><ProjectOSDashboard /></ProtectedRoute>} />
 
             {/* Fallbacks for old routes to redirect to new structure */}
             <Route path="dashboard" element={<Navigate to="/vendor/digital-solution/dashboard" replace />} />

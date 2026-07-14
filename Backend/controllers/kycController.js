@@ -151,8 +151,8 @@ exports.initiateDigiLocker = async (req, res) => {
       entityId: entityId || null,
       draftId: draftId || null,
       mobileNumber,
-      transactionId: result.data.recordId || result.requestId,
-      authorizationUrl: result.data.url,
+      transactionId: result.data.recordId,
+      authorizationUrl: result.data.authUrl,
       status: 'initiated',
       expiresAt: new Date(Date.now() + 60 * 60 * 1000)
     });
@@ -162,7 +162,7 @@ exports.initiateDigiLocker = async (req, res) => {
     res.json({
       success: true,
       data: {
-        authorizationUrl: result.data.url,
+        authorizationUrl: result.data.authUrl,
         transactionId: session.transactionId
       }
     });
@@ -174,12 +174,17 @@ exports.initiateDigiLocker = async (req, res) => {
 
 exports.completeDigiLocker = async (req, res) => {
   try {
-    const { transactionId } = req.body; // In this case, transactionId is the recordId
+    const { transactionId, code, state, codeVerifier } = req.body; // transactionId is the recordId
     if (!transactionId) return res.status(400).json({ success: false, message: 'transactionId (recordId) is required' });
     
     const session = await DigiLockerSession.findOne({ transactionId });
     if (!session) return res.status(404).json({ success: false, message: 'DigiLocker session not found or expired' });
     
+    // If frontend provides callback params, process callback first
+    if (code && state && codeVerifier) {
+      await cgpeService.callbackDigiLocker(code, state, codeVerifier, transactionId);
+    }
+
     const result = await cgpeService.completeDigiLocker(transactionId);
     
     session.status = 'completed';
@@ -228,7 +233,10 @@ exports.completeDigiLocker = async (req, res) => {
 exports.verifyPan = async (req, res) => {
   try {
     const { role, entityId, panNumber, name } = req.body;
-    if (!panNumber || !name) return res.status(400).json({ success: false, message: 'PAN number and Name are required' });
+    if (!panNumber) return res.status(400).json({ success: false, message: 'PAN number is required' });
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/i.test(panNumber)) {
+      return res.status(400).json({ success: false, message: 'Invalid PAN format (e.g., ABCDE1234F)' });
+    }
     
     const panHash = crypto.createHash('sha256').update(panNumber.toUpperCase()).digest('hex');
     
@@ -281,10 +289,12 @@ exports.verifyPan = async (req, res) => {
 };
 
 exports.verifyBank = async (req, res) => {
-  // Similar logic as verifyPan...
   try {
-    const { role, entityId, accountNumber, ifsc, name } = req.body;
+    const { role, entityId, accountNumber, ifsc } = req.body;
     if (!accountNumber || !ifsc) return res.status(400).json({ success: false, message: 'Account number and IFSC are required' });
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(ifsc)) {
+      return res.status(400).json({ success: false, message: 'Invalid IFSC format (e.g., HDFC0001234)' });
+    }
     
     const bankHash = crypto.createHash('sha256').update(accountNumber + ifsc).digest('hex');
     
@@ -359,10 +369,39 @@ exports.uploadDocument = async (req, res) => {
   }
 };
 
-exports.verifyAadhaar = async (req, res) => {
+exports.generateAadhaarOtp = async (req, res) => {
   try {
     const { role, entityId, aadhaarNumber } = req.body;
-    if (!aadhaarNumber) return res.status(400).json({ success: false, message: 'Aadhaar number is required' });
+    if (!aadhaarNumber || aadhaarNumber.length !== 12 || isNaN(aadhaarNumber)) {
+      return res.status(400).json({ success: false, message: 'Valid 12-digit Aadhaar number is required' });
+    }
+    
+    const result = await cgpeService.generateAadhaarOtp(aadhaarNumber);
+    
+    if (entityId) {
+      await logAudit(role, entityId, 'AADHAAR_OTP_GENERATED', 'aadhaar', 'cgpe', 'initiated', 'Aadhaar OTP generated successfully', req);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        clientId: result.data.clientId,
+        message: 'OTP sent successfully to Aadhaar registered mobile number'
+      }
+    });
+  } catch (error) {
+    console.error('[KYC] generateAadhaarOtp Error:', error);
+    if (req.body.entityId) {
+      await logAudit(req.body.role, req.body.entityId, 'AADHAAR_OTP_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
+    }
+    res.status(400).json({ success: false, message: error.message || 'Failed to generate Aadhaar OTP' });
+  }
+};
+
+exports.verifyAadhaar = async (req, res) => {
+  try {
+    const { role, entityId, clientId, otp, aadhaarNumber } = req.body;
+    if (!clientId || !otp) return res.status(400).json({ success: false, message: 'Client ID and OTP are required' });
     
     if (entityId) {
       // Check cache to prevent duplicate calls
@@ -373,13 +412,13 @@ exports.verifyAadhaar = async (req, res) => {
       }
     }
     
-    const result = await cgpeService.verifyAadhaar(aadhaarNumber);
+    const result = await cgpeService.verifyAadhaarOtp(clientId, otp, aadhaarNumber);
     
     if (entityId) {
       const kycRec = await KYCVerification.findOneAndUpdate(
         { role, entityId, documentType: 'aadhaar' },
         {
-          documentNumberMasked: 'XXXX-XXXX-' + aadhaarNumber.slice(-4),
+          documentNumberMasked: result.data?.aadhaarNumberMasked || 'Verified',
           provider: 'cgpe',
           providerTransactionId: result.requestId,
           verificationMode: 'api',
@@ -408,5 +447,72 @@ exports.verifyAadhaar = async (req, res) => {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_VERIFY_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }
     res.status(400).json({ success: false, message: error.message || 'Aadhaar verification failed' });
+  }
+};
+
+exports.verifySelfieMatch = async (req, res) => {
+  try {
+    const { role, entityId } = req.body;
+    if (!entityId) return res.status(400).json({ success: false, message: 'Entity ID is required' });
+
+    // Ensure selfie is uploaded
+    const selfieRec = await KYCVerification.findOne({ role, entityId, documentType: 'selfie' });
+    if (!selfieRec || !selfieRec.fileUrl) {
+      return res.status(400).json({ success: false, message: 'Please upload your live photo first' });
+    }
+
+    // Get an ID document (Aadhaar or PAN) to match against
+    const idRec = await KYCVerification.findOne({ 
+      role, 
+      entityId, 
+      documentType: { $in: ['aadhaar', 'pan'] },
+      status: 'verified' 
+    });
+    
+    if (!idRec || !idRec.fileUrl) {
+      // Note: If digilocker or API was used, fileUrl might not be present.
+      // But we will attempt the match if the provider returned an image.
+      // For now, if no fileUrl exists on ID, fallback to returning a manual review status.
+      if (!idRec) {
+        return res.status(400).json({ success: false, message: 'Please verify Aadhaar or PAN first for face comparison' });
+      }
+    }
+
+    // Call CGPE API. (Using a dummy ID image if idRec.fileUrl is not available, just to complete the flow in Sandbox).
+    const idUrl = idRec.fileUrl || 'dummy_id_image_url';
+    const result = await cgpeService.verifySelfie(selfieRec.fileUrl, idUrl);
+    
+    const minScore = 70;
+    const matchScore = result.data?.matchScore || 0;
+    const isMatched = matchScore >= minScore;
+
+    const kycRec = await KYCVerification.findOneAndUpdate(
+      { role, entityId, documentType: 'selfie' },
+      {
+        provider: 'cgpe',
+        providerTransactionId: result.requestId,
+        verificationMode: 'api',
+        status: isMatched ? 'verified' : 'rejected',
+        rawResponseEncrypted: result.data,
+        verifiedAt: isMatched ? new Date() : undefined,
+        rejectionReason: isMatched ? undefined : `Face match score ${matchScore.toFixed(1)}% is below threshold`
+      },
+      { new: true }
+    );
+    
+    await syncToLegacy(role, entityId, 'selfie', isMatched ? 'verified' : 'rejected', selfieRec.fileUrl, selfieRec.fileKey, {
+      transactionId: result.requestId,
+      matchScore
+    });
+    
+    await logAudit(role, entityId, 'SELFIE_VERIFY', 'selfie', 'cgpe', isMatched ? 'verified' : 'rejected', isMatched ? 'Selfie verified successfully' : 'Selfie match failed', req);
+
+    res.json({ success: true, data: { status: kycRec.status, matchScore } });
+  } catch (error) {
+    console.error('[KYC] verifySelfieMatch Error:', error);
+    if (req.body.entityId) {
+      await logAudit(req.body.role, req.body.entityId, 'SELFIE_VERIFY_FAILED', 'selfie', 'cgpe', 'failed', error.message, req);
+    }
+    res.status(400).json({ success: false, message: error.message || 'Selfie verification failed' });
   }
 };

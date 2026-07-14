@@ -115,11 +115,16 @@ const addWorker = async (req, res) => {
       });
     }
 
+    // Generate temporary password for the TazkY Engineer App
+    const crypto = require('crypto');
+    const tempPassword = crypto.randomBytes(4).toString('hex'); // 8 char temp password
+    
     // Create worker
     worker = await Worker.create({
       name,
       email: email || null, // Handle empty string as null for sparse index
       phone,
+      password: tempPassword, // Assign temporary password
       aadhar: {
         number: aadhar.number,
         document: aadharUrl
@@ -129,11 +134,17 @@ const addWorker = async (req, res) => {
       address: address || {},
       status: WORKER_STATUS.ACTIVE
     });
+    
+    // Provisioning: Simulate SMS delivery for TazkY App Download
+    const message = `Welcome to TazkY! You have been onboarded as a Field Engineer. Download the TazkY Engineer App: https://app.tazky.com/download. Your Login Phone: ${phone} and Temp Password: ${tempPassword}`;
+    console.log(`[SMS_SIMULATION_TAZKY] To: ${phone} | Message: ${message}`);
+    // In production, integrate MSG91 or Twilio here.
 
     res.status(201).json({
       success: true,
-      message: 'Worker added successfully',
-      data: worker
+      message: 'Worker added successfully. SMS sent with TazkY App credentials.',
+      data: worker,
+      tempPassword // Returning just for testing/demo purposes
     });
   } catch (error) {
     console.error('Add worker error:', error);

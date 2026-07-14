@@ -58,6 +58,7 @@ const PassbookPrinterServices = lazy(() => import('../pages/PassbookPrinterServi
 const CdmServices = lazy(() => import('../pages/CdmServices'));
 const PosServices = lazy(() => import('../pages/PosServices'));
 const VsatServices = lazy(() => import('../pages/VsatServices'));
+const ProjectTemplates = lazy(() => import('../pages/ProjectTemplates'));
 const BarcodeReaderServices = lazy(() => import('../pages/BarcodeReaderServices'));
 
 // Energy Solutions
@@ -110,6 +111,7 @@ const AdminRoutes = () => {
           <Route path="bookings" element={<AnimatedPage><Bookings /></AnimatedPage>} />
           <Route path="bookings/tracking" element={<AnimatedPage><BookingTracking /></AnimatedPage>} />
           <Route path="bookings/notifications" element={<AnimatedPage><BookingNotifications /></AnimatedPage>} />
+          <Route path="project-templates/*" element={<AnimatedPage><ProjectTemplates /></AnimatedPage>} />
           <Route path="user-categories/*" element={<AnimatedPage><UserCategories /></AnimatedPage>} />
           <Route path="service-categories/*" element={<AnimatedPage><ServiceCategories /></AnimatedPage>} />
           <Route path="one-time-services" element={<AnimatedPage><OneTimeServices /></AnimatedPage>} />

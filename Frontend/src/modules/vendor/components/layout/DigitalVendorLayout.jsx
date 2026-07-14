@@ -6,7 +6,7 @@ import {
   FiHome, FiUser, FiUsers, FiBriefcase, FiFolder, FiClipboard, 
   FiMapPin, FiGlobe, FiFileText, FiCreditCard, FiDollarSign, 
   FiBarChart2, FiBell, FiStar, FiHelpCircle, FiSettings, 
-  FiMenu, FiSearch, FiMessageSquare, FiChevronDown, FiLogOut, FiExternalLink, FiCheckCircle, FiShield
+  FiMenu, FiSearch, FiMessageSquare, FiChevronDown, FiLogOut, FiExternalLink, FiCheckCircle, FiShield, FiGrid
 } from 'react-icons/fi';
 import Logo from '../../../../components/common/Logo';
 import { logout } from '../../services/authService';
@@ -21,17 +21,14 @@ const navItems = [
   { name: 'Services', path: '/vendor/digital-solution/services', icon: FiBriefcase },
   { name: 'Projects', path: '/vendor/digital-solution/projects', icon: FiFolder },
   { name: 'Work Orders', path: '/vendor/digital-solution/work-orders', icon: FiClipboard },
-  { name: 'Milestones', path: '/vendor/digital-solution/milestones', icon: FiMapPin },
-  { name: 'Client Portal', path: '/vendor/digital-solution/client-portal', icon: FiGlobe },
-  { name: 'Invoices', path: '/vendor/digital-solution/invoices', icon: FiFileText },
-  { name: 'Payments', path: '/vendor/digital-solution/payments', icon: FiCreditCard },
   { name: 'Earnings', path: '/vendor/digital-solution/earnings', icon: FiDollarSign },
-  { name: 'Reports', path: '/vendor/digital-solution/reports', icon: FiBarChart2 },
   { name: 'Notifications', path: '/vendor/digital-solution/notifications', icon: FiBell, badge: 12 },
   { name: 'Reviews', path: '/vendor/digital-solution/reviews', icon: FiStar },
   { name: 'Support', path: '/vendor/digital-solution/support', icon: FiHelpCircle },
+  { name: '⚡ Project OS', path: '/vendor/project-os', icon: FiGrid },
   { name: 'Settings', path: '/vendor/digital-solution/settings', icon: FiSettings },
 ];
+
 
 const DigitalVendorLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -250,7 +247,7 @@ const DigitalVendorLayout = () => {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto bg-[#F8FAFC]">
+        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] p-4 md:p-6 lg:p-8">
           <Outlet />
         </main>
         

@@ -79,6 +79,10 @@ const vendorSchema = new mongoose.Schema({
     enum: ['quick_service', 'project_partner'],
     default: 'quick_service'
   },
+  vendorModels: [{
+    type: String,
+    enum: ['ONE_TIME', 'PROJECT']
+  }],
   subServiceIds: {
     type: [mongoose.Schema.Types.ObjectId],
     ref: 'SubService',
@@ -213,10 +217,32 @@ const vendorSchema = new mongoose.Schema({
   otherDocuments: [{
     type: String // Cloudinary URLs
   }],
+  digitalSLAAccepted: {
+    type: Boolean,
+    default: false
+  },
+  pfDocument: {
+    type: String, // Cloudinary URL
+    default: null
+  },
+  esiDocument: {
+    type: String, // Cloudinary URL
+    default: null
+  },
   approvalStatus: {
     type: String,
     enum: Object.values(VENDOR_STATUS),
     default: VENDOR_STATUS.PENDING
+  },
+  onboarding: {
+    currentStep: { type: Number, default: 1 },
+    completedSteps: { type: [Number], default: [] },
+    progressPercentage: { type: Number, default: 0 },
+    status: { 
+      type: String, 
+      enum: ['DRAFT', 'EMAIL_VERIFICATION_PENDING', 'OTP_VERIFICATION_PENDING', 'IN_PROGRESS', 'SUBMITTED', 'UNDER_REVIEW', 'CHANGES_REQUESTED', 'PARTIALLY_APPROVED', 'APPROVED', 'REJECTED', 'SUSPENDED'], 
+      default: 'DRAFT' 
+    }
   },
   inductionStatus: {
     type: String,
@@ -371,6 +397,12 @@ const vendorSchema = new mongoose.Schema({
     default: 0,
     min: 0,
     max: 5
+  },
+  ratingMetrics: {
+    slaAdherence: { type: Number, default: 0, min: 0, max: 5 },
+    technicalCompletion: { type: Number, default: 0, min: 0, max: 5 },
+    damageIncidentRate: { type: Number, default: 0, min: 0, max: 5 },
+    professionalEthics: { type: Number, default: 0, min: 0, max: 5 }
   },
   totalJobs: {
     type: Number,

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { FiCheckCircle, FiUpload, FiMapPin, FiCreditCard, FiUser, FiBriefcase, FiZap, FiLayers } from 'react-icons/fi';
 import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
+import { toast } from 'react-hot-toast';
+import api from '../../../../services/api';
 
 export const Step1Account = ({ data, updateData, errors }) => {
   const [otpSent, setOtpSent] = useState(false);
@@ -162,60 +164,108 @@ export const Step3KYC = ({ data, updateData, kycRef }) => {
 // Step 4 (was Step 8)
 export const Step4BankDetails = ({ data, updateData }) => {
   const [verifying, setVerifying] = useState(false);
+  const [verificationError, setVerificationError] = useState(null);
   
-  const handleVerifyBank = () => {
-    if (!data.accountNumber || !data.ifscCode) return;
+  const handleVerifyBank = async () => {
+    if (!data.accountNumber || !data.ifscCode || !data.accountHolderName) {
+      toast.error('Please fill all required bank details.');
+      return;
+    }
     setVerifying(true);
+    setVerificationError(null);
     
-    setTimeout(() => {
+    try {
+      // In a fully integrated flow, vendorId is present after step 1 registration.
+      // If vendorId is missing (draft UI mode), we still hit the API to simulate the network request structure.
+      const response = await api.post('/vendor/verify-bank-penny-drop', {
+        vendorId: data.vendorId || 'draft_mode_validation', 
+        ownerName: data.ownerName, // For fuzzy matching if vendorId is draft
+        companyName: data.companyName, // Also check against company name
+        bankName: data.accountHolderName,
+        accountNumber: data.accountNumber,
+        ifsc: data.ifscCode,
+        upiId: data.upiId
+      }).catch(err => err.response); // Catch here to read response data even on 4xx/5xx
+
+      // If backend throws 404 (Vendor not found because we are in draft mode and haven't saved step 1 yet), 
+      // or if it succeeds, we handle the UI accordingly.
+      
+      // For production frontend-only draft flow: we rely on fuzzy match simulation if DB lookup fails, 
+      // but if the backend actually processed it (success: true), we accept it.
+      
+      if (response && response.data && response.data.success) {
+        updateData({ 
+          bankStatus: 'verified',
+          pennyDropName: data.accountHolderName 
+        });
+        toast.success(response.data.message || 'Bank verified successfully!');
+      } else if (response && response.data) {
+         // Handle any 4xx/5xx errors properly
+         const errMsg = response.data.message || 'Verification failed. Please check details.';
+         setVerificationError(errMsg);
+         toast.error(errMsg);
+      } else if (response) {
+         setVerificationError(`Verification failed with status: ${response.status}`);
+         toast.error(`Verification failed with status: ${response.status}`);
+      } else {
+         // Network or unexpected error
+         setVerificationError('Failed to communicate with the verification server. Network error.');
+         toast.error('Failed to communicate with the verification server. Network error.');
+      }
+    } catch (error) {
+       setVerificationError('Failed to verify bank account');
+       toast.error('Failed to verify bank account');
+    } finally {
       setVerifying(false);
-      updateData({ 
-        bankStatus: 'verified',
-        pennyDropName: data.ownerName || 'Verified User' 
-      });
-    }, 2000);
+    }
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-fade-in flex flex-col h-full">
       <h3 className="text-xl font-bold">Bank Details (Penny Drop Verification)</h3>
-      <div>
-        <label className="block text-sm font-medium mb-1">Account Holder Name (As per Bank)</label>
-        <input type="text" className="w-full p-3 border rounded-xl" value={data.accountHolderName || ''} onChange={e => updateData({ accountHolderName: e.target.value })} disabled={data.bankStatus === 'verified'} />
-      </div>
-      <div>
-        <label className="block text-sm font-medium mb-1">Account Number</label>
-        <input type="text" className="w-full p-3 border rounded-xl" value={data.accountNumber || ''} onChange={e => updateData({ accountNumber: e.target.value })} disabled={data.bankStatus === 'verified'} />
-      </div>
-      <div>
-        <label className="block text-sm font-medium mb-1">IFSC Code</label>
-        <input type="text" className="w-full p-3 border rounded-xl uppercase" value={data.ifscCode || ''} onChange={e => updateData({ ifscCode: e.target.value.toUpperCase() })} disabled={data.bankStatus === 'verified'} />
-      </div>
-      <div>
-        <label className="block text-sm font-medium mb-1">UPI ID (Optional)</label>
-        <input type="text" className="w-full p-3 border rounded-xl" value={data.upiId || ''} onChange={e => updateData({ upiId: e.target.value })} disabled={data.bankStatus === 'verified'} />
-      </div>
-
-      <div className="pt-2">
-        {data.bankStatus === 'verified' ? (
-          <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
-            <div className="flex items-center text-green-700 font-bold mb-1">
-              <FiCheckCircle className="mr-2" /> Bank Account Verified
-            </div>
-            <p className="text-sm text-green-600">IMPS Penny drop successful. Name matched ({data.pennyDropName}) with 95% fuzzy score.</p>
+      <p className="text-gray-500 text-sm mb-4">We will deposit ₹1 to verify your account.</p>
+      
+      <div className="flex-1 overflow-y-auto p-2">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Account Holder Name (As per Bank)</label>
+            <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.accountHolderName || ''} onChange={e => updateData({ accountHolderName: e.target.value })} disabled={data.bankStatus === 'verified'} placeholder="e.g. Acme Services" />
           </div>
-        ) : (
-          <button 
-            type="button" 
-            onClick={handleVerifyBank}
-            disabled={verifying || !data.accountNumber || !data.ifscCode}
-            className={`w-full p-3 rounded-xl font-medium transition-colors ${verifying ? 'bg-gray-200 text-gray-500' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-          >
-            {verifying ? (
-              <span className="flex items-center justify-center"><span className="animate-spin mr-2 border-2 border-current border-t-transparent rounded-full w-5 h-5"></span> Executing ₹1 Penny Drop...</span>
-            ) : 'Verify Bank Account'}
-          </button>
-        )}
+          <div>
+            <label className="block text-sm font-medium mb-1">Account Number</label>
+            <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.accountNumber || ''} onChange={e => updateData({ accountNumber: e.target.value })} disabled={data.bankStatus === 'verified'} placeholder="0000000000" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">IFSC Code</label>
+            <input type="text" className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72]" value={data.ifscCode || ''} onChange={e => updateData({ ifscCode: e.target.value.toUpperCase() })} disabled={data.bankStatus === 'verified'} placeholder="HDFC0001234" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">UPI ID (Optional)</label>
+            <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.upiId || ''} onChange={e => updateData({ upiId: e.target.value })} disabled={data.bankStatus === 'verified'} placeholder="vendor@upi" />
+          </div>
+
+          <div className="pt-2">
+            {data.bankStatus === 'verified' ? (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                <div className="flex items-center text-green-700 font-bold mb-1">
+                  <FiCheckCircle className="mr-2" /> Bank Account Verified
+                </div>
+                <p className="text-sm text-green-600">IMPS Penny drop successful. Name matched ({data.pennyDropName}).</p>
+              </div>
+            ) : (
+              <button 
+                type="button" 
+                onClick={handleVerifyBank}
+                disabled={verifying || !data.accountNumber || !data.ifscCode || !data.accountHolderName}
+                className={`w-full p-4 rounded-xl font-bold transition-colors ${verifying || !data.accountNumber || !data.ifscCode || !data.accountHolderName ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-[#0D8A72] text-white hover:bg-teal-700 shadow-md'}`}
+              >
+                {verifying ? (
+                  <span className="flex items-center justify-center"><span className="animate-spin mr-2 border-2 border-current border-t-transparent rounded-full w-5 h-5"></span> Executing ₹1 Penny Drop...</span>
+                ) : 'Verify Bank Account'}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -242,3 +292,437 @@ export const Step5Review = ({ data }) => (
     </div>
   </div>
 );
+
+// --- New Dynamic Steps ---
+
+export const StepBusinessInfo = ({ data, updateData }) => (
+  <div className="space-y-4 animate-fade-in">
+    <h3 className="text-xl font-bold">Business Information</h3>
+    <p className="text-gray-500 text-sm mb-4">Please provide your registered business details.</p>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Company / Legal Name</label>
+      <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.companyName || ''} onChange={e => updateData({ companyName: e.target.value })} placeholder="e.g. Acme Services Pvt Ltd" />
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Incorporation Type</label>
+      <select className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-[#0D8A72]" value={data.incorporationType || 'Proprietorship'} onChange={e => updateData({ incorporationType: e.target.value })}>
+        <option value="Proprietorship">Proprietorship</option>
+        <option value="Partnership">Partnership</option>
+        <option value="LLP">LLP</option>
+        <option value="Private Limited">Private Limited</option>
+      </select>
+    </div>
+
+    <div className="grid grid-cols-2 gap-4">
+      <div>
+        <label className="block text-sm font-medium mb-1">PAN Number</label>
+        <input type="text" className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72]" value={data.panNumber || ''} onChange={e => updateData({ panNumber: e.target.value })} placeholder="ABCDE1234F" />
+      </div>
+      <div>
+        <label className="block text-sm font-medium mb-1">GSTIN (Optional for Proprietors)</label>
+        <input type="text" className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72]" value={data.gstin || ''} onChange={e => updateData({ gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" />
+      </div>
+    </div>
+
+    <div>
+      <label className="block text-sm font-medium mb-1">Office Address</label>
+      <textarea className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" rows="2" value={data.officeAddress || ''} onChange={e => updateData({ officeAddress: e.target.value })} placeholder="Full address" />
+    </div>
+    
+    <div className="grid grid-cols-3 gap-4">
+      <div className="col-span-1">
+        <label className="block text-sm font-medium mb-1">Pincode</label>
+        <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.pincode || ''} onChange={e => updateData({ pincode: e.target.value })} />
+      </div>
+      <div className="col-span-1">
+        <label className="block text-sm font-medium mb-1">City</label>
+        <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.city || ''} onChange={e => updateData({ city: e.target.value })} />
+      </div>
+      <div className="col-span-1">
+        <label className="block text-sm font-medium mb-1">State</label>
+        <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.state || ''} onChange={e => updateData({ state: e.target.value })} />
+      </div>
+    </div>
+  </div>
+);
+
+export const StepChooseModel = ({ data, updateData }) => {
+  const models = data.models || [];
+  
+  const toggleModel = (modelId) => {
+    if (models.includes(modelId)) {
+      updateData({ models: models.filter(m => m !== modelId) });
+    } else {
+      updateData({ models: [...models, modelId] });
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div>
+        <h3 className="text-xl font-bold">Choose Operating Model</h3>
+        <p className="text-gray-500 text-sm">Select one or both models depending on your business capabilities.</p>
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div 
+          onClick={() => toggleModel('ONE_TIME')}
+          className={`cursor-pointer rounded-2xl p-6 border-2 transition-all ${models.includes('ONE_TIME') ? 'border-[#0D8A72] bg-teal-50' : 'border-gray-200 hover:border-gray-300'}`}
+        >
+          <div className="flex justify-between items-start mb-4">
+            <div className={`p-3 rounded-xl ${models.includes('ONE_TIME') ? 'bg-[#0D8A72] text-white' : 'bg-gray-100 text-gray-500'}`}>
+              <FiZap className="w-6 h-6" />
+            </div>
+            {models.includes('ONE_TIME') && <FiCheckCircle className="w-6 h-6 text-[#0D8A72]" />}
+          </div>
+          <h4 className="font-bold text-lg mb-2">One-Time Services</h4>
+          <p className="text-sm text-gray-500">Daily repair, installation, maintenance calls, inspections, and short-duration jobs. Fast turnaround.</p>
+        </div>
+
+        <div 
+          onClick={() => toggleModel('PROJECT')}
+          className={`cursor-pointer rounded-2xl p-6 border-2 transition-all ${models.includes('PROJECT') ? 'border-[#0D8A72] bg-teal-50' : 'border-gray-200 hover:border-gray-300'}`}
+        >
+          <div className="flex justify-between items-start mb-4">
+            <div className={`p-3 rounded-xl ${models.includes('PROJECT') ? 'bg-[#0D8A72] text-white' : 'bg-gray-100 text-gray-500'}`}>
+              <FiLayers className="w-6 h-6" />
+            </div>
+            {models.includes('PROJECT') && <FiCheckCircle className="w-6 h-6 text-[#0D8A72]" />}
+          </div>
+          <h4 className="font-bold text-lg mb-2">Project-Based</h4>
+          <p className="text-sm text-gray-500">Large, long-duration, multi-site, and milestone-based work. High value contracts and AMC.</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const StepOneTimeServices = ({ data, updateData }) => {
+  const [expandedCategory, setExpandedCategory] = useState(null);
+
+  const categories = [
+    {
+      name: "Home Appliances (C06)",
+      services: ["AC Installation & Service", "Refrigerator Repair", "Washing Machine Repair", "Microwave Repair", "Geyser Repair", "Chimney & Hob Service", "Dishwasher Repair", "Air Cooler Service"]
+    },
+    {
+      name: "Mobile & Gadget Service (C09)",
+      services: ["Mobile Screen Repair", "Battery Replacement", "Software/Flashing", "Tablet Repair", "Smartwatch Repair", "Mobile Accessory Setup"]
+    },
+    {
+      name: "Electrical Services (C12)",
+      services: ["House Wiring", "Switchboard & MCB Repair", "Electrical Fault Finding", "Earthing Installation", "Ceiling Fan & Light Fitting"]
+    },
+    {
+      name: "Plumbing & Water Systems (C13)",
+      services: ["Pipe Leak Repair", "Water Tank Cleaning", "Bathroom Fitting Installation", "Borewell/Motor Pump Repair", "Drainage Cleaning", "Water Purifier & RO Service"]
+    },
+    {
+      name: "HVAC & Cold Storage (C14)",
+      services: ["Split/Window AC Service", "Central AC Maintenance", "Cold Storage Repair", "Chiller Maintenance", "Duct Cleaning"]
+    },
+    {
+      name: "Audio-Video & Entertainment (C17)",
+      services: ["Home Theatre Installation", "TV Mounting & Repair", "Projector & Screen Setup", "Sound System Installation", "DJ Equipment Setup"]
+    },
+    {
+      name: "Automobile & EV Services (C22)",
+      services: ["EV Charger Installation", "Car Electrical Repair", "Vehicle Battery Replacement", "GPS Tracker Installation"]
+    },
+    {
+      name: "Water Purifier & RO Systems (C24)",
+      services: ["RO Installation", "Filter Replacement", "RO Repair & AMC", "Water Softener Installation"]
+    }
+  ];
+
+  const selected = data.oneTimeServices || [];
+  
+  const toggle = (srv) => {
+    if (selected.includes(srv)) updateData({ oneTimeServices: selected.filter(s => s !== srv) });
+    else updateData({ oneTimeServices: [...selected, srv] });
+  };
+  
+  const getSelectedCount = (cat) => cat.services.filter(s => selected.includes(s)).length;
+
+  return (
+    <div className="space-y-4 animate-fade-in flex flex-col h-full">
+      <h3 className="text-xl font-bold">One-Time Services</h3>
+      <p className="text-gray-500 text-sm mb-4">Select the quick services you provide.</p>
+      
+      <div className="flex-1 overflow-y-auto space-y-3 max-h-[50vh] pr-2">
+        {categories.map((cat, idx) => {
+          const isExpanded = expandedCategory === idx;
+          const selectedCount = getSelectedCount(cat);
+          
+          return (
+            <div key={idx} className="border rounded-xl bg-white overflow-hidden shadow-sm transition-all">
+              <div 
+                className={`flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-teal-50/50 border-b' : ''}`}
+                onClick={() => setExpandedCategory(isExpanded ? null : idx)}
+              >
+                <div className="flex items-center gap-3">
+                   <h4 className={`font-bold ${isExpanded || selectedCount > 0 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
+                     {cat.name}
+                   </h4>
+                   {selectedCount > 0 && (
+                     <span className="bg-[#0D8A72] text-white text-[10px] font-bold px-2.5 py-1 rounded-full">
+                       {selectedCount} Selected
+                     </span>
+                   )}
+                </div>
+                <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D8A72]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              
+              {isExpanded && (
+                <div className="p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
+                  {cat.services.map(srv => (
+                    <label key={srv} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors shadow-sm ${selected.includes(srv) ? 'bg-teal-50/50 border-[#0D8A72]' : 'bg-white hover:border-[#0D8A72]/50'}`}>
+                      <input type="checkbox" checked={selected.includes(srv)} onChange={() => toggle(srv)} className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded" />
+                      <span className={`text-sm font-medium ${selected.includes(srv) ? 'text-[#0D8A72]' : 'text-gray-700'}`}>{srv}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export const StepOneTimeCapacity = ({ data, updateData }) => (
+  <div className="space-y-4 animate-fade-in">
+    <h3 className="text-xl font-bold">One-Time Coverage & Capacity</h3>
+    <p className="text-gray-500 text-sm mb-4">How much work can you handle daily?</p>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Max Daily Jobs per Worker</label>
+      <input type="number" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.dailyCapacity || 5} onChange={e => updateData({ dailyCapacity: e.target.value })} />
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Total Active Field Workers</label>
+      <input type="number" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.totalWorkers || 1} onChange={e => updateData({ totalWorkers: e.target.value })} />
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Service Radius (Km)</label>
+      <input type="number" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.serviceRadiusKm || 15} onChange={e => updateData({ serviceRadiusKm: e.target.value })} />
+    </div>
+  </div>
+);
+
+export const StepProjectServices = ({ data, updateData }) => {
+  const [expandedCategory, setExpandedCategory] = useState(null);
+
+  const categories = [
+    { name: "CCTV & Surveillance (C01)", services: ["CCTV Camera Installation", "CCTV Maintenance & AMC", "CCTV Repair & Troubleshooting", "DVR/NVR Setup", "CCTV Cabling & Wiring", "Remote Viewing Setup", "Camera Relocation", "Old to New Migration"] },
+    { name: "IT & Computer Services (C02)", services: ["Desktop Repair", "Laptop Repair", "OS Installation", "Virus Removal", "Data Recovery", "Hardware Upgrade", "Printer Repair", "Software Installation", "Computer AMC", "Server Setup"] },
+    { name: "Networking & Internet (C03)", services: ["Router & Modem Setup", "WiFi Range Extension", "Structured Cabling", "Switch & Access Point Installation", "Network Troubleshooting", "VPN Setup", "CCTV-Network Integration", "Office Network Setup"] },
+    { name: "Energy & Power Backup (C04)", services: ["Solar Panel Installation", "Solar Maintenance", "Inverter Installation", "UPS Installation", "Battery Replacement", "Generator Installation", "Stabilizer Installation", "Solar Inspection"] },
+    { name: "Banking & Financial Devices (C05)", services: ["ATM Maintenance", "POS Machine Installation", "Biometric Device Setup", "Cash Recycler/Kiosk Support", "Passbook Printer Service", "Currency Counting Machine Repair"] },
+    { name: "Security Systems (C07)", services: ["Access Control Systems", "Video Door Phone Installation", "Burglar Alarm Systems", "Fire Alarm Systems", "Boom Barrier Installation", "Intercom Systems", "Smart Lock Installation"] },
+    { name: "Telecom & Communication (C08)", services: ["Landline Installation", "EPABX Setup & Repair", "Fiber/Broadband Installation", "Mobile Tower Maintenance", "Telephone Exchange Service", "Intercom System Repair"] },
+    { name: "Healthcare Equipment (C10)", services: ["Oxygen Concentrator Service", "Wheelchair & Mobility Aid Repair", "Hospital Bed Maintenance", "BP Monitor/Glucometer Calibration", "Nebulizer Repair", "Medical Refrigerator Service", "Diagnostic Equipment AMC"] },
+    { name: "Agricultural Machinery (C11)", services: ["Tractor Repair", "Power Tiller Repair", "Water Pump Installation", "Irrigation System Setup", "Agricultural Drone Service", "Sprayer & Duster Repair", "Rice Mill & Thresher Maintenance", "Borewell Motor Repair"] },
+    { name: "Office & Commercial Equipment (C15)", services: ["Printer/Copier AMC", "EPABX & Intercom Setup", "Biometric Attendance System", "Projector Installation & Repair", "Shredder Repair", "Scanner Setup"] },
+    { name: "Industrial Machinery & Automation (C16)", services: ["PLC/Automation Repair", "Motor Rewinding", "Compressor Repair", "Generator/DG Set Service", "Conveyor System Maintenance", "Industrial Electrical AMC"] },
+    { name: "Elevator & Lift Services (C18)", services: ["Lift Installation", "Lift AMC & Repair", "Escalator Maintenance"] },
+    { name: "Fire & Safety Equipment (C19)", services: ["Fire Extinguisher Refill/Service", "Smoke Detector Installation", "Sprinkler System Maintenance", "Fire Hydrant System Check"] },
+    { name: "Educational & Institutional Equipment (C20)", services: ["Smart Board & Projector Setup", "Biometric Attendance Systems", "Computer Lab AMC", "Public Address System Setup"] },
+    { name: "Retail & POS Equipment (C21)", services: ["Billing Software Setup", "Barcode Scanner/Printer Repair", "POS Terminal Maintenance", "Weighing Scale Calibration"] },
+    { name: "Smart Home Automation (C23)", services: ["Smart Lighting Setup", "Home Automation Panel Installation", "Smart Switch & Sensor Setup", "Voice Assistant Integration"] }
+  ];
+
+  const selected = data.projectServices || [];
+  
+  const toggle = (srv) => {
+    if (selected.includes(srv)) updateData({ projectServices: selected.filter(s => s !== srv) });
+    else updateData({ projectServices: [...selected, srv] });
+  };
+  
+  const getSelectedCount = (cat) => cat.services.filter(s => selected.includes(s)).length;
+
+  return (
+    <div className="space-y-4 animate-fade-in flex flex-col h-full">
+      <h3 className="text-xl font-bold">Project Expertise</h3>
+      <p className="text-gray-500 text-sm mb-4">Select the large-scale projects you are equipped to handle.</p>
+      
+      <div className="flex-1 overflow-y-auto space-y-3 max-h-[50vh] pr-2">
+        {categories.map((cat, idx) => {
+          const isExpanded = expandedCategory === idx;
+          const selectedCount = getSelectedCount(cat);
+          
+          return (
+            <div key={idx} className="border rounded-xl bg-white overflow-hidden shadow-sm transition-all">
+              <div 
+                className={`flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-teal-50/50 border-b' : ''}`}
+                onClick={() => setExpandedCategory(isExpanded ? null : idx)}
+              >
+                <div className="flex items-center gap-3">
+                   <h4 className={`font-bold ${isExpanded || selectedCount > 0 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
+                     {cat.name}
+                   </h4>
+                   {selectedCount > 0 && (
+                     <span className="bg-[#0D8A72] text-white text-[10px] font-bold px-2.5 py-1 rounded-full">
+                       {selectedCount} Selected
+                     </span>
+                   )}
+                </div>
+                <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D8A72]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+              
+              {isExpanded && (
+                <div className="p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
+                  {cat.services.map(srv => (
+                    <label key={srv} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors shadow-sm ${selected.includes(srv) ? 'bg-teal-50/50 border-[#0D8A72]' : 'bg-white hover:border-[#0D8A72]/50'}`}>
+                      <input type="checkbox" checked={selected.includes(srv)} onChange={() => toggle(srv)} className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded" />
+                      <span className={`text-sm font-medium ${selected.includes(srv) ? 'text-[#0D8A72]' : 'text-gray-700'}`}>{srv}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export const StepProjectCapacity = ({ data, updateData }) => (
+  <div className="space-y-4 animate-fade-in">
+    <h3 className="text-xl font-bold">Project Capacity & Infrastructure</h3>
+    <p className="text-gray-500 text-sm mb-4">Detail your capabilities for handling large contracts.</p>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Max Project Value (₹)</label>
+      <select className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-[#0D8A72]" value={data.maxProjectValue || '10L'} onChange={e => updateData({ maxProjectValue: e.target.value })}>
+        <option value="5L">Up to 5 Lakhs</option>
+        <option value="10L">Up to 10 Lakhs</option>
+        <option value="50L">Up to 50 Lakhs</option>
+        <option value="1Cr+">1 Crore +</option>
+      </select>
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Total Specialized Engineers</label>
+      <input type="number" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.totalEngineers || 0} onChange={e => updateData({ totalEngineers: e.target.value })} />
+    </div>
+
+    <div>
+      <label className="block text-sm font-medium mb-1">Coverage Type</label>
+      <select className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-[#0D8A72]" value={data.projectCoverageType || 'City Level'} onChange={e => updateData({ projectCoverageType: e.target.value })}>
+        <option value="City Level">City Level</option>
+        <option value="State Level">State Level</option>
+        <option value="Pan India">Pan India</option>
+      </select>
+    </div>
+  </div>
+);
+
+export const StepProjectPortfolio = ({ data, updateData }) => (
+  <div className="space-y-4 animate-fade-in">
+    <h3 className="text-xl font-bold">Past Project Portfolio</h3>
+    <p className="text-gray-500 text-sm mb-4">Briefly mention a past significant project you successfully delivered.</p>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Project Title</label>
+      <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.portfolioTitle || ''} onChange={e => updateData({ portfolioTitle: e.target.value })} placeholder="e.g. 500 Node Networking for IT Park" />
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Client Name / Sector</label>
+      <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.portfolioClient || ''} onChange={e => updateData({ portfolioClient: e.target.value })} placeholder="e.g. TCS / IT Sector" />
+    </div>
+    
+    <div>
+      <label className="block text-sm font-medium mb-1">Project Value (₹)</label>
+      <input type="number" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.portfolioValue || ''} onChange={e => updateData({ portfolioValue: e.target.value })} placeholder="150000" />
+    </div>
+  </div>
+);
+
+export const StepDocuments = ({ data, updateData }) => {
+  const handleFile = (field, e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Mock upload behavior - in real app, you'd upload to S3 and save URL
+      updateData({ [field]: file.name });
+    }
+  };
+  
+  const isProject = data.models?.includes('PROJECT');
+  const notProprietor = data.incorporationType !== 'Proprietorship';
+
+  const DocumentCard = ({ field, label, subtext }) => {
+    const isUploaded = !!data[field];
+    return (
+      <div className={`p-4 border-2 rounded-xl text-center flex flex-col items-center justify-center h-32 transition-colors cursor-pointer relative ${isUploaded ? 'border-[#0D8A72] bg-teal-50' : 'border-dashed border-gray-300 bg-gray-50 hover:border-[#0D8A72] hover:bg-gray-100'}`}>
+        <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={e => handleFile(field, e)} title={isUploaded ? "Click to change document" : "Upload document"} />
+        
+        {isUploaded ? (
+          <>
+            <FiCheckCircle className="w-8 h-8 mb-2 text-[#0D8A72]" />
+            <span className="text-sm font-bold text-[#0D8A72]">Uploaded Successfully</span>
+            <span className="text-xs text-teal-700 mt-1 truncate w-full px-2">{data[field] !== 'mock_url_from_s3' ? data[field] : 'Document_Saved.pdf'}</span>
+          </>
+        ) : (
+          <>
+            <FiUpload className="w-6 h-6 mb-2 text-gray-400" />
+            <span className="text-sm font-medium text-gray-700">{label}</span>
+            <span className="text-xs text-gray-500 mt-1">{subtext}</span>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4 animate-fade-in flex flex-col h-full">
+      <h3 className="text-xl font-bold">Documents & Compliance</h3>
+      <p className="text-gray-500 text-sm mb-4">Enterprise clients require strict compliance. Upload the following documents.</p>
+      
+      <div className="flex-1 overflow-y-auto p-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          
+          <DocumentCard field="panUrl" label="PAN Card" subtext="Required" />
+          <DocumentCard field="gstUrl" label="GST Certificate" subtext={isProject ? 'Required for Projects' : 'Optional'} />
+          <DocumentCard field="companyRegUrl" label="Business Registration" subtext="Udyam / MSME / Shop Act" />
+          <DocumentCard field="chequeUrl" label="Cancelled Cheque" subtext="For Bank Verification" />
+
+          {isProject && (
+            <>
+              <DocumentCard field="pfDocumentUrl" label="PF Registration" subtext="Required by Enterprise Clients" />
+              <DocumentCard field="esiDocumentUrl" label="ESIC Registration" subtext="Required by Enterprise Clients" />
+              <DocumentCard field="workOrderUrl" label="Past Work Order (PO)" subtext="Proof for Portfolio Project" />
+            </>
+          )}
+
+        </div>
+
+        {isProject && (
+          <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl flex gap-3 items-start">
+            <input 
+              type="checkbox" 
+              className="mt-1 w-5 h-5 text-[#0D8A72] rounded focus:ring-[#0D8A72]"
+              checked={!!data.digitalSLAAccepted}
+              onChange={e => updateData({ digitalSLAAccepted: e.target.checked })}
+            />
+            <div className="text-sm text-red-900">
+              <span className="font-bold block">Vendor Enterprise SLA & Legal Liability Agreement</span>
+              <p className="mt-1 text-red-700">By checking this box, I digitally acknowledge and accept full financial and legal responsibility for any damage, loss, or misconduct by technicians dispatched under my enterprise account.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};

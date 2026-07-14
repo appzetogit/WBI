@@ -12,7 +12,9 @@ const {
   getWalletSummary,
   payWorker,
   requestWithdrawal,
-  getWithdrawals
+  getWithdrawals,
+  createSettlementOrder,
+  verifySettlementPayment
 } = require('../../controllers/vendorControllers/vendorWalletController');
 
 // Validation rules
@@ -33,6 +35,17 @@ const settlementValidation = [
   body('paymentMethod').optional().isIn(['upi', 'bank_transfer', 'cash', 'other'])
 ];
 
+const orderValidation = [
+  body('amount').isFloat({ min: 1 }).withMessage('Valid amount is required')
+];
+
+const verificationValidation = [
+  body('razorpay_payment_id').notEmpty().withMessage('Payment ID is required'),
+  body('razorpay_order_id').notEmpty().withMessage('Order ID is required'),
+  body('razorpay_signature').notEmpty().withMessage('Signature is required'),
+  body('amount').isFloat({ min: 1 }).withMessage('Valid amount is required')
+];
+
 // Routes
 // Get wallet with ledger balance
 router.get('/wallet', authenticate, isVendor, getWallet);
@@ -46,8 +59,16 @@ router.get('/wallet/transactions', authenticate, isVendor, getTransactions);
 // Record cash collection (creates negative entry - vendor owes admin)
 router.post('/wallet/cash-collection', authenticate, isVendor, cashCollectionValidation, recordCashCollection);
 
-// Request settlement (vendor pays admin)
+// Legacy Manual Settlement (Proof Upload)
 router.post('/wallet/settlement', authenticate, isVendor, settlementValidation, requestSettlement);
+
+// --- Razorpay Settlement Flow ---
+// Create Razorpay order for clearing dues
+router.post('/wallet/settlement/create-order', authenticate, isVendor, orderValidation, createSettlementOrder);
+
+// Verify Razorpay payment and clear dues
+router.post('/wallet/settlement/verify-payment', authenticate, isVendor, verificationValidation, verifySettlementPayment);
+// --------------------------------
 
 // Pay worker for a booking
 router.post('/wallet/pay-worker', authenticate, isVendor, payWorkerValidation, payWorker);

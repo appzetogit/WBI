@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef, useCallback } from 'react';
 import { FiCheckCircle, FiAlertCircle, FiUpload, FiLoader, FiShield } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { kycService } from '../../services/kycService';
@@ -8,6 +8,69 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
   const [loading, setLoading] = useState(true);
   const [verifications, setVerifications] = useState({});
   const [activeUploads, setActiveUploads] = useState({});
+  const [videoStream, setVideoStream] = useState(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  // Stop camera when component unmounts
+  useEffect(() => {
+    return () => stopCamera();
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+      setVideoStream(null);
+    }
+  }, [videoStream]);
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      setVideoStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      toast.error('Camera access denied or unavailable');
+    }
+  };
+
+  const captureAndVerifySelfie = useCallback(async (rule) => {
+    if (!videoRef.current || !canvasRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    
+    setVerifications(p => ({ ...p, [rule.documentType]: { status: 'verifying' } }));
+    stopCamera();
+
+    canvas.toBlob(async (blob) => {
+      try {
+        const fileUrl = canvas.toDataURL('image/jpeg');
+        // 1. Upload the image
+        const uploadRes = await kycService.uploadDocument({ 
+          role, entityId, documentType: rule.documentType, fileUrl, fileKey: 'selfie-capture' 
+        });
+
+        if (uploadRes.success) {
+          // 2. Call Face Match API
+          const matchRes = await kycService.verifySelfieMatch({ role, entityId });
+          if (matchRes.success) {
+             toast.success('Selfie verified successfully against ID document!');
+             setVerifications(p => ({ ...p, [rule.documentType]: { status: 'verified', fileUrl } }));
+          }
+        }
+      } catch (err) {
+        toast.error(err.message || 'Selfie verification failed');
+        setVerifications(p => ({ ...p, [rule.documentType]: { status: 'failed', error: err.message } }));
+      }
+    }, 'image/jpeg');
+  }, [role, entityId, stopCamera]);
 
   useEffect(() => {
     loadRules();
@@ -65,18 +128,38 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
     }
   };
 
-  const handleVerifyAadhaar = async (aadhaarNumber) => {
-    if (!aadhaarNumber || aadhaarNumber.length !== 12) return toast.error('Valid 12-digit Aadhaar required');
+  const handleGenerateAadhaarOtp = async (aadhaarNumber) => {
+    if (!aadhaarNumber || aadhaarNumber.length !== 12 || isNaN(aadhaarNumber)) {
+      return toast.error('Valid 12-digit Aadhaar required');
+    }
     try {
-      setVerifications(p => ({ ...p, aadhaar: { status: 'verifying' } }));
-      const res = await kycService.verifyAadhaar({ role, entityId, aadhaarNumber });
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'generating_otp' } }));
+      const res = await kycService.generateAadhaarOtp({ role, entityId, aadhaarNumber });
+      if (res.success) {
+        toast.success(res.data?.message || 'OTP sent to Aadhaar linked mobile number');
+        setVerifications(p => ({ 
+          ...p, 
+          aadhaar: { ...p.aadhaar, status: 'pending', otpSent: true, clientId: res.data.clientId } 
+        }));
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to generate Aadhaar OTP');
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message, otpSent: false } }));
+    }
+  };
+
+  const handleVerifyAadhaar = async (clientId, otp, aadhaarNumber) => {
+    if (!clientId || !otp || otp.length < 4) return toast.error('Valid OTP is required');
+    try {
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verifying' } }));
+      const res = await kycService.verifyAadhaar({ role, entityId, clientId, otp, aadhaarNumber });
       if (res.success) {
         toast.success('Aadhaar verified successfully');
         setVerifications(p => ({ ...p, aadhaar: { status: 'verified', data: res.data } }));
       }
     } catch (err) {
       toast.error(err.message || 'Aadhaar verification failed');
-      setVerifications(p => ({ ...p, aadhaar: { status: 'failed', error: err.message, otpSent: false } }));
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message } }));
     }
   };
 
@@ -195,13 +278,12 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
                         <button 
                           onClick={() => {
                             const val = document.getElementById('aadhaarInput').value;
-                            if(val.length !== 12 || isNaN(val)) return toast.error('Enter valid 12-digit Aadhaar');
-                            setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, otpSent: true } }));
-                            toast.success('OTP sent to Aadhaar linked mobile number');
+                            handleGenerateAadhaarOtp(val);
                           }}
+                          disabled={vState.status === 'generating_otp'}
                           className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
                         >
-                          Get OTP
+                          {vState.status === 'generating_otp' ? 'Sending OTP...' : 'Get OTP'}
                         </button>
                       ) : (
                         <>
@@ -209,8 +291,8 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
                           <button 
                             onClick={() => {
                                const otp = document.getElementById('aadhaarOtp').value;
-                               if(otp.length < 4) return toast.error('Enter valid OTP');
-                               handleVerifyAadhaar(document.getElementById('aadhaarInput').value);
+                               const aadhaarNumber = document.getElementById('aadhaarInput').value;
+                               handleVerifyAadhaar(vState.clientId, otp, aadhaarNumber);
                             }}
                             disabled={vState.status === 'verifying'}
                             className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
@@ -251,7 +333,49 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
                     </div>
                   )}
 
-                  {(rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') && (
+                  {rule.documentType === 'selfie' && (
+                    <div className="space-y-4">
+                      <div className="bg-gray-100 rounded-lg overflow-hidden aspect-video relative flex items-center justify-center">
+                        {!videoStream ? (
+                          <div className="text-center p-6">
+                            <FiUpload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                            <p className="text-sm font-medium text-gray-600 mb-4">Live photo required for face match</p>
+                            <button 
+                              onClick={startCamera}
+                              className="bg-black text-white text-sm font-semibold py-2 px-4 rounded-lg hover:bg-gray-800"
+                            >
+                              Start Camera
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover" />
+                            <canvas ref={canvasRef} className="hidden" />
+                          </>
+                        )}
+                      </div>
+                      
+                      {videoStream && (
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={stopCamera}
+                            className="flex-1 bg-red-100 text-red-700 text-sm font-semibold py-2.5 rounded-lg hover:bg-red-200"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            onClick={() => captureAndVerifySelfie(rule)}
+                            disabled={vState.status === 'verifying'}
+                            className="flex-1 bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                          >
+                            {vState.status === 'verifying' ? 'Verifying...' : 'Capture & Verify'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {rule.documentType !== 'selfie' && (rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') && (
                     <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-6 hover:bg-gray-50 transition-colors text-center">
                       <input type="file" accept={rule.allowedMimeTypes.join(',')} onChange={(e) => handleFileUpload(e, rule)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                       <FiUpload className="w-6 h-6 text-gray-400 mx-auto mb-2" />

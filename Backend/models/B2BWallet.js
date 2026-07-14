@@ -11,6 +11,10 @@ const b2bWalletSchema = new mongoose.Schema({
     type: Number, 
     default: 0 
   },
+  escrowBalance: {
+    type: Number,
+    default: 0
+  },
   totalTopup: { 
     type: Number, 
     default: 0 

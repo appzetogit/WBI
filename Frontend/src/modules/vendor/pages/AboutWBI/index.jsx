@@ -1,213 +1,311 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiArrowLeft, FiCheckCircle, FiUsers, FiShield, FiClock, FiAward, FiHeart, FiGlobe, FiSmile, FiSmartphone } from 'react-icons/fi';
-import { motion } from 'framer-motion';
-import Logo from '../../../../components/common/Logo';
+import { FiSearch, FiMessageCircle, FiPhoneCall, FiMail, FiFileText, FiLifeBuoy, FiChevronRight, FiClock, FiCheckCircle, FiAlertCircle, FiUser, FiX } from 'react-icons/fi';
+import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'react-hot-toast';
 
-const AboutWBI = () => {
+const SupportCenter = () => {
   const navigate = useNavigate();
+  const [vendorData, setVendorData] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [tickets, setTickets] = useState([]);
+  const [ticketForm, setTicketForm] = useState({ subject: '', category: 'General', description: '' });
 
-  // Container animation variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
+  // Load Vendor Data & Mock Tickets
+  useEffect(() => {
+    const data = localStorage.getItem('vendorData');
+    if (data && data !== 'undefined') {
+      try {
+        setVendorData(JSON.parse(data));
+      } catch (e) {
+        console.error('Failed to parse vendorData', e);
       }
     }
-  };
 
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: {
-      y: 0,
-      opacity: 1,
-      transition: {
-        duration: 0.6,
-        ease: [0.25, 0.1, 0.25, 1]
-      }
+    const savedTickets = localStorage.getItem('vendorTickets');
+    if (savedTickets) {
+      setTickets(JSON.parse(savedTickets));
+    } else {
+      // Default placeholder tickets
+      const defaultTickets = [
+        { id: 'TKT-8923', subject: 'Payment settlement delay', status: 'In Progress', date: new Date(Date.now() - 7200000).toLocaleString(), category: 'Billing' },
+        { id: 'TKT-8845', subject: 'How to update service locations?', status: 'Resolved', date: new Date(Date.now() - 172800000).toLocaleString(), category: 'General' },
+      ];
+      setTickets(defaultTickets);
+      localStorage.setItem('vendorTickets', JSON.stringify(defaultTickets));
     }
-  };
+  }, []);
 
-  // Gradient Definition for re-use in inline styles
-  const WBIGradient = 'linear-gradient(135deg, #347989 0%, #BB5F36 100%)';
-  const WBITextGradient = {
-    background: WBIGradient,
-    WebkitBackgroundClip: 'text',
-    WebkitTextFillColor: 'transparent',
-  };
-
-  const features = [
-    {
-      icon: FiUsers,
-      title: 'Expert Providers',
-      description: 'Verified professionals for all your needs'
-    },
-    {
-      icon: FiShield,
-      title: 'Safe & Secure',
-      description: 'Your safety is our top priority'
-    },
-    {
-      icon: FiClock,
-      title: 'On-Time Service',
-      description: 'Punctual delivery at your convenience'
-    },
-    {
-      icon: FiAward,
-      title: 'Quality Assured',
-      description: 'Service with 100% satisfaction guarantee'
+  const handleCreateTicket = (e) => {
+    e.preventDefault();
+    if (!ticketForm.subject || !ticketForm.description) {
+      toast.error("Please fill in all required fields.");
+      return;
     }
-  ];
 
-  const stats = [
-    { number: '10K+', label: 'Happy Customers' },
-    { number: '500+', label: 'Service Partners' },
-    { number: '4.8', label: 'App Rating' },
+    const newTicket = {
+      id: `TKT-${Math.floor(1000 + Math.random() * 9000)}`,
+      subject: ticketForm.subject,
+      status: 'Open',
+      date: new Date().toLocaleString(),
+      category: ticketForm.category
+    };
+
+    const updatedTickets = [newTicket, ...tickets];
+    setTickets(updatedTickets);
+    localStorage.setItem('vendorTickets', JSON.stringify(updatedTickets));
+    
+    toast.success("Support ticket created successfully!");
+    setIsModalOpen(false);
+    setTicketForm({ subject: '', category: 'General', description: '' });
+  };
+
+  const quickLinks = [
+    { title: 'Billing & Payments', icon: FiFileText, desc: 'Invoices, payouts, and tax documents', color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', link: '/vendor/digital-solution/wallet' },
+    { title: 'Account Settings', icon: FiUser, desc: 'Profile, security, and preferences', color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100', link: '/vendor/digital-solution/settings' },
+    { title: 'Technical Help', icon: FiLifeBuoy, desc: 'App issues, bugs, and troubleshooting', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', action: () => setIsModalOpen(true) },
+    { title: 'Service Guidelines', icon: FiCheckCircle, desc: 'Quality standards and best practices', color: 'text-teal-600', bg: 'bg-teal-50', border: 'border-teal-100', link: '/vendor/digital-solution/dashboard' },
   ];
 
   return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      variants={containerVariants}
-      className="min-h-screen bg-gray-50 pb-10"
-    >
-      {/* SVG Gradient Definition */}
-      <svg width="0" height="0" className="absolute">
-        <linearGradient id="WBI-about-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#347989" />
-          <stop offset="50%" stopColor="#D68F35" />
-          <stop offset="100%" stopColor="#BB5F36" />
-        </linearGradient>
-      </svg>
-
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-30 border-b border-gray-100">
-        <div className="px-4 py-4 flex items-center gap-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors active:scale-95"
-          >
-            <FiArrowLeft className="w-5 h-5 text-gray-700" />
-          </button>
-          <span className="text-xl font-bold" style={WBITextGradient}>About WBI</span>
-        </div>
-      </header>
-
-      <main className="px-5 py-6 space-y-8">
-        {/* Hero Section */}
-        <motion.div variants={itemVariants} className="text-center">
-          <div className="relative w-28 h-28 mx-auto mb-6">
-            {/* Spinning Border */}
-            <div
-              className="absolute inset-[-3px] rounded-full opacity-70"
-              style={{
-                background: 'conic-gradient(from 0deg, #347989, #D68F35, #BB5F36, #347989)',
-                animation: 'spin 4s linear infinite',
-              }}
-            />
-            {/* White Background */}
-            <div className="absolute inset-0 bg-white rounded-full shadow-lg flex items-center justify-center">
-              <Logo className="w-16 h-16 object-contain" />
-            </div>
-          </div>
-
-          <h1 className="text-3xl font-extrabold text-gray-900 mb-2">
-            Welcome to <span style={WBITextGradient}>WBI</span>
+    <div className="font-sans space-y-8 max-w-7xl mx-auto w-full pb-12">
+      
+      {/* Hero Section */}
+      <div className="relative bg-gradient-to-br from-gray-900 to-gray-800 rounded-[2rem] overflow-hidden shadow-2xl shadow-gray-900/20 px-8 py-16 text-center md:text-left md:px-12 flex flex-col md:flex-row items-center justify-between">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-teal-500/20 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500/20 rounded-full blur-3xl -ml-10 -mb-10 pointer-events-none"></div>
+        
+        <div className="relative z-10 max-w-2xl">
+          <h1 className="text-3xl md:text-5xl font-extrabold text-white mb-4 tracking-tight">
+            How can we help you, <span className="text-teal-400">{vendorData?.name?.split(' ')[0] || 'Partner'}</span>?
           </h1>
-          <p className="text-gray-500 max-w-xs mx-auto leading-relaxed">
-            Your trusted partner for premium home and personal care services.
+          <p className="text-gray-400 text-lg mb-8 max-w-xl">
+            Search our knowledge base or reach out to our dedicated support team to resolve your issues instantly.
           </p>
-        </motion.div>
-
-        {/* Stats Row */}
-        <motion.div variants={itemVariants} className="flex justify-between bg-white rounded-2xl p-6 shadow-sm border border-gray-100 divide-x divide-gray-100">
-          {stats.map((stat, idx) => (
-            <div key={idx} className="flex-1 text-center px-2">
-              <div className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[#347989] to-[#BB5F36]">
-                {stat.number}
-              </div>
-              <div className="text-[10px] uppercase tracking-wider text-gray-400 font-medium mt-1">
-                {stat.label}
-              </div>
+          
+          <div className="relative max-w-lg">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+              <FiSearch className="text-gray-400 w-6 h-6" />
             </div>
-          ))}
-        </motion.div>
+            <input 
+              type="text" 
+              placeholder="Search for articles, guides, or FAQs..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white/10 backdrop-blur-md border border-white/20 text-white placeholder-gray-300 text-base rounded-2xl focus:ring-2 focus:ring-teal-400 focus:bg-white/20 block pl-14 p-4 transition-all outline-none"
+            />
+          </div>
+        </div>
 
-        {/* Mission Statement */}
-        <motion.div variants={itemVariants}>
-          <div className="bg-gradient-to-br from-[#347989]/5 to-[#BB5F36]/5 rounded-2xl p-6 border border-[#347989]/10 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5">
-              <FiGlobe className="w-24 h-24" />
+        <div className="hidden md:flex relative z-10 w-48 h-48 bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2rem] items-center justify-center shadow-2xl rotate-3 hover:rotate-0 transition-transform duration-500">
+           <FiLifeBuoy className="w-24 h-24 text-teal-400 opacity-80" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* Left Column (Quick Links & Contact) */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          {/* Quick Help Categories */}
+          <div>
+            <h3 className="text-xl font-bold text-gray-900 mb-6">Browse Topics</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {quickLinks.map((item, idx) => (
+                <motion.div 
+                  key={idx}
+                  whileHover={{ y: -4 }}
+                  onClick={() => item.link ? navigate(item.link) : (item.action && item.action())}
+                  className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md cursor-pointer transition-all flex items-start gap-4"
+                >
+                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${item.bg} border ${item.border}`}>
+                    <item.icon className={`w-6 h-6 ${item.color}`} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-gray-900 text-base mb-1">{item.title}</h4>
+                    <p className="text-sm text-gray-500 leading-relaxed">{item.desc}</p>
+                  </div>
+                </motion.div>
+              ))}
             </div>
-            <h3 className="text-lg font-bold text-gray-800 mb-3">Our Mission</h3>
-            <p className="text-sm text-gray-600 leading-relaxed relative z-10">
-              WBI is dedicated to revolutionizing how you experience home services. We connect you with top-tier professionals to deliver safe, reliable, and high-quality services right at your doorstep. We believe in making life simpler, one service at a time.
-            </p>
           </div>
-        </motion.div>
 
-        {/* Why Choose Us Grid */}
-        <motion.div variants={itemVariants}>
-          <h3 className="text-lg font-bold text-gray-800 mb-4 px-1">Why Choose WBI?</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {features.map((feature, index) => (
-              <div
-                key={index}
-                className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-shadow group"
-              >
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3 group-hover:scale-110 transition-transform duration-300"
-                  style={{ background: 'linear-gradient(135deg, rgba(52, 121, 137, 0.1), rgba(187, 95, 54, 0.1))' }}>
-                  <feature.icon className="w-5 h-5" style={{ stroke: 'url(#WBI-about-gradient)' }} />
+          {/* Contact Methods */}
+          <div className="bg-white rounded-[2rem] p-8 border border-gray-100 shadow-sm">
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Still need help?</h3>
+            <p className="text-gray-500 text-sm mb-8">Our support team is available 24/7 to assist you.</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              <a href="mailto:support@webcraft.com" className="flex flex-col items-center text-center p-6 bg-gray-50 rounded-2xl border border-gray-100 hover:border-teal-200 hover:bg-teal-50/50 transition-colors cursor-pointer group">
+                <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <FiMessageCircle className="w-6 h-6" />
                 </div>
-                <h4 className="text-sm font-bold text-gray-800 mb-1">{feature.title}</h4>
-                <p className="text-xs text-gray-500 leading-relaxed">{feature.description}</p>
+                <h4 className="font-bold text-gray-900 mb-1">Live Chat</h4>
+                <p className="text-xs text-gray-500 mb-3">Wait time: ~2 mins</p>
+                <span className="text-teal-600 font-semibold text-sm group-hover:underline">Start Chat</span>
+              </a>
+
+              <a href="tel:+18001234567" className="flex flex-col items-center text-center p-6 bg-gray-50 rounded-2xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/50 transition-colors cursor-pointer group">
+                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <FiPhoneCall className="w-6 h-6" />
+                </div>
+                <h4 className="font-bold text-gray-900 mb-1">Phone Call</h4>
+                <p className="text-xs text-gray-500 mb-3">Mon-Fri, 9am - 6pm</p>
+                <span className="text-blue-600 font-semibold text-sm group-hover:underline">Call Us</span>
+              </a>
+
+              <a href="mailto:support@webcraft.com" className="flex flex-col items-center text-center p-6 bg-gray-50 rounded-2xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50/50 transition-colors cursor-pointer group">
+                <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <FiMail className="w-6 h-6" />
+                </div>
+                <h4 className="font-bold text-gray-900 mb-1">Email Support</h4>
+                <p className="text-xs text-gray-500 mb-3">Reply within 24 hours</p>
+                <span className="text-orange-600 font-semibold text-sm group-hover:underline">Send Email</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column (Tickets & Status) */}
+        <div className="space-y-8">
+          
+          {/* Create Ticket Button */}
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-teal-600/25 transition-all flex items-center justify-center gap-2 active:scale-95"
+          >
+            <FiLifeBuoy className="w-5 h-5" />
+            Open a New Ticket
+          </button>
+
+          {/* Recent Tickets */}
+          <div className="bg-white rounded-[2rem] border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[400px]">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between shrink-0 bg-gray-50/50">
+              <h3 className="font-bold text-gray-900">Recent Tickets</h3>
+              <span className="text-teal-600 text-sm font-semibold hover:underline cursor-pointer">View All</span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+              {tickets.length > 0 ? (
+                tickets.map((ticket, idx) => (
+                  <div key={idx} className="p-6 hover:bg-gray-50 transition-colors cursor-pointer group">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-gray-400">{ticket.id}</span>
+                      <span className={`text-[10px] font-bold px-2.5 py-1 rounded-md ${
+                        ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {ticket.status}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-gray-900 mb-2 pr-4">{ticket.subject}</h4>
+                    <div className="flex items-center justify-between text-xs text-gray-500">
+                      <span className="flex items-center gap-1.5"><FiClock className="w-3.5 h-3.5" /> {ticket.date}</span>
+                      <FiChevronRight className="w-4 h-4 text-gray-300 group-hover:text-teal-500 transition-colors" />
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-gray-400 p-6 text-center">
+                  <FiAlertCircle className="w-8 h-8 mb-2 opacity-50" />
+                  <p className="text-sm">No recent tickets.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* System Status */}
+          <div className="bg-gray-900 rounded-[2rem] p-6 text-white relative overflow-hidden">
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-green-500/20 rounded-full blur-2xl"></div>
+            <div className="flex items-center gap-4 mb-2">
+              <div className="w-3 h-3 bg-green-500 rounded-full shadow-[0_0_12px_rgba(34,197,94,0.8)] animate-pulse"></div>
+              <h3 className="font-bold text-white">All Systems Operational</h3>
+            </div>
+            <p className="text-gray-400 text-xs pl-7">Platform is running smoothly.</p>
+          </div>
+
+        </div>
+      </div>
+
+      {/* Ticket Modal */}
+      <AnimatePresence>
+        {isModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-6 border-b border-gray-100 bg-gray-50">
+                <h3 className="text-lg font-bold text-gray-900">Create Support Ticket</h3>
+                <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                  <FiX className="w-6 h-6" />
+                </button>
               </div>
-            ))}
-          </div>
-        </motion.div>
 
-        {/* How It Works */}
-        <motion.div variants={itemVariants}>
-          <h3 className="text-lg font-bold text-gray-800 mb-4 px-1">How We Work</h3>
-          <div className="bg-white rounded-2xl p-1 shadow-sm border border-gray-100">
-            {[
-              { title: 'Book Details', desc: 'Select service & schedule time', icon: FiSmartphone },
-              { title: 'Get Matched', desc: 'We assign a top-rated pro', icon: FiUsers },
-              { title: 'Relax', desc: 'Enjoy high-quality service', icon: FiSmile },
-            ].map((step, i) => (
-              <div key={i} className="flex items-center p-4 border-b last:border-0 border-gray-50 relative">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 mr-4 shadow-sm text-white font-bold text-lg relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-br from-[#347989] to-[#BB5F36]" />
-                  <span className="relative z-10">{i + 1}</span>
-                </div>
+              <form onSubmit={handleCreateTicket} className="p-6 space-y-5">
                 <div>
-                  <h4 className="text-sm font-bold text-gray-800">{step.title}</h4>
-                  <p className="text-xs text-gray-500">{step.desc}</p>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Subject</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={ticketForm.subject}
+                    onChange={(e) => setTicketForm({...ticketForm, subject: e.target.value})}
+                    placeholder="Brief description of the issue"
+                    className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
+                  />
                 </div>
-              </div>
-            ))}
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Category</label>
+                  <select 
+                    value={ticketForm.category}
+                    onChange={(e) => setTicketForm({...ticketForm, category: e.target.value})}
+                    className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all bg-white"
+                  >
+                    <option>General</option>
+                    <option>Billing & Payouts</option>
+                    <option>Technical Issue</option>
+                    <option>Account Settings</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Details</label>
+                  <textarea 
+                    required
+                    rows="4"
+                    value={ticketForm.description}
+                    onChange={(e) => setTicketForm({...ticketForm, description: e.target.value})}
+                    placeholder="Please describe your issue in detail..."
+                    className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all resize-none"
+                  ></textarea>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-5 py-2.5 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    className="px-6 py-2.5 bg-teal-600 text-white font-bold rounded-xl shadow-md shadow-teal-600/20 hover:bg-teal-700 transition-colors"
+                  >
+                    Submit Ticket
+                  </button>
+                </div>
+              </form>
+            </motion.div>
           </div>
-        </motion.div>
+        )}
+      </AnimatePresence>
 
-        {/* Footer Info */}
-        <motion.div variants={itemVariants} className="text-center pt-4 border-t border-gray-200">
-          <p className="text-xs text-gray-400 mb-1">Designed & Developed by</p>
-          <span className="text-sm font-bold tracking-wide" style={WBITextGradient}>WBI Team</span>
-          <p className="text-[10px] text-gray-300 mt-4">v7.6.27 • Made with â¤ï¸ in India</p>
-        </motion.div>
-      </main>
-
-      <style jsx>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </motion.div>
+    </div>
   );
 };
 
-export default AboutWBI;
+export default SupportCenter;

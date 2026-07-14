@@ -648,12 +648,20 @@ const collectCash = async (req, res) => {
 
     // Update Booking Status
     booking.status = BOOKING_STATUS.COMPLETED;
-    booking.paymentMethod = 'cash collected'; // Standardized label
-    booking.paymentStatus = PAYMENT_STATUS.COLLECTED_BY_VENDOR;
-    booking.cashCollected = true;
-    booking.cashCollectedBy = 'worker';
-    booking.cashCollectorId = workerId;
-    booking.cashCollectedAt = new Date();
+    
+    if (booking.paymentStatus === 'escrowed') {
+      booking.paymentMethod = 'escrow_wallet';
+      booking.paymentStatus = 'paid';
+      booking.cashCollected = false;
+    } else {
+      booking.paymentMethod = 'cash collected'; // Standardized label
+      booking.paymentStatus = PAYMENT_STATUS.COLLECTED_BY_VENDOR;
+      booking.cashCollected = true;
+      booking.cashCollectedBy = 'worker';
+      booking.cashCollectorId = workerId;
+      booking.cashCollectedAt = new Date();
+    }
+    
     booking.completedAt = new Date();
     booking.paymentOtp = undefined;
     await booking.save();
@@ -668,25 +676,52 @@ const collectCash = async (req, res) => {
     if (booking.vendorId) {
       const vendorDoc = await Vendor.findById(booking.vendorId).select('wallet');
       if (vendorDoc) {
-        const currentDues = (vendorDoc.wallet.dues || 0) + grandTotal;
-        const cashLimit = vendorDoc.wallet.cashLimit || 10000;
-        const netOwed = currentDues - ((vendorDoc.wallet.earnings || 0) + vendorEarning);
-        const isBlocked = netOwed > cashLimit;
-
-        const updateQuery = {
-          $inc: {
-            'wallet.dues': grandTotal,
-            'wallet.earnings': vendorEarning,
-            'wallet.totalCashCollected': grandTotal
-          }
-        };
-
-        if (isBlocked) {
-          updateQuery.$set = {
-            'wallet.isBlocked': true,
-            'wallet.blockedAt': new Date(),
-            'wallet.blockReason': `Cash limit exceeded. Net owed: ₹${netOwed.toFixed(2)}, Limit: ₹${cashLimit}`
+        let updateQuery = {};
+        let isBlocked = false;
+        
+        if (booking.paymentStatus === 'paid' && booking.paymentMethod === 'escrow_wallet') {
+          // Escrow Logic - No dues, just earnings!
+          updateQuery = {
+            $inc: {
+              'wallet.earnings': vendorEarning
+            }
           };
+          
+          // Move from B2B Escrow
+          const B2BCompany = require('../../models/B2BCompany');
+          const B2BWallet = require('../../models/B2BWallet');
+          const company = await B2BCompany.findOne({ primaryEmail: 'b2b-enterprise@appzeto.com' });
+          if (company) {
+             const b2bWallet = await B2BWallet.findOne({ companyId: company._id });
+             if (b2bWallet) {
+                b2bWallet.escrowBalance -= grandTotal;
+                b2bWallet.totalSpent += grandTotal;
+                await b2bWallet.save();
+             }
+          }
+          
+        } else {
+          // Cash Collected Logic
+          const currentDues = (vendorDoc.wallet.dues || 0) + grandTotal;
+          const cashLimit = vendorDoc.wallet.cashLimit || 10000;
+          const netOwed = currentDues - ((vendorDoc.wallet.earnings || 0) + vendorEarning);
+          isBlocked = netOwed > cashLimit;
+
+          updateQuery = {
+            $inc: {
+              'wallet.dues': grandTotal,
+              'wallet.earnings': vendorEarning,
+              'wallet.totalCashCollected': grandTotal
+            }
+          };
+
+          if (isBlocked) {
+            updateQuery.$set = {
+              'wallet.isBlocked': true,
+              'wallet.blockedAt': new Date(),
+              'wallet.blockReason': `Cash limit exceeded. Net owed: ₹${netOwed.toFixed(2)}, Limit: ₹${cashLimit}`
+            };
+          }
         }
 
         await Vendor.findByIdAndUpdate(booking.vendorId, updateQuery);

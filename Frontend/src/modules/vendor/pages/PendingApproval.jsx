@@ -1,19 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  FiClock, FiCheckCircle, FiFileText, FiShield, 
+  FiCheck, FiFileText, FiShield, 
   FiDollarSign, FiBookOpen, FiTruck, FiPlay, 
-  FiLock, FiXCircle, FiTrendingUp, FiActivity, FiGlobe,
-  FiCamera
+  FiLock, FiGlobe, FiCamera, FiArrowRight,
+  FiAlertCircle, FiCheckCircle
 } from 'react-icons/fi';
-import { themeColors } from '../../../theme';
 import Logo from '../../../components/common/Logo';
 import api from '../../../services/api';
 import toast from 'react-hot-toast';
 
 const PendingApproval = () => {
   const navigate = useNavigate();
-  const brandColor = themeColors.brand?.teal || '#0D8A72';
 
   const [vendor, setVendor] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,10 +20,13 @@ const PendingApproval = () => {
   // Phase 2 State: KYC
   const [aadhaarNum, setAadhaarNum] = useState('');
   const [kycVerifying, setKycVerifying] = useState(false);
-  const [selfieVerifying, setSelfieVerifying] = useState(false);
   const [panNum, setPanNum] = useState('');
   const [gstNum, setGstNum] = useState('');
-  const [taxVerifying, setTaxVerifying] = useState(false);
+  
+  // Webcam State
+  const [stream, setStream] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const videoRef = useRef(null);
 
   // Phase 3 State: Bank
   const [bankName, setBankName] = useState('');
@@ -45,31 +46,63 @@ const PendingApproval = () => {
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/vendor/profile');
-      if (res.data?.success) {
-        setVendor(res.data.data);
-        const v = res.data.data;
-        if (v.kycStatus !== 'verified') {
-          setActiveStep(2);
-        } else if (v.bankStatus !== 'verified') {
-          setActiveStep(3);
-        } else if (v.inductionStatus !== 'completed') {
-          setActiveStep(4);
-        } else {
-          setActiveStep(5);
+      const token = localStorage.getItem('vendorAccessToken') || sessionStorage.getItem('vendorAccessToken');
+      
+      if (token) {
+        const res = await api.get('/vendors/profile');
+        if (res.data?.success) {
+          setVendor(res.data.data);
+          const v = res.data.data;
+          if (v.kycStatus !== 'verified') setActiveStep(2);
+          else if (v.bankStatus !== 'verified') setActiveStep(3);
+          else if (v.inductionStatus !== 'completed') setActiveStep(4);
+          else setActiveStep(5);
+          return;
         }
       }
-    } catch (err) {
+      
+      // Fallback to local storage if no token or api fails
       const dataStr = localStorage.getItem('vendorData');
       if (dataStr) {
         try {
           const v = JSON.parse(dataStr);
+          if (!v._id) {
+            toast.error('Session expired. Please sign in again.');
+            localStorage.clear();
+            navigate('/vendor/login');
+            return;
+          }
           setVendor(v);
           if (v.kycStatus !== 'verified') setActiveStep(2);
           else if (v.bankStatus !== 'verified') setActiveStep(3);
           else if (v.inductionStatus !== 'completed') setActiveStep(4);
           else setActiveStep(5);
         } catch (_) {}
+      } else {
+        toast.error('No active onboarding session found.');
+        navigate('/vendor/login');
+      }
+    } catch (err) {
+      // API error occurred, fallback to local storage
+      const dataStr = localStorage.getItem('vendorData');
+      if (dataStr) {
+        try {
+          const v = JSON.parse(dataStr);
+          if (!v._id) {
+            toast.error('Session expired. Please sign in again.');
+            localStorage.clear();
+            navigate('/vendor/login');
+            return;
+          }
+          setVendor(v);
+          if (v.kycStatus !== 'verified') setActiveStep(2);
+          else if (v.bankStatus !== 'verified') setActiveStep(3);
+          else if (v.inductionStatus !== 'completed') setActiveStep(4);
+          else setActiveStep(5);
+        } catch (_) {}
+      } else {
+        toast.error('No active onboarding session found.');
+        navigate('/vendor/login');
       }
     } finally {
       setLoading(false);
@@ -80,24 +113,81 @@ const PendingApproval = () => {
     fetchStatus();
   }, []);
 
+  // Initialize WebCam when Step 2 is active
+  useEffect(() => {
+    let currentStream = null;
+    const kycDone = vendor?.kycStatus === 'verified';
+    if (activeStep === 2 && !kycDone) {
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(s => {
+          currentStream = s;
+          setStream(s);
+        })
+        .catch(err => console.error("Webcam error:", err));
+    } else {
+      setStream(null);
+    }
+    return () => {
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [activeStep, vendor?.kycStatus]);
+
+  // Connect stream to video element
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream, activeStep]);
+
   const handleVerifyKyc = async () => {
     if (!aadhaarNum || aadhaarNum.length !== 12) {
       toast.error('Please enter a valid 12-digit Aadhaar number');
       return;
     }
+    
+    // Capture Image from Webcam
+    let imageData = null;
+    if (videoRef.current && stream) {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      // Mirror the image horizontally to match the preview
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      imageData = canvas.toDataURL('image/jpeg', 0.8);
+      setCapturedImage(imageData); // Freeze the feed
+    } else {
+      toast.error('Biometric feed is required. Please ensure your webcam is connected and allowed.');
+      return;
+    }
+
     setKycVerifying(true);
     setTimeout(async () => {
       try {
         const res = await api.post('/vendor/verify-kyc', {
-          vendorId: vendor._id,
+          vendorId: vendor?._id,
           gstin: gstNum,
-          panNumber: panNum
+          panNumber: panNum,
+          biometricImage: imageData // Sending image to backend
         });
         if (res.data.success) {
-          toast.success('Aadhaar retrieved via DigiLocker! Biometrics face matched (98% match).');
+          toast.success('Aadhaar and Biometrics verified securely via DigiLocker.');
+          // Update local storage so fetchStatus sees the new state
+          const dataStr = localStorage.getItem('vendorData');
+          if (dataStr) {
+            const v = JSON.parse(dataStr);
+            v.kycStatus = 'verified';
+            localStorage.setItem('vendorData', JSON.stringify(v));
+          }
           fetchStatus();
         }
       } catch (err) {
+        setCapturedImage(null); // Unfreeze on error
         toast.error(err.response?.data?.message || 'KYC verification failed');
       } finally {
         setKycVerifying(false);
@@ -113,7 +203,7 @@ const PendingApproval = () => {
     setBankVerifying(true);
     try {
       const res = await api.post('/vendor/verify-bank-penny-drop', {
-        vendorId: vendor._id,
+        vendorId: vendor?._id,
         bankName,
         accountNumber: accountNum,
         ifsc: ifscCode,
@@ -121,6 +211,13 @@ const PendingApproval = () => {
       });
       if (res.data.success) {
         toast.success(res.data.message);
+        // Update local storage so fetchStatus sees the new state
+        const dataStr = localStorage.getItem('vendorData');
+        if (dataStr) {
+          const v = JSON.parse(dataStr);
+          v.bankStatus = 'verified';
+          localStorage.setItem('vendorData', JSON.stringify(v));
+        }
         fetchStatus();
       }
     } catch (err) {
@@ -132,14 +229,21 @@ const PendingApproval = () => {
 
   const handleCompleteTraining = async () => {
     if (quizAnswer !== 'B') {
-      toast.error('Incorrect answer! Please review the safety guidelines and select the correct option.');
+      toast.error('Incorrect response. Please review compliance guidelines.');
       return;
     }
     setTrainingVerifying(true);
     try {
-      const res = await api.post('/vendor/complete-induction', { vendorId: vendor._id });
+      const res = await api.post('/vendor/complete-induction', { vendorId: vendor?._id });
       if (res.data.success) {
-        toast.success('Induction modules completed successfully!');
+        toast.success('Induction compliance verified.');
+        // Update local storage so fetchStatus sees the new state
+        const dataStr = localStorage.getItem('vendorData');
+        if (dataStr) {
+          const v = JSON.parse(dataStr);
+          v.inductionStatus = 'completed';
+          localStorage.setItem('vendorData', JSON.stringify(v));
+        }
         fetchStatus();
       }
     } catch (err) {
@@ -152,11 +256,11 @@ const PendingApproval = () => {
   const handleGoLive = async () => {
     setActivating(true);
     try {
-      const res = await api.post('/vendor/activate-account', { vendorId: vendor._id });
+      const res = await api.post('/vendor/activate-account', { vendorId: vendor?._id });
       if (res.data.success) {
-        toast.success('Congratulations! Your account is active and go-live.');
+        toast.success('Account Activated. Redirecting to Dashboard...');
         
-        const updatedProfile = await api.get('/vendor/profile');
+        const updatedProfile = await api.get('/vendors/profile');
         if (updatedProfile.data?.success) {
           localStorage.setItem('vendorData', JSON.stringify(updatedProfile.data.data));
         }
@@ -172,10 +276,10 @@ const PendingApproval = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-12 h-12 border-4 border-t-transparent border-[#0D8A72] rounded-full animate-spin mx-auto" />
-          <p className="text-sm font-semibold text-gray-500">Loading Onboarding Status...</p>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="flex items-center gap-3">
+          <div className="w-5 h-5 border-2 border-slate-400 border-t-slate-800 rounded-full animate-spin" />
+          <span className="text-sm font-medium text-slate-600">Initializing Workspace...</span>
         </div>
       </div>
     );
@@ -185,280 +289,299 @@ const PendingApproval = () => {
   const bankDone = vendor?.bankStatus === 'verified';
   const inductionDone = vendor?.inductionStatus === 'completed';
 
+  const steps = [
+    { id: 1, title: 'Identity Registration', subtitle: 'Mobile & Basic Info', done: true },
+    { id: 2, title: 'Compliance & KYC', subtitle: 'Aadhaar & Tax Info', done: kycDone },
+    { id: 3, title: 'Financial Audit', subtitle: 'Bank Verification', done: bankDone },
+    { id: 4, title: 'Partner Induction', subtitle: 'Safety & Protocols', done: inductionDone },
+    { id: 5, title: 'Activation', subtitle: 'System Go-Live', done: vendor?.approvalStatus === 'approved' }
+  ];
+
   return (
-    <div className="min-h-screen bg-[#F8FCFC] flex flex-col font-sans">
-      {/* Header */}
-      <div className="bg-white border-b border-[#E6F4F2] sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Logo className="h-8 w-auto" />
-            <span className="text-lg font-bold text-gray-800">TaskY Partner Lifecycle</span>
-          </div>
+    <div className="min-h-screen bg-[#F3F4F6] font-inter text-slate-800 flex flex-col">
+      {/* Enterprise Header */}
+      <header className="bg-slate-900 border-b border-slate-800 text-white shadow-sm flex-none">
+        <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <span className="text-xs font-bold text-[#0D8A72] bg-[#E6F4F2] px-3 py-1.5 rounded-full">
-              Legal Name: {vendor?.name}
-            </span>
+            <Logo className="h-6 w-auto brightness-0 invert" />
+            <div className="w-px h-5 bg-slate-700"></div>
+            <span className="text-sm font-semibold tracking-wide">Partner Lifecycle Management</span>
+          </div>
+          <div className="flex items-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Entity:</span>
+              <span className="font-medium text-slate-100">{vendor?.name || 'Authorized Partner'}</span>
+            </div>
             <button 
               onClick={() => {
                 localStorage.clear();
                 navigate('/vendor/login');
               }}
-              className="text-xs font-bold text-red-500 hover:underline"
+              className="text-slate-400 hover:text-white transition-colors flex items-center gap-1.5"
             >
               Sign Out
             </button>
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-6">
+      {/* Main Workspace */}
+      <main className="flex-1 w-full max-w-[1400px] mx-auto px-6 py-8 flex flex-col lg:flex-row gap-8 items-start">
         
-        {/* Stepper Navigation Sidebar */}
-        <div className="lg:w-80 bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm h-fit space-y-6">
-          <h3 className="font-bold text-gray-800 text-sm uppercase tracking-wider">Lifecycle Roadmap</h3>
-          <div className="space-y-4">
-            
-            {/* Step 1: Registration */}
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center shrink-0">
-                <FiCheckCircle className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-gray-900">1. Mobile Registration</p>
-                <p className="text-[10px] text-gray-400">OTP Authenticated</p>
-              </div>
+        {/* Left Sidebar - Stepper */}
+        <div className="w-full lg:w-72 shrink-0">
+          <div className="mb-6">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Process Flow</h2>
+            <p className="text-sm text-slate-800 font-medium">Onboarding Pipeline</p>
+          </div>
+          
+          <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+            <div className="flex flex-col relative py-2">
+              {/* Connecting Line */}
+              <div className="absolute left-[31px] top-6 bottom-6 w-px bg-slate-200 z-0"></div>
+
+              {steps.map((step) => {
+                const isActive = activeStep === step.id;
+                const isPast = step.id < activeStep;
+                const isFuture = step.id > activeStep && !step.done;
+
+                return (
+                  <button 
+                    key={step.id}
+                    disabled={isFuture && !step.done}
+                    onClick={() => {
+                      if (!(isFuture && !step.done) && step.id !== 1) {
+                        setActiveStep(step.id);
+                      }
+                    }}
+                    className={`relative z-10 flex items-start gap-4 p-4 text-left transition-colors w-full ${
+                      isActive ? 'bg-emerald-50/50' : 'hover:bg-slate-50'
+                    } ${(isFuture && !step.done) ? 'opacity-60 cursor-not-allowed hover:bg-transparent' : ''}`}
+                  >
+                    <div className="mt-0.5 relative shrink-0">
+                      {/* Indicator Circle */}
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-all ${
+                        step.done 
+                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          : isActive 
+                            ? 'bg-white border-emerald-600 text-emerald-600 shadow-[0_0_0_3px_rgba(5,150,105,0.1)]'
+                            : 'bg-white border-slate-300 text-slate-400'
+                      }`}>
+                        {step.done ? <FiCheck className="w-3.5 h-3.5" /> : step.id}
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <h4 className={`text-sm font-semibold ${isActive ? 'text-emerald-800' : 'text-slate-700'}`}>
+                        {step.title}
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-0.5">{step.subtitle}</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-
-            {/* Step 2: KYC */}
-            <button 
-              disabled={kycDone}
-              onClick={() => setActiveStep(2)}
-              className={`w-full flex items-center gap-3 text-left p-2 rounded-xl transition-all ${activeStep === 2 ? 'bg-teal-50/50' : 'hover:bg-gray-50'}`}
-            >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${kycDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                {kycDone ? <FiCheckCircle className="w-5 h-5" /> : <FiFileText className="w-4 h-4" />}
-              </div>
-              <div>
-                <p className={`text-xs font-bold ${activeStep === 2 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>2. DigiLocker KYC</p>
-                <p className="text-[10px] text-gray-400">Aadhaar BGV & Biometrics</p>
-              </div>
-            </button>
-
-            {/* Step 3: Bank Verify */}
-            <button 
-              disabled={!kycDone || bankDone}
-              onClick={() => setActiveStep(3)}
-              className={`w-full flex items-center gap-3 text-left p-2 rounded-xl transition-all ${!kycDone ? 'opacity-50 cursor-not-allowed' : activeStep === 3 ? 'bg-teal-50/50' : 'hover:bg-gray-50'}`}
-            >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${bankDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                {bankDone ? <FiCheckCircle className="w-5 h-5" /> : <FiDollarSign className="w-4 h-4" />}
-              </div>
-              <div>
-                <p className={`text-xs font-bold ${activeStep === 3 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>3. IMPS Bank Verify</p>
-                <p className="text-[10px] text-gray-400">₹1 Penny Drop & Audit</p>
-              </div>
-            </button>
-
-            {/* Step 4: Training */}
-            <button 
-              disabled={!bankDone || inductionDone}
-              onClick={() => setActiveStep(4)}
-              className={`w-full flex items-center gap-3 text-left p-2 rounded-xl transition-all ${!bankDone ? 'opacity-50 cursor-not-allowed' : activeStep === 4 ? 'bg-teal-50/50' : 'hover:bg-gray-50'}`}
-            >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${inductionDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                {inductionDone ? <FiCheckCircle className="w-5 h-5" /> : <FiBookOpen className="w-4 h-4" />}
-              </div>
-              <div>
-                <p className={`text-xs font-bold ${activeStep === 4 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>4. Custom Induction</p>
-                <p className="text-[10px] text-gray-400">Interactive Soft Skills</p>
-              </div>
-            </button>
-
-            {/* Step 5: Activation */}
-            <button 
-              disabled={!inductionDone}
-              onClick={() => setActiveStep(5)}
-              className={`w-full flex items-center gap-3 text-left p-2 rounded-xl transition-all ${!inductionDone ? 'opacity-50 cursor-not-allowed' : activeStep === 5 ? 'bg-teal-50/50' : 'hover:bg-gray-50'}`}
-            >
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${vendor?.approvalStatus === 'approved' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                {vendor?.approvalStatus === 'approved' ? <FiCheckCircle className="w-5 h-5" /> : <FiShield className="w-4 h-4" />}
-              </div>
-              <div>
-                <p className={`text-xs font-bold ${activeStep === 5 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>5. Go-Live Activation</p>
-                <p className="text-[10px] text-gray-400">Standardized Uniform Kit</p>
-              </div>
-            </button>
-
           </div>
         </div>
 
-        {/* Dynamic Stepper Workspace */}
-        <div className="flex-1 bg-white rounded-3xl border border-[#E6F4F2] p-6 sm:p-8 shadow-sm space-y-6">
+        {/* Right Content Area */}
+        <div className="flex-1 w-full bg-white rounded-lg border border-slate-200 shadow-sm min-h-[600px] flex flex-col">
           
-          {/* STEP 2: KYC PANEL */}
+          {/* STEP 2: KYC */}
           {activeStep === 2 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">Secure Digital KYC & Verification</h2>
-                <p className="text-xs text-gray-400 mt-1">Consent-based verification linked directly to government portals via DigiLocker.</p>
+            <div className="flex flex-col h-full animate-[fadeIn_0.3s_ease-out]">
+              <div className="p-6 border-b border-slate-200 bg-slate-50/50 rounded-t-lg">
+                <h1 className="text-xl font-semibold text-slate-800">Compliance & KYC Verification</h1>
+                <p className="text-sm text-slate-500 mt-1">Government-backed identity verification via DigiLocker API.</p>
               </div>
 
-              {/* Aadhaar Verification */}
-              <div className="p-5 bg-gray-50 rounded-2xl border border-gray-100 space-y-4">
-                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                  <FiFileText className="text-[#0D8A72]" /> 1. Aadhaar Verification via DigiLocker
-                </h4>
-                <div className="space-y-3">
-                  <label className="block text-xs font-semibold text-gray-500">12-Digit Aadhaar Card Number</label>
-                  <input 
-                    type="text" 
-                    maxLength={12}
-                    className="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:border-[#0D8A72]"
-                    placeholder="Enter 12-digit Aadhaar Number"
-                    value={aadhaarNum}
-                    onChange={e => setAadhaarNum(e.target.value.replace(/[^0-9]/g, ''))}
-                  />
-                  <button
-                    onClick={handleVerifyKyc}
-                    disabled={kycVerifying || kycDone}
-                    className="w-full py-3 bg-[#0D8A72] text-white font-bold rounded-xl text-sm transition-colors hover:bg-teal-700 disabled:opacity-50"
-                  >
-                    {kycVerifying ? 'Fetching from DigiLocker API Setu...' : 'Connect & Fetch via DigiLocker'}
-                  </button>
-                </div>
-              </div>
+              <div className="p-6 space-y-8">
+                {/* Section 1 */}
+                <section>
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
+                    <FiFileText className="text-emerald-600" />
+                    <h3 className="text-sm font-semibold text-slate-800">Aadhaar Authentication</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">12-Digit Aadhaar Number <span className="text-red-500">*</span></label>
+                      <input 
+                        type="text" 
+                        maxLength={12}
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                        placeholder="XXXX XXXX XXXX"
+                        value={aadhaarNum}
+                        onChange={e => setAadhaarNum(e.target.value.replace(/[^0-9]/g, ''))}
+                      />
+                    </div>
+                    <div>
+                      <button
+                        onClick={handleVerifyKyc}
+                        disabled={kycVerifying || kycDone || aadhaarNum.length !== 12}
+                        className="w-full px-4 py-2 bg-emerald-600 text-white font-medium rounded-md text-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center gap-2"
+                      >
+                        {kycVerifying ? (
+                          <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> Processing...</>
+                        ) : (
+                          <>Authenticate with DigiLocker</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </section>
 
-              {/* Face Match Verification */}
-              <div className="p-5 bg-gray-50 rounded-2xl border border-gray-100 space-y-4">
-                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                  <FiCamera className="text-[#0D8A72]" /> 2. Face-Match Fraud Check
-                </h4>
-                <p className="text-xs text-gray-500">Compares live selfie biometrics against Aadhaar database photo to eliminate account renting.</p>
-                <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 rounded-2xl p-6 bg-white space-y-3">
-                  <div className="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center text-[#0D8A72]">
-                    <FiCamera className="w-6 h-6" />
+                {/* Section 2 */}
+                <section>
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
+                    <FiCamera className="text-emerald-600" />
+                    <h3 className="text-sm font-semibold text-slate-800">Biometric Face Match</h3>
                   </div>
-                  <span className="text-xs font-bold text-gray-500">Device Webcam Ready</span>
-                  <span className="text-[10px] text-gray-400">Match quality threshold requires 90% accuracy</span>
-                </div>
-              </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-md p-2 flex flex-col items-center justify-center relative overflow-hidden h-48 max-w-sm mx-auto">
+                    {capturedImage ? (
+                      <img src={capturedImage} alt="Captured Biometric" className="object-cover w-full h-full rounded shadow-sm" />
+                    ) : stream ? (
+                      <video ref={videoRef} autoPlay playsInline muted className="object-cover w-full h-full rounded shadow-sm scale-x-[-1]" />
+                    ) : (
+                      <>
+                        <div className="w-12 h-12 bg-white border border-slate-200 rounded-md flex items-center justify-center text-slate-600 mb-3 shadow-sm">
+                          <FiCamera className="w-5 h-5" />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-700">Connecting Webcam...</span>
+                        <span className="text-xs text-slate-500 mt-1 text-center px-4">Please allow camera permissions to capture biometrics.</span>
+                      </>
+                    )}
+                    {kycVerifying && (
+                      <div className="absolute inset-0 bg-emerald-900/80 flex flex-col items-center justify-center text-white z-10 backdrop-blur-sm">
+                        <div className="w-10 h-10 border-4 border-emerald-400 border-t-white rounded-full animate-spin mb-3"></div>
+                        <span className="text-sm font-bold tracking-widest uppercase">Scanning Face...</span>
+                      </div>
+                    )}
+                  </div>
+                </section>
 
-              {/* Tax Details */}
-              <div className="p-5 bg-gray-50 rounded-2xl border border-gray-100 space-y-4">
-                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                  <FiLock className="text-[#0D8A72]" /> 3. Tax & Business Verification
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase">GSTIN (Optional)</label>
-                    <input 
-                      type="text" 
-                      className="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm font-semibold uppercase outline-none focus:border-[#0D8A72]" 
-                      placeholder="GSTIN Number"
-                      value={gstNum}
-                      onChange={e => setGstNum(e.target.value)}
-                    />
+                {/* Section 3 */}
+                <section>
+                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
+                    <FiLock className="text-emerald-600" />
+                    <h3 className="text-sm font-semibold text-slate-800">Tax Registration</h3>
                   </div>
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase">PAN Card Number</label>
-                    <input 
-                      type="text" 
-                      className="w-full p-3 bg-white border border-gray-200 rounded-xl text-sm font-semibold uppercase outline-none focus:border-[#0D8A72]" 
-                      placeholder="PAN Number"
-                      value={panNum}
-                      onChange={e => setPanNum(e.target.value)}
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">GSTIN (Optional)</label>
+                      <input 
+                        type="text" 
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm uppercase font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                        placeholder="ENTER GSTIN"
+                        value={gstNum}
+                        onChange={e => setGstNum(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">PAN Number</label>
+                      <input 
+                        type="text" 
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm uppercase font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                        placeholder="ENTER PAN"
+                        value={panNum}
+                        onChange={e => setPanNum(e.target.value)}
+                      />
+                    </div>
                   </div>
-                </div>
+                </section>
               </div>
             </div>
           )}
 
-          {/* STEP 3: BANK VERIFICATION */}
+          {/* STEP 3: BANKING */}
           {activeStep === 3 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">Banking Validation & Audit</h2>
-                <p className="text-xs text-gray-400 mt-1">We trigger a ₹1 IMPS penny drop transaction to verify your account holder name matches your Aadhaar details.</p>
+            <div className="flex flex-col h-full animate-[fadeIn_0.3s_ease-out]">
+              <div className="p-6 border-b border-slate-200 bg-slate-50/50 rounded-t-lg">
+                <h1 className="text-xl font-semibold text-slate-800">Financial Audit</h1>
+                <p className="text-sm text-slate-500 mt-1">Secure IMPS penny drop mechanism to validate beneficiary records.</p>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 mb-1.5">Account Holder Name (As per Bank/Aadhaar)</label>
-                  <input 
-                    type="text"
-                    className="w-full p-3 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:border-[#0D8A72]"
-                    placeholder="Enter Exact Legal Name"
-                    value={bankName}
-                    onChange={e => setBankName(e.target.value)}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-6">
+                <div className="max-w-2xl space-y-6">
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1.5">Bank Account Number</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Account Holder Legal Name <span className="text-red-500">*</span></label>
                     <input 
                       type="text"
-                      className="w-full p-3 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:border-[#0D8A72]"
-                      placeholder="Account Number"
-                      value={accountNum}
-                      onChange={e => setAccountNum(e.target.value.replace(/[^0-9]/g, ''))}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                      placeholder="As per bank records"
+                      value={bankName}
+                      onChange={e => setBankName(e.target.value)}
                     />
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Account Number <span className="text-red-500">*</span></label>
+                      <input 
+                        type="text"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium tracking-wide focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                        placeholder="Enter Account Number"
+                        value={accountNum}
+                        onChange={e => setAccountNum(e.target.value.replace(/[^0-9]/g, ''))}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">IFSC Code <span className="text-red-500">*</span></label>
+                      <input 
+                        type="text"
+                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium uppercase tracking-wide focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                        placeholder="e.g. SBIN0001234"
+                        value={ifscCode}
+                        onChange={e => setIfscCode(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1.5">IFSC Code</label>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">UPI VPA (Optional)</label>
                     <input 
                       type="text"
-                      className="w-full p-3 border border-gray-200 rounded-xl text-sm font-semibold uppercase outline-none focus:border-[#0D8A72]"
-                      placeholder="IFSC (e.g. SBIN0001234)"
-                      value={ifscCode}
-                      onChange={e => setIfscCode(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
+                      placeholder="e.g. entity@bank"
+                      value={upiId}
+                      onChange={e => setUpiId(e.target.value)}
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 mb-1.5">UPI ID / VPA Handle (Optional)</label>
-                  <input 
-                    type="text"
-                    className="w-full p-3 border border-gray-200 rounded-xl text-sm font-semibold outline-none focus:border-[#0D8A72]"
-                    placeholder="e.g. name@okhdfcbank"
-                    value={upiId}
-                    onChange={e => setUpiId(e.target.value)}
-                  />
+                  <div className="pt-4 border-t border-slate-200">
+                    <button
+                      onClick={handleVerifyBank}
+                      disabled={bankVerifying || bankDone || !bankName || !accountNum || !ifscCode}
+                      className="px-6 py-2.5 bg-slate-800 text-white font-medium rounded-md text-sm hover:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                    >
+                      {bankVerifying ? (
+                        <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> Executing Transaction...</>
+                      ) : (
+                        <><FiDollarSign className="w-4 h-4"/> Execute IMPS Penny Drop Audit</>
+                      )}
+                    </button>
+                    <p className="text-xs text-slate-500 mt-3 flex items-center gap-1.5">
+                      <FiAlertCircle /> Secure bank-grade audit trail is maintained for this transaction.
+                    </p>
+                  </div>
                 </div>
-
-                <button
-                  onClick={handleVerifyBank}
-                  disabled={bankVerifying || bankDone}
-                  className="w-full py-3.5 bg-blue-600 text-white font-bold rounded-xl text-sm shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50 mt-4 flex items-center justify-center gap-2"
-                >
-                  {bankVerifying ? (
-                    <><span className="animate-spin border-2 border-white border-t-transparent rounded-full w-4 h-4"></span> Triggering IMPS Penny Drop...</>
-                  ) : (
-                    <><FiDollarSign/> Execute ₹1 Penny Drop Verification</>
-                  )}
-                </button>
               </div>
             </div>
           )}
 
-          {/* STEP 4: TRAINING & INDUCTION */}
+          {/* STEP 4: TRAINING */}
           {activeStep === 4 && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-start flex-wrap gap-4">
+            <div className="flex flex-col h-full animate-[fadeIn_0.3s_ease-out]">
+              <div className="p-6 border-b border-slate-200 bg-slate-50/50 rounded-t-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
-                  <h2 className="text-xl font-bold text-gray-800">On-Platform Induction Training</h2>
-                  <p className="text-xs text-gray-400 mt-1">Complete mandatory safety and protocol modules to activate your dispatches.</p>
+                  <h1 className="text-xl font-semibold text-slate-800">Partner Induction Protocols</h1>
+                  <p className="text-sm text-slate-500 mt-1">Review operational guidelines and acknowledge compliance.</p>
                 </div>
                 
-                {/* Language Picker */}
-                <div className="flex items-center gap-2 bg-[#E6F4F2] px-3 py-1.5 rounded-xl border border-[#10AFA5]/10 text-xs font-bold text-[#0D8A72]">
-                  <FiGlobe /> Language:
+                <div className="flex items-center gap-2">
+                  <FiGlobe className="text-slate-500" />
                   <select 
                     value={language}
                     onChange={e => setLanguage(e.target.value)}
-                    className="bg-transparent font-bold focus:outline-none cursor-pointer"
+                    className="bg-white border border-slate-300 text-slate-700 text-sm rounded-md px-3 py-1.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option>English</option>
                     <option>Malayalam</option>
@@ -467,124 +590,123 @@ const PendingApproval = () => {
                 </div>
               </div>
 
-              {/* Interactive Training Carousel */}
-              <div className="bg-gray-50 border border-gray-100 p-6 rounded-2xl space-y-4">
-                <h3 className="font-bold text-sm text-gray-700 flex items-center gap-2"><FiBookOpen/> Induction Module (Multilingual)</h3>
-                
-                <div className="space-y-3 bg-white p-4 rounded-xl border border-gray-100 text-xs leading-relaxed text-gray-600 shadow-sm">
-                  {language === 'English' && (
-                    <>
-                      <p className="font-bold text-gray-800 mb-1">Module 1: Safety & Zero-Tolerance Offline Steering</p>
-                      <p>WBI operates on a strict zero-tolerance steering policy. Technicians must never attempt to share personal phone numbers or request offline cash payment. First strike reduces dispatch priority by 50%; secondary strikes result in permanent account ban.</p>
-                    </>
-                  )}
-                  {language === 'Malayalam' && (
-                    <>
-                      <p className="font-bold text-gray-800 mb-1">മോഡ്യൂൾ 1: സുരക്ഷയും ഓഫ്‌ലൈൻ പേയ്‌മെന്റ് നിയന്ത്രണങ്ങളും</p>
+              <div className="p-6 flex-1 flex flex-col">
+                <div className="bg-slate-50 border border-slate-200 rounded-md p-6 mb-6">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-3 flex items-center gap-2">
+                    <FiBookOpen className="text-emerald-600" /> 
+                    {language === 'English' && 'Module 1: Safety & Zero-Tolerance Offline Steering'}
+                    {language === 'Malayalam' && 'മോഡ്യൂൾ 1: സുരക്ഷയും നിയന്ത്രണങ്ങളും'}
+                    {language === 'Hindi' && 'मॉड्यूल 1: सुरक्षा और नीतियां'}
+                  </h3>
+                  <div className="text-sm text-slate-600 leading-relaxed border-l-2 border-slate-300 pl-4">
+                    {language === 'English' && (
+                      <p>WBI operates on a strict zero-tolerance steering policy. Authorized partners must never share personal contact details or request offline cash payments outside the secure platform. First violations result in a 50% dispatch priority reduction; subsequent violations incur an immediate and permanent platform ban.</p>
+                    )}
+                    {language === 'Malayalam' && (
                       <p>ഫോൺ നമ്പറുകൾ പങ്കിടുന്നതോ ഉപഭോക്താവിൽ നിന്നും നേരിട്ട് പണം വാങ്ങുന്നതോ കർശനമായി നിരോധിച്ചിരിക്കുന്നു. നിയമലംഘനം കണ്ടെത്തിയാൽ നിങ്ങളുടെ അക്കൗണ്ട് എന്നെന്നേക്കുമായി ബ്ലോക്ക് ചെയ്യപ്പെടും.</p>
-                    </>
-                  )}
-                  {language === 'Hindi' && (
-                    <>
-                      <p className="font-bold text-gray-800 mb-1">मॉड्यूल 1: सुरक्षा और प्लेटफॉर्म गोपनीयता नीतियां</p>
+                    )}
+                    {language === 'Hindi' && (
                       <p>संतुष्टि और सुरक्षा के लिए, ग्राहकों से कभी भी व्यक्तिगत रूप से संपर्क न करें या प्लेटफॉर्म के बाहर पैसे का लेनदेन न करें। नियमों के उल्लंघन पर आपका खाता स्थाई रूप से बंद किया जा सकता है।</p>
-                    </>
-                  )}
+                    )}
+                  </div>
                 </div>
 
-                {/* Question */}
-                <div className="space-y-3 pt-2">
-                  <p className="text-xs font-bold text-gray-700">Quiz Question: If a client requests offline cash payments steering, what should you do?</p>
+                <div className="space-y-4">
+                  <h4 className="text-sm font-semibold text-slate-800">Compliance Assessment</h4>
+                  <p className="text-xs text-slate-500">Scenario: If a client requests offline cash payments to bypass platform fees, what is the protocol?</p>
                   
-                  <div className="space-y-2 text-xs font-medium">
-                    <label className="flex items-center gap-3 p-3 border rounded-xl bg-white hover:bg-gray-50/50 cursor-pointer">
-                      <input 
-                        type="radio" 
-                        name="quiz" 
-                        value="A" 
-                        checked={quizAnswer === 'A'} 
-                        onChange={() => setQuizAnswer('A')}
-                        className="text-[#0D8A72] focus:ring-[#0D8A72]" 
-                      />
-                      <span>A) Accept the cash steering to save platform service commission charges.</span>
+                  <div className="space-y-3">
+                    <label className={`flex items-start gap-3 p-4 border rounded-md cursor-pointer transition-colors ${quizAnswer === 'A' ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <input type="radio" name="quiz" value="A" checked={quizAnswer === 'A'} onChange={() => setQuizAnswer('A')} className="mt-0.5 text-slate-800 focus:ring-slate-800" />
+                      <span className="text-sm text-slate-700">A) Accept the offline payment to reduce service commission charges.</span>
                     </label>
 
-                    <label className="flex items-center gap-3 p-3 border rounded-xl bg-white hover:bg-gray-50/50 cursor-pointer">
-                      <input 
-                        type="radio" 
-                        name="quiz" 
-                        value="B" 
-                        checked={quizAnswer === 'B'} 
-                        onChange={() => setQuizAnswer('B')}
-                        className="text-[#0D8A72] focus:ring-[#0D8A72]" 
-                      />
-                      <span className="text-green-700">B) Politely refuse, complete OTP sign-off, and process inside the secure in-app escrow.</span>
+                    <label className={`flex items-start gap-3 p-4 border rounded-md cursor-pointer transition-colors ${quizAnswer === 'B' ? 'border-emerald-600 bg-emerald-50/30' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <input type="radio" name="quiz" value="B" checked={quizAnswer === 'B'} onChange={() => setQuizAnswer('B')} className="mt-0.5 text-emerald-600 focus:ring-emerald-600" />
+                      <span className="text-sm text-slate-700 font-medium">B) Decline the request, mandate OTP sign-off, and process billing exclusively through the authorized in-app escrow system.</span>
                     </label>
                   </div>
                 </div>
 
-                <button
-                  onClick={handleCompleteTraining}
-                  disabled={trainingVerifying || inductionDone}
-                  className="w-full py-3 bg-[#0D8A72] text-white font-bold rounded-xl text-sm transition-colors hover:bg-teal-700 disabled:opacity-50 mt-4 flex items-center justify-center gap-2"
-                >
-                  {trainingVerifying ? 'Verifying Answers...' : 'Submit Answers & Verify Module'}
-                </button>
+                <div className="mt-auto pt-6 border-t border-slate-200 flex justify-end">
+                  <button
+                    onClick={handleCompleteTraining}
+                    disabled={trainingVerifying || inductionDone || !quizAnswer}
+                    className="px-6 py-2.5 bg-emerald-600 text-white font-medium rounded-md text-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {trainingVerifying ? 'Validating...' : 'Acknowledge & Submit'}
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* STEP 5: ACTIVATION & KIT DEPLOYMENT */}
+          {/* STEP 5: ACTIVATION */}
           {activeStep === 5 && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-bold text-gray-800">Account Activation & Kit Dispatch</h2>
-                <p className="text-xs text-gray-400 mt-1">WBI branded kit dispatch status tracker and Go-Live activation toggle.</p>
+            <div className="flex flex-col h-full animate-[fadeIn_0.3s_ease-out]">
+              <div className="p-6 border-b border-slate-200 bg-slate-50/50 rounded-t-lg">
+                <h1 className="text-xl font-semibold text-slate-800">System Activation</h1>
+                <p className="text-sm text-slate-500 mt-1">Finalize partner provisioning and verify logistics status.</p>
               </div>
 
-              {/* Kit Tracker Card */}
-              <div className="p-5 bg-gray-50 border border-gray-100 rounded-2xl space-y-4">
-                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2">
-                  <FiTruck className="text-[#0D8A72]" /> Shipment Logistics Status
-                </h4>
+              <div className="p-8 flex-1 flex flex-col justify-center items-center">
                 
-                <div className="flex items-center gap-4 bg-white p-4 rounded-xl border border-gray-100">
-                  <div className="w-10 h-10 rounded-xl bg-[#E6F4F2] flex items-center justify-center text-[#0D8A72] font-black">
-                    QR
+                <div className="w-full max-w-lg space-y-8">
+                  <div className="flex flex-col items-center text-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-700 border border-slate-200">
+                      <FiShield className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-800">All Audits Passed</h2>
+                      <p className="text-sm text-slate-500 mt-2">Your compliance, financial, and operational audits have been successfully verified by the system administrator.</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-900">TaskY Branded Uniform & ID Badges</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Status: Dispatched via WBI logistics (Tracking ID: TKY-KIT-77382)</p>
-                  </div>
-                  <span className="ml-auto text-[10px] font-bold px-2 py-1 bg-green-50 text-green-700 rounded-full border border-green-200">
-                    In Transit
-                  </span>
-                </div>
-              </div>
 
-              {/* Action Banner */}
-              <div className="p-5 bg-blue-50/50 border border-blue-100 rounded-2xl space-y-3">
-                <h4 className="text-xs font-bold text-blue-800">Induction Checklist Complete!</h4>
-                <p className="text-xs text-blue-700 leading-relaxed">
-                  Your identity, tax files, and bank penny drop audits are fully verified. You can now override and activate your Go-Live status!
-                </p>
-                <button
-                  onClick={handleGoLive}
-                  disabled={activating}
-                  className="w-full py-4 bg-[#0D8A72] text-white font-extrabold rounded-xl text-sm shadow-md hover:bg-teal-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  {activating ? (
-                    <><span className="animate-spin border-2 border-white border-t-transparent rounded-full w-4 h-4"></span> Activating Partner account...</>
-                  ) : (
-                    <><FiPlay className="w-5 h-5"/> ACTIVATE PARTNER & GO-LIVE</>
-                  )}
-                </button>
+                  <div className="bg-white border border-slate-200 rounded-lg p-5">
+                    <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-4">
+                      <FiTruck className="text-slate-400" /> Logistics Status
+                    </h4>
+                    
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-slate-50 rounded-md border border-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs">
+                        QR
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-slate-800">Standardized Uniform & Toolkit</p>
+                        <p className="text-xs text-slate-500 font-mono mt-1">WAYBILL: WBI-LOG-77382</p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <span className="text-xs font-medium text-slate-600 uppercase tracking-wide">
+                          In Transit
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-800 rounded-lg p-6 text-white text-center">
+                    <h3 className="text-base font-semibold mb-2">Ready for Go-Live</h3>
+                    <p className="text-sm text-slate-400 mb-6">Click below to provision your workspace and activate your partner dashboard.</p>
+                    <button
+                      onClick={handleGoLive}
+                      disabled={activating}
+                      className="w-full py-3 bg-emerald-600 text-white font-medium rounded-md text-sm hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                    >
+                      {activating ? (
+                        <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> Provisioning Workspace...</>
+                      ) : (
+                        <>Initialize Workspace <FiArrowRight /></>
+                      )}
+                    </button>
+                  </div>
+
+                </div>
               </div>
             </div>
           )}
 
         </div>
-      </div>
+      </main>
     </div>
   );
 };

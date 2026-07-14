@@ -11,6 +11,7 @@ router.use(isAdmin);
 router.get('/', siteTestingEnquiryController.getEnquiries);
 router.get('/:id', siteTestingEnquiryController.getEnquiry);
 router.put('/:id/status', siteTestingEnquiryController.updateStatus);
+router.post('/:id/broadcast', siteTestingEnquiryController.broadcastToVendors);
 router.delete('/:id', siteTestingEnquiryController.deleteEnquiry);
 
 module.exports = router;

@@ -134,6 +134,8 @@ const ElectricalSafetyTestEnquiry = lazyLoad(() => import('../pages/ElectricalSa
 const HcPreventiveMaintenanceEnquiry = lazyLoad(() => import('../pages/HcPreventiveMaintenanceEnquiry'));
 const HcAmcEnquiry = lazyLoad(() => import('../pages/HcAmcEnquiry'));
 
+const B2BDashboard = lazyLoad(() => import('../pages/B2BDashboard'));
+
 const LoadingFallback = () => (
   <PageSkeleton />
 );
@@ -176,6 +178,7 @@ const UserRoutes = () => {
               {/* Protected routes (auth required) */}
               <Route path="/" element={<AnimatedPage><ProtectedRoute userType="user"><Home /></ProtectedRoute></AnimatedPage>} />
               <Route path="/home" element={<AnimatedPage><ProtectedRoute userType="user"><Home /></ProtectedRoute></AnimatedPage>} />
+              <Route path="/b2b-dashboard" element={<AnimatedPage><ProtectedRoute userType="user"><B2BDashboard /></ProtectedRoute></AnimatedPage>} />
               <Route path="/services" element={<AnimatedPage><ProtectedRoute userType="user"><Services /></ProtectedRoute></AnimatedPage>} />
               <Route path="/service/:slug" element={<AnimatedPage><ProtectedRoute userType="user"><OneTimeServiceDetail /></ProtectedRoute></AnimatedPage>} />
               <Route path="/service/:slug/packages" element={<AnimatedPage><ProtectedRoute userType="user"><OneTimeServicePackages /></ProtectedRoute></AnimatedPage>} />

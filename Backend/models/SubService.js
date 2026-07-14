@@ -57,6 +57,11 @@ const subServiceSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
+  supportedExecutionTypes: [{
+    type: String,
+    enum: ['ONE_TIME', 'AMC', 'PROJECT'],
+    default: ['ONE_TIME']
+  }],
   suggestedTools: [{
     type: String,
     trim: true

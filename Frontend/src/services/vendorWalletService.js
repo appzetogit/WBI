@@ -87,10 +87,26 @@ const vendorWalletService = {
   },
 
   /**
-   * Request settlement (vendor pays admin)
+   * Request settlement (legacy - vendor pays admin via screenshot proof)
    */
   requestSettlement: async (data) => {
     const response = await api.post('/vendors/wallet/settlement', data);
+    return response.data;
+  },
+
+  /**
+   * Create Razorpay Order for Settlement
+   */
+  createSettlementOrder: async (amount) => {
+    const response = await api.post('/vendors/wallet/settlement/create-order', { amount });
+    return response.data;
+  },
+
+  /**
+   * Verify Razorpay Settlement Payment
+   */
+  verifySettlementPayment: async (data) => {
+    const response = await api.post('/vendors/wallet/settlement/verify-payment', data);
     return response.data;
   },
 
@@ -121,7 +137,7 @@ const vendorWalletService = {
    * Request Withdrawal
    */
   requestWithdrawal: async (data) => {
-    const response = await api.post('/vendors/wallet/withdrawal', data);
+    const response = await api.post('/vendors/withdraw', data);
     return response.data;
   }
 };

@@ -316,7 +316,13 @@ const register = async (req, res) => {
       pan: { number: pan, document: panUrl },
       otherDocuments: otherUrls,
       approvalStatus: VENDOR_STATUS.PENDING,
-      isPhoneVerified: true
+      isPhoneVerified: true,
+      onboarding: {
+        currentStep: 1,
+        completedSteps: [],
+        status: 'DRAFT',
+        progressPercentage: 10
+      }
     });
 
     // Notify Admins
@@ -449,6 +455,35 @@ const login = async (req, res) => {
     userRes.mobile = foundUser.phone || foundUser.mobile || null;
     userRes.role = resolvedRole;
     userRes.status = foundUser.status || foundUser.approvalStatus || undefined;
+
+    let availableModules = [];
+    let vendorModels = [];
+    let modelApprovals = [];
+    
+    if (resolvedRole === 'vendor') {
+      vendorModels = foundUser.vendorModels || [];
+      const VendorModelApproval = require('../../models/VendorModelApproval');
+      const approvals = await VendorModelApproval.find({ vendorId: foundUser._id });
+      
+      modelApprovals = approvals.map(a => ({ model: a.model, status: a.status }));
+      
+      // Dynamic derivation of modules based on model approvals and status
+      if (foundUser.approvalStatus === 'APPROVED' || foundUser.approvalStatus === 'approved') {
+        availableModules.push('DASHBOARD', 'PROFILE', 'WALLET');
+        if (modelApprovals.some(a => a.model === 'ONE_TIME' && (a.status === 'APPROVED' || a.status === 'approved'))) {
+          availableModules.push('SERVICE_OPERATIONS', 'TEAM');
+        }
+        if (modelApprovals.some(a => a.model === 'PROJECT' && (a.status === 'APPROVED' || a.status === 'approved'))) {
+          availableModules.push('PROJECTS', 'INVENTORY', 'INVOICES');
+        }
+      } else if (foundUser.onboarding?.status && foundUser.onboarding.status !== 'APPROVED') {
+         availableModules.push('ONBOARDING');
+      }
+      
+      userRes.vendorModels = vendorModels;
+      userRes.modelApprovals = modelApprovals;
+      userRes.availableModules = availableModules;
+    }
 
     res.status(200).json({
       success: true,

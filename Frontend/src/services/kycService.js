@@ -37,6 +37,15 @@ export const kycService = {
     }
   },
 
+  generateAadhaarOtp: async (payload) => {
+    try {
+      const response = await api.post('/kyc/aadhaar/generate-otp', payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { success: false, message: 'Failed to generate Aadhaar OTP' };
+    }
+  },
+
   verifyAadhaar: async (payload) => {
     try {
       const response = await api.post('/kyc/aadhaar/verify', payload);
@@ -61,6 +70,15 @@ export const kycService = {
       return response.data;
     } catch (error) {
       throw error.response?.data || { success: false, message: 'Failed to upload document' };
+    }
+  },
+
+  verifySelfieMatch: async (payload) => {
+    try {
+      const response = await api.post('/kyc/selfie/verify', payload);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { success: false, message: 'Selfie verification failed' };
     }
   }
 };

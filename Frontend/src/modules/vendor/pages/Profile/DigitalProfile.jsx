@@ -118,7 +118,12 @@ const DigitalProfile = memo(() => {
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-gray-800">Service Portfolio</h3>
-                  <span className="text-xs font-bold text-[#0D8A72] cursor-pointer">Edit</span>
+                  <span 
+                    onClick={() => navigate('/vendor/digital-solution/services')}
+                    className="text-xs font-bold text-[#0D8A72] cursor-pointer hover:underline"
+                  >
+                    Edit
+                  </span>
                 </div>
                 <div className="space-y-4 mb-6">
                   <div className="flex text-[10px] text-gray-400 font-bold uppercase pb-2 border-b border-gray-50">
@@ -137,7 +142,10 @@ const DigitalProfile = memo(() => {
                     </div>
                   ))}
                 </div>
-                <button className="w-full py-2 border border-dashed border-gray-300 text-[#0D8A72] font-bold text-sm rounded-lg flex justify-center items-center gap-2 hover:bg-gray-50 transition-colors">
+                <button 
+                  onClick={() => navigate('/vendor/digital-solution/services')}
+                  className="w-full py-2 border border-dashed border-gray-300 text-[#0D8A72] font-bold text-sm rounded-lg flex justify-center items-center gap-2 hover:bg-gray-50 transition-colors"
+                >
                   <FiPlus/> Add New Service
                 </button>
               </div>
@@ -147,7 +155,12 @@ const DigitalProfile = memo(() => {
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 overflow-x-auto">
                <div className="flex justify-between items-center mb-6">
                   <h3 className="font-bold text-gray-800">Team & Engineers ({team.length})</h3>
-                  <span className="text-xs font-bold text-[#0D8A72] cursor-pointer">View All</span>
+                  <span 
+                    onClick={() => navigate('/vendor/digital-solution/engineers')}
+                    className="text-xs font-bold text-[#0D8A72] cursor-pointer hover:underline"
+                  >
+                    View All
+                  </span>
                 </div>
                 <div className="flex gap-4 min-w-max pb-2">
                   {team.map((member, i) => (
@@ -161,7 +174,10 @@ const DigitalProfile = memo(() => {
                       </div>
                     </div>
                   ))}
-                  <div className="w-48 bg-white border-2 border-dashed border-gray-200 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 transition-colors text-gray-400 hover:text-[#0D8A72]">
+                  <div 
+                    onClick={() => navigate('/vendor/digital-solution/engineers')}
+                    className="w-48 bg-white border-2 border-dashed border-gray-200 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 transition-colors text-gray-400 hover:text-[#0D8A72]"
+                  >
                     <div className="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center mb-2"><FiPlus className="w-6 h-6"/></div>
                     <span className="font-bold text-sm">Add Member</span>
                   </div>

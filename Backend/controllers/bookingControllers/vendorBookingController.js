@@ -1499,12 +1499,18 @@ const payWorker = async (req, res) => {
 const getVendorRatings = async (req, res) => {
   try {
     const vendorId = req.user.id;
-    const { page = 1, limit = 10 } = req.query;
+    const { page = 1, limit = 10, serviceId } = req.query;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    // Build query
+    const query = { vendorId, rating: { $ne: null } };
+    if (serviceId && serviceId !== 'all') {
+      query.serviceId = serviceId;
+    }
+
     // Fetch bookings where rating is not null
-    const bookings = await Booking.find({ vendorId, rating: { $ne: null } })
+    const bookings = await Booking.find(query)
       .populate('userId', 'name profilePhoto')
       .populate('serviceId', 'title iconUrl')
       .populate('workerId', 'name profilePhoto')
@@ -1512,11 +1518,17 @@ const getVendorRatings = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    const total = await Booking.countDocuments({ vendorId, rating: { $ne: null } });
+    const total = await Booking.countDocuments(query);
 
-    // Calculate average rating
+    // Calculate average rating based on query
+    const objectIdVendor = new mongoose.Types.ObjectId(vendorId.toString());
+    const matchQuery = { vendorId: objectIdVendor, rating: { $ne: null } };
+    if (serviceId && serviceId !== 'all') {
+      matchQuery.serviceId = new mongoose.Types.ObjectId(serviceId.toString());
+    }
+
     const stats = await Booking.aggregate([
-      { $match: { vendorId: new mongoose.Types.ObjectId(vendorId), rating: { $ne: null } } },
+      { $match: matchQuery },
       {
         $group: {
           _id: null,
@@ -1531,10 +1543,39 @@ const getVendorRatings = async (req, res) => {
       }
     ]);
 
+    // Fetch unique services for filter
+    const availableServices = await Booking.aggregate([
+      { $match: { vendorId: objectIdVendor, rating: { $ne: null } } },
+      {
+        $group: {
+          _id: '$serviceId',
+          serviceName: { $first: '$serviceName' },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $lookup: {
+          from: 'userservices', // Note: assuming the collection name is 'userservices', if not, serviceName fallback is used
+          localField: '_id',
+          foreignField: '_id',
+          as: 'serviceDetails'
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          title: { $ifNull: [{ $arrayElemAt: ['$serviceDetails.title', 0] }, '$serviceName'] },
+          count: 1
+        }
+      },
+      { $sort: { title: 1 } }
+    ]);
+
     res.status(200).json({
       success: true,
       data: bookings,
       stats: stats[0] || { averageRating: 0, totalReviews: 0, star5: 0, star4: 0, star3: 0, star2: 0, star1: 0 },
+      availableServices,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -1544,10 +1585,11 @@ const getVendorRatings = async (req, res) => {
     });
   } catch (error) {
     console.error('Get vendor ratings error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch ratings'
-    });
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch ratings',
+        error: error.stack
+      });
   }
 };
 

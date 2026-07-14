@@ -30,6 +30,7 @@ const iconMap = {
   Vendors: FiBriefcase,
   Workers: FiUser,
   Engineers: FiUser,
+  "Project OS Templates": FiGrid,
   "Form Builder": FiGrid,
   Verifications: FiShield,
   Bookings: FiShoppingBag,

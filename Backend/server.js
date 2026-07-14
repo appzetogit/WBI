@@ -233,6 +233,7 @@ app.use('/api/users/one-time-services', require('./routes/user-routes/oneTimeSer
 app.use('/api/one-time-services', require('./routes/user-routes/oneTimeService.routes'));
 app.use('/api/services', require('./routes/user-routes/oneTimeService.routes'));
 app.use('/api/users/addresses', require('./routes/user-routes/address.routes'));
+app.use('/api/b2b-dashboard', require('./routes/user-routes/b2b-dashboard.routes'));
 
 // Review Booking Flow routes
 app.use('/api/booking-draft', require('./routes/user-routes/bookingDraft.routes'));
@@ -261,6 +262,7 @@ app.use('/api/vendors/catalog', require('./routes/vendor-routes/catalog.routes')
 app.use('/api/vendors/enquiries', require('./routes/vendor-routes/vendorEnquiry.routes'));
 app.use('/api/vendors/assignments', require('./routes/vendor-routes/engineerAssignment.routes'));
 app.use('/api/vendors/team', require('./routes/vendor-routes/team.routes'));
+app.use('/api/vendors/service-offerings', require('./routes/vendor-routes/vendorServiceOffering.routes'));
 app.use('/api/workers/one-time-bookings', require('./routes/worker-routes/workerOneTimeBooking.routes'));
 app.use('/api/worker/bookings', require('./routes/worker-routes/bookingResponse.routes'));
 app.use('/api/vendors/digital', require('./routes/vendor-routes/digital.routes'));
@@ -406,6 +408,12 @@ app.use('/api/payment', require('./routes/payment.routes'));
 // Notification routes
 app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/chats', require('./routes/chat.routes'));
+
+// ── WBI Project Operating System ──────────────────────────────────────────────
+// Configuration-driven engine for all enterprise project-based services.
+// Completely isolated from legacy enquiry-based routes.
+app.use('/api/project-os', require('./routes/projectOS.routes'));
+
 
 // Public routes (no authentication required)
 app.use('/api/public', require('./routes/public-routes/catalog.routes'));

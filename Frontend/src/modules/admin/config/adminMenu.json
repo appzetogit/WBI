@@ -61,6 +61,15 @@
     ]
   },
   {
+    "title": "Project OS Templates",
+    "route": "/admin/project-templates",
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
+    "children": []
+  },
+  {
     "title": "Form Builder",
     "route": "/admin/form-builder",
     "allowedRoles": [

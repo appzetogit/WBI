@@ -4,6 +4,11 @@ const VendorKYC = require('../../models/VendorKYC');
 const VendorBank = require('../../models/VendorBank');
 const VendorPayment = require('../../models/VendorPayment');
 const { generateOTP, hashOTP, verifyOTP } = require('../../utils/redisOtp.util');
+const VendorCapability = require('../../models/VendorCapability');
+const VendorProjectPortfolio = require('../../models/VendorProjectPortfolio');
+const VendorDocument = require('../../models/VendorDocument');
+const VendorFinance = require('../../models/VendorFinance');
+const VendorModelApproval = require('../../models/VendorModelApproval');
 
 // Since we are upgrading the registration, we might use a draft collection,
 // but to avoid breaking things, we can just save it into a new Model or save a partial vendor
@@ -20,156 +25,295 @@ const getConfig = async (req, res) => {
   }
 };
 
-const createDraft = async (req, res) => {
+const updateBusinessDetails = async (req, res) => {
   try {
-    // In a real application we would use a Draft model. Here we just return an ID mock.
-    // For WBI, we will create a Vendor with status 'draft' or just use frontend state.
-    // Given the prompt asks for POST /api/vendor/registration-draft, I'll create a Vendor in 'pending_approval' but mark as draft somehow, or just return an ID.
-    // Since we didn't create a draft model, let's create one now dynamically or use Vendor.
+    // Expect req.user.id to be set by auth middleware
+    const vendorId = req.user?.id || req.body.vendorId;
+    const vendor = await Vendor.findById(vendorId);
+    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+
+    const { companyName, incorporationType, gstin, panNumber, panUrl, officeAddress, city, state, pincode, latitude, longitude } = req.body;
     
-    // Using Vendor model directly but setting a flag or using approvalStatus = 'draft'
-    // Wait, let's stick to the prompt's requirement and just return a token or mock it since frontend usually holds draft state until step 12.
-    // Actually, step 12 says "Submit: vendorStatus = pending_approval". So step 1-11 is draft.
+    vendor.businessName = companyName;
+    vendor.incorporationType = incorporationType;
+    vendor.gstin = gstin;
+    vendor.pan = { number: panNumber, document: panUrl };
+    vendor.address = {
+      fullAddress: officeAddress,
+      city, state, pincode,
+      lat: latitude, lng: longitude
+    };
+    if (longitude && latitude) {
+      vendor.geoLocation = { type: 'Point', coordinates: [longitude, latitude] };
+    }
     
-    // For simplicity, let's let frontend hold the draft and just use submit.
-    // But if we must have draft API:
-    res.status(200).json({ success: true, draftId: 'draft_' + Date.now() });
+    vendor.onboarding.currentStep = 2;
+    if (!vendor.onboarding.completedSteps.includes(1)) vendor.onboarding.completedSteps.push(1);
+    
+    await vendor.save();
+    res.status(200).json({ success: true, message: 'Business details updated', vendor });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-const updateDraft = async (req, res) => {
+const updateModels = async (req, res) => {
   try {
-    res.status(200).json({ success: true, message: 'Draft updated' });
+    const vendorId = req.user?.id || req.body.vendorId;
+    const { models } = req.body; // e.g. ["ONE_TIME", "PROJECT"]
+    
+    if (!models || models.length === 0) return res.status(400).json({ success: false, message: 'Select at least one model' });
+
+    const vendor = await Vendor.findById(vendorId);
+    vendor.vendorModels = models;
+    vendor.onboarding.currentStep = 3;
+    if (!vendor.onboarding.completedSteps.includes(2)) vendor.onboarding.completedSteps.push(2);
+    
+    await vendor.save();
+    res.status(200).json({ success: true, message: 'Models updated', vendorModels: vendor.vendorModels });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-const submitRegistration = async (req, res) => {
+const updateOneTimeCapability = async (req, res) => {
   try {
-    const data = req.body;
+    const vendorId = req.user?.id || req.body.vendorId;
+    const { serviceCoverage, dailyCapacity, serviceConfigurations } = req.body;
+
+    await VendorCapability.findOneAndUpdate(
+      { vendorId },
+      { $set: { 
+          'oneTime.serviceCoverage': serviceCoverage, 
+          'oneTime.dailyCapacity': dailyCapacity,
+          'oneTime.serviceConfigurations': serviceConfigurations
+      } },
+      { upsert: true, new: true }
+    );
     
-    // Verify OTP first
-    if (data.otp && data.phone) {
-      const ver = await verifyOTP(data.phone, data.otp);
-      if (!ver.success) {
-        return res.status(400).json({ success: false, message: ver.message });
-      }
-    }
-
-    let formattedWorkingHours = '09:00 AM - 06:00 PM';
-    if (data.workingHours) {
-      if (typeof data.workingHours === 'object' && data.workingHours.start && data.workingHours.end) {
-        formattedWorkingHours = `${data.workingHours.start} - ${data.workingHours.end}`;
-      } else if (typeof data.workingHours === 'string') {
-        formattedWorkingHours = data.workingHours;
-      }
-    }
-
-    // Create Vendor
-    const vendor = await Vendor.create({
-      name: data.ownerName || data.name,
-      email: data.email,
-      phone: data.mobile || data.phone,
-      password: data.password,
-      partnerMode: data.partnerMode,
-      businessType: data.businessType,
-      vendorType: data.businessType, // Maintain compatibility
-      businessName: data.companyName,
-      categories: data.categoryIds,
-      subServiceIds: data.subServiceIds,
-      operatingCities: [data.workingCity],
-      workingCities: [data.workingCity],
-      serviceRadiusKm: data.serviceRadiusKm,
-      address: {
-        fullAddress: data.officeAddress,
-        city: data.city,
-        state: data.state,
-        pincode: data.pincode,
-        landmark: data.landmark,
-        lat: data.latitude,
-        lng: data.longitude
-      },
-      geoLocation: {
-        type: 'Point',
-        coordinates: [data.longitude || 0, data.latitude || 0]
-      },
-      companyDescription: data.companyDescription,
-      website: data.website,
-      gstin: data.gstNumber,
-      pan: { number: data.panNumber, document: data.panUrl },
-      teamSize: (data.totalWorkers || 0) + (data.totalEngineers || 0),
-      totalWorkers: data.totalWorkers || 0,
-      totalEngineers: data.totalEngineers || 0,
-      workingDays: data.workingDays,
-      workingHours: formattedWorkingHours,
-      emergencyServiceAvailable: data.emergencyServiceAvailable || false,
-      available24x7: data.available24x7 || false,
-      profilePhoto: data.companyLogo,
-      approvalStatus: 'pending',
-      kycStatus: 'pending',
-      inductionStatus: 'pending',
-      kitDispatchStatus: 'pending',
-      bankStatus: data.bankStatus || 'pending',
-      paymentStatus: data.paymentStatus || 'skipped',
-      isPhoneVerified: true
+    // Also update vendor step tracking
+    await Vendor.findByIdAndUpdate(vendorId, {
+      $set: { 'onboarding.currentStep': 4 },
+      $addToSet: { 'onboarding.completedSteps': 3 }
     });
 
-    // Create KYC
-    await VendorKYC.create({
-      vendorId: vendor._id,
-      aadhaarUrl: data.aadhaarUrl,
-      panUrl: data.panUrl,
-      gstCertificateUrl: data.gstCertificateUrl,
-      ownerSelfieUrl: data.ownerSelfieUrl,
-      companyPhotoUrl: data.companyLogo
-    });
-
-    // Create Bank
-    if (data.accountNumber) {
-      await VendorBank.create({
-        vendorId: vendor._id,
-        accountHolderName: data.accountHolderName,
-        accountNumberEncrypted: data.accountNumber, // Mock encryption
-        accountNumberMasked: '****' + data.accountNumber.slice(-4),
-        ifsc: data.ifscCode,
-        upiId: data.upiId
-      });
-    }
-
-    // Create Payment if joined
-    if (data.paymentId) {
-      await VendorPayment.create({
-        vendorId: vendor._id,
-        type: 'joining_fee',
-        amount: data.joiningFeeAmount,
-        finalAmount: data.joiningFeeAmount,
-        razorpayPaymentId: data.paymentId,
-        status: 'paid',
-        paidAt: new Date()
-      });
-    }
-
-    res.status(201).json({ success: true, message: 'Registration submitted successfully', vendorId: vendor._id });
+    res.status(200).json({ success: true, message: 'One-Time capabilities updated' });
   } catch (error) {
-    console.error('Submit Registration Error:', error);
-    if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern || {})[0] || 'field';
-      return res.status(400).json({
-        success: false,
-        message: `Registration failed: A vendor with this ${field} is already registered.`
-      });
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateProjectCapability = async (req, res) => {
+  try {
+    const vendorId = req.user?.id || req.body.vendorId;
+    const { projectCoverage, capacity, experience, workingModel } = req.body;
+
+    await VendorCapability.findOneAndUpdate(
+      { vendorId },
+      { $set: { 
+          'project.projectCoverage': projectCoverage, 
+          'project.capacity': capacity,
+          'project.experience': experience,
+          'project.workingModel': workingModel
+      } },
+      { upsert: true, new: true }
+    );
+    
+    await Vendor.findByIdAndUpdate(vendorId, {
+      $set: { 'onboarding.currentStep': 5 },
+      $addToSet: { 'onboarding.completedSteps': 4 }
+    });
+
+    res.status(200).json({ success: true, message: 'Project capabilities updated' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const addPortfolio = async (req, res) => {
+  try {
+    const vendorId = req.user?.id || req.body.vendorId;
+    const projects = req.body.projects || []; // Array of project objects
+    
+    // For simplicity, we clear and recreate, or we can insert many. Let's do a replace-all for draft flow.
+    await VendorProjectPortfolio.deleteMany({ vendorId });
+    if (projects.length > 0) {
+      const docs = projects.map(p => ({ ...p, vendorId }));
+      await VendorProjectPortfolio.insertMany(docs);
     }
-    if (error.name === 'ValidationError') {
-      const msg = Object.values(error.errors).map(val => val.message).join(', ');
-      return res.status(400).json({
-        success: false,
-        message: `Validation Error: ${msg}`
-      });
+    
+    await Vendor.findByIdAndUpdate(vendorId, {
+      $addToSet: { 'onboarding.completedSteps': 5 }
+    });
+
+    res.status(200).json({ success: true, message: 'Portfolio updated' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getDocumentRequirements = async (req, res) => {
+  try {
+    const vendorId = req.user?.id || req.query.vendorId;
+    const vendor = await Vendor.findById(vendorId);
+    
+    // Dynamic logic based on vendor models and business type
+    const requirements = ['PAN', 'BANK_STATEMENT'];
+    if (vendor.incorporationType !== 'Proprietorship') requirements.push('COMPANY_REGISTRATION');
+    if (vendor.vendorModels.includes('PROJECT')) {
+      requirements.push('GST', 'ITR', 'BALANCE_SHEET', 'PF_ESI_DECLARATION');
     }
-    res.status(500).json({ success: false, message: 'Failed to submit registration: ' + error.message });
+    
+    res.status(200).json({ success: true, requirements });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const submitApplication = async (req, res) => {
+  try {
+    const { vendorId } = req.body;
+    let vendor;
+    
+    if (req.user?.id || (vendorId && vendorId !== 'draft_mode_validation')) {
+      const id = req.user?.id || vendorId;
+      vendor = await Vendor.findById(id);
+      if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    } else {
+      const {
+        ownerName, mobile, email, password, companyName, gstin, panNumber,
+        models, incorporationType, officeAddress, city, state, pincode,
+        oneTimeServices, projectServices, dailyCapacity, totalWorkers,
+        serviceRadiusKm, maxProjectValue, totalEngineers, projectCoverageType,
+        portfolioTitle, portfolioClient, portfolioValue,
+        panUrl, gstUrl, companyRegUrl, chequeUrl, pfDocumentUrl, esiDocumentUrl, workOrderUrl, digitalSLAAccepted,
+        accountHolderName, accountNumber, ifscCode, upiId,
+        workingCity, latitude, longitude, bankStatus, aadhaarVerified
+      } = req.body;
+
+      if (!ownerName || !mobile) {
+         return res.status(400).json({ success: false, message: 'Owner name and mobile are required' });
+      }
+
+      // Check for existing vendor by phone or email to prevent E11000 errors
+      vendor = await Vendor.findOne({ $or: [{ phone: mobile }, { email: email && email !== '' ? email : 'NON_EXISTENT_EMAIL_DUMMY' }] });
+      
+      if (!vendor) {
+        vendor = new Vendor({ phone: mobile });
+      }
+
+      vendor.name = ownerName;
+      vendor.email = email || null;
+      vendor.businessName = companyName;
+      vendor.gstin = gstin;
+      vendor.pan = { number: panNumber, document: panUrl };
+      vendor.incorporationType = incorporationType || 'Proprietorship';
+      vendor.address = { fullAddress: officeAddress, city, state, pincode, lat: latitude, lng: longitude };
+      vendor.vendorModels = models || [];
+      vendor.workingCities = workingCity ? [workingCity] : [];
+      vendor.serviceRadiusKm = serviceRadiusKm || 10;
+      if (bankStatus === 'verified') vendor.bankStatus = 'verified';
+      if (aadhaarVerified) vendor.kycStatus = 'verified';
+
+      vendor.pfDocument = pfDocumentUrl || null;
+      vendor.esiDocument = esiDocumentUrl || null;
+      vendor.digitalSLAAccepted = !!digitalSLAAccepted;
+      vendor.otherDocuments = [gstUrl, companyRegUrl, chequeUrl, workOrderUrl].filter(Boolean);
+
+      if (password) {
+        // DO NOT manually hash the password here, as VendorSchema.pre('save') will hash it automatically!
+        vendor.password = password;
+      }
+      
+      // Basic init
+      vendor.onboarding = { status: 'SUBMITTED', progressPercentage: 100 };
+      await vendor.save();
+      
+      // Upsert Bank Details
+      if (accountNumber && ifscCode) {
+        await VendorBank.findOneAndUpdate(
+          { vendorId: vendor._id },
+          {
+            accountHolderName: accountHolderName || ownerName,
+            accountNumberEncrypted: accountNumber,
+            accountNumberMasked: '****' + accountNumber.slice(-4),
+            ifsc: ifscCode,
+            upiId: upiId
+          },
+          { upsert: true }
+        );
+      }
+
+      // Upsert Capabilities
+      if (models?.includes('ONE_TIME') && oneTimeServices?.length) {
+        await VendorCapability.findOneAndUpdate(
+          { vendorId: vendor._id },
+          {
+            $set: {
+              'oneTime.dailyCapacity.maxJobsPerDay': dailyCapacity || 5
+            }
+          },
+          { upsert: true }
+        );
+      }
+
+      if (models?.includes('PROJECT') && projectServices?.length) {
+        const parseValue = (val) => {
+          if (!val) return 0;
+          const str = String(val).toUpperCase();
+          const num = parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
+          if (str.includes('CR')) return num * 10000000;
+          if (str.includes('L')) return num * 100000;
+          if (str.includes('K')) return num * 1000;
+          return num;
+        };
+
+        await VendorCapability.findOneAndUpdate(
+          { vendorId: vendor._id },
+          {
+            $set: {
+              'project.capacity.maxProjectValueHandled': parseValue(maxProjectValue),
+              'project.capacity.maxSimultaneousProjects': 1
+            }
+          },
+          { upsert: true }
+        );
+        
+        if (portfolioTitle) {
+          await VendorProjectPortfolio.findOneAndUpdate(
+            { vendorId: vendor._id, projectName: portfolioTitle },
+            {
+              $set: {
+                clientName: portfolioClient,
+                projectValue: parseValue(portfolioValue),
+                'documents.workOrderUrl': workOrderUrl
+              }
+            },
+            { upsert: true }
+          );
+        }
+      }
+    }
+    
+    vendor.onboarding.status = 'SUBMITTED';
+    vendor.onboarding.progressPercentage = 100;
+    
+    await vendor.save();
+    
+    // Initialize model approvals to PENDING
+    if (vendor.vendorModels && vendor.vendorModels.length > 0) {
+      for (const model of vendor.vendorModels) {
+        await VendorModelApproval.findOneAndUpdate(
+          { vendorId: vendor._id, model },
+          { status: 'PENDING' },
+          { upsert: true }
+        );
+      }
+    }
+    
+    res.status(200).json({ success: true, message: 'Application submitted successfully', vendorId: vendor._id });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -218,40 +362,57 @@ const verifyKyc = async (req, res) => {
 
 const verifyBankPennyDrop = async (req, res) => {
   try {
-    const { vendorId, bankName, accountNumber, ifsc, upiId } = req.body;
-    const vendor = await Vendor.findById(vendorId);
-    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    const { vendorId, bankName, accountNumber, ifsc, upiId, ownerName, companyName } = req.body;
+    
+    let targetName1 = 'Vendor Partner';
+    let targetName2 = '';
+    let vendor = null;
 
-    // Calculate name match score
-    const targetName = vendor.name || 'Vendor Partner';
-    const matchScore = getFuzzyMatchScore(targetName, bankName);
+    if (vendorId && vendorId !== 'draft_mode_validation') {
+      vendor = await Vendor.findById(vendorId);
+      if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+      targetName1 = vendor.name || 'Vendor Partner';
+      targetName2 = vendor.businessName || '';
+    } else {
+      targetName1 = ownerName || 'Vendor Partner';
+      targetName2 = companyName || '';
+    }
 
-    if (matchScore < 90) {
+    // Calculate name match score against both owner name and company name
+    const matchScore1 = getFuzzyMatchScore(targetName1, bankName);
+    const matchScore2 = targetName2 ? getFuzzyMatchScore(targetName2, bankName) : 0;
+    
+    const bestScore = Math.max(matchScore1, matchScore2);
+    const matchedWith = bestScore === matchScore1 ? targetName1 : targetName2;
+
+    if (bestScore < 80) {
       return res.status(400).json({
         success: false,
-        message: `Penny Drop failed: Account holder name "${bankName}" does not match Aadhaar/Legal name "${targetName}" (${matchScore}% match, required >= 90%).`
+        message: `Penny Drop failed: Account holder name "${bankName}" does not match Legal/Company name (Best match: ${bestScore}%, required >= 80%).`
       });
     }
 
-    vendor.bankStatus = 'verified';
-    await vendor.save();
+    if (vendor) {
+      vendor.bankStatus = 'verified';
+      await vendor.save();
 
-    // Create Bank record
-    await VendorBank.findOneAndUpdate(
-      { vendorId: vendor._id },
-      {
-        accountHolderName: bankName,
-        accountNumberEncrypted: accountNumber,
-        accountNumberMasked: '****' + accountNumber.slice(-4),
-        ifsc,
-        upiId
-      },
-      { upsert: true }
-    );
+      // Create Bank record
+      await VendorBank.findOneAndUpdate(
+        { vendorId: vendor._id },
+        {
+          accountHolderName: bankName,
+          accountNumberEncrypted: accountNumber,
+          accountNumberMasked: '****' + accountNumber.slice(-4),
+          ifsc,
+          upiId
+        },
+        { upsert: true }
+      );
+    }
 
     res.status(200).json({
       success: true,
-      message: `Penny drop verification successful! Legal name matched with ${matchScore}% score.`
+      message: `Penny drop verification successful! Legal name matched with ${bestScore}% score.`
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -292,9 +453,13 @@ const activateAccount = async (req, res) => {
 
 module.exports = {
   getConfig,
-  createDraft,
-  updateDraft,
-  submitRegistration,
+  updateBusinessDetails,
+  updateModels,
+  updateOneTimeCapability,
+  updateProjectCapability,
+  addPortfolio,
+  getDocumentRequirements,
+  submitApplication,
   verifyKyc,
   verifyBankPennyDrop,
   completeInduction,

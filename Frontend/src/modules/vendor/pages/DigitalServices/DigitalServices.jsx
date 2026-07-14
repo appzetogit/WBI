@@ -3,35 +3,36 @@ import {
   FiSearch, FiFilter, FiGrid, FiList, FiPlus, FiDownload,
   FiCode, FiSmartphone, FiDatabase, FiTrendingUp, FiFigma, FiTool, FiCloud, FiMoreHorizontal,
   FiEye, FiEdit2, FiCopy, FiTrash2, FiStar, FiChevronLeft, FiChevronRight,
-  FiBox, FiCheckSquare, FiDollarSign, FiShoppingBag, FiArrowUpRight, FiArrowDownRight
+  FiBox, FiCheckSquare, FiDollarSign, FiShoppingBag, FiArrowUpRight, FiArrowDownRight, FiPieChart
 } from 'react-icons/fi';
-import api from '../../../../services/api';
+import vendorOfferingService from '../../services/vendorOfferingService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-
+import AddServiceModal from './components/AddServiceModal'; // We will create this next
 const iconMap = {
-  FiCode: <FiCode />,
-  FiSmartphone: <FiSmartphone />,
-  FiDatabase: <FiDatabase />,
-  FiTrendingUp: <FiTrendingUp />,
-  FiFigma: <FiFigma />,
-  FiTool: <FiTool />,
-  FiCloud: <FiCloud />,
-  FiMoreHorizontal: <FiMoreHorizontal />
+  'web-dev': <FiCode />,
+  'app-dev': <FiSmartphone />,
+  'database': <FiDatabase />,
+  'marketing': <FiTrendingUp />,
+  'design': <FiFigma />,
+  'maintenance': <FiTool />,
+  'cloud': <FiCloud />
 };
 
 export default function DigitalServices() {
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState(null);
   const [services, setServices] = useState([]);
-  const [recentOrders, setRecentOrders] = useState([]);
+  const recentOrders = []; // Mocked for now since backend doesn't support it yet
   const [categoriesConfig, setCategoriesConfig] = useState([]);
-  const [statusesConfig, setStatusesConfig] = useState([]);
+  const [vendorModels, setVendorModels] = useState([]);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   
   // Filters & State
   const [activeTab, setActiveTab] = useState('All Services');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [categoryFilter, setCategoryFilter] = useState('All Categories');
+  const [executionModelFilter, setExecutionModelFilter] = useState('All Models');
   const [viewMode, setViewMode] = useState('grid');
   const [page, setPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(8);
@@ -39,19 +40,19 @@ export default function DigitalServices() {
 
   const fetchOverview = async () => {
     try {
-      const res = await api.get('/vendors/digital-services/overview');
-      if(res.data.success) {
-        setOverview(res.data.data);
+      const res = await vendorOfferingService.getServiceSummary();
+      if(res.success) {
+        setOverview(res.data);
       }
     } catch(err) { console.error('Error fetching overview', err); }
   };
 
   const fetchConfig = async () => {
     try {
-      const res = await api.get('/vendors/digital-services/config');
-      if(res.data.success) {
-        setCategoriesConfig(res.data.data.categories);
-        setStatusesConfig(res.data.data.statuses);
+      const res = await vendorOfferingService.getServiceOptions({});
+      if(res.success) {
+        setCategoriesConfig(res.data.categories);
+        setVendorModels(res.data.vendorModels || []);
       }
     } catch(err) { console.error('Error fetching config', err); }
   };
@@ -59,50 +60,37 @@ export default function DigitalServices() {
   const fetchServices = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/vendors/digital-services', {
-        params: { 
-          page, 
-          limit: itemsPerPage, 
-          search, 
-          category: activeTab !== 'All Services' ? activeTab : (categoryFilter !== 'All Categories' ? categoryFilter : ''), 
-          status: statusFilter 
-        }
-      });
-      if(res.data.success) {
-        setServices(res.data.data);
-        setTotalPages(res.data.pagination.pages);
+      const params = {
+        page, 
+        limit: itemsPerPage, 
+        search
+      };
+      
+      const catFilter = activeTab !== 'All Services' ? activeTab : (categoryFilter !== 'All Categories' ? categoryFilter : '');
+      if (catFilter) {
+        const catObj = categoriesConfig.find(c => c.name === catFilter);
+        if (catObj) params.category = catObj._id;
+      }
+      if (statusFilter !== 'All Status') params.status = statusFilter;
+      if (executionModelFilter !== 'All Models') params.executionModel = executionModelFilter;
+
+      const res = await vendorOfferingService.getServiceOfferings(params);
+      if(res.success) {
+        setServices(res.data.items);
+        setTotalPages(res.data.pagination.totalPages);
       }
     } catch(err) { console.error('Error fetching services', err); }
     finally { setLoading(false); }
   };
 
-  const fetchOrders = async () => {
-    try {
-      const res = await api.get('/vendors/digital-services/orders/recent');
-      if(res.data.success) {
-        setRecentOrders(res.data.data);
-      }
-    } catch(err) { console.error('Error fetching orders', err); }
-  };
-
   useEffect(() => {
     fetchConfig();
     fetchOverview();
-    fetchOrders();
-
-    const socket = io(import.meta.env.VITE_SOCKET_URL || 'https://app.wbinfs.com', {
-      auth: { token: localStorage.getItem('vendorAccessToken') || sessionStorage.getItem('vendorAccessToken') }
-    });
-
-    socket.on('digital_service:created', () => { fetchServices(); fetchOverview(); });
-    socket.on('digital_service:updated', () => { fetchServices(); fetchOverview(); });
-    
-    return () => socket.disconnect();
   }, []);
 
   useEffect(() => {
     fetchServices();
-  }, [page, activeTab, search, statusFilter, categoryFilter, itemsPerPage]);
+  }, [page, activeTab, search, statusFilter, categoryFilter, executionModelFilter, itemsPerPage, categoriesConfig]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
@@ -132,7 +120,10 @@ export default function DigitalServices() {
           <button className="flex items-center px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 shadow-sm transition-all">
             <FiDownload className="mr-2" /> Export Services
           </button>
-          <button className="flex items-center px-4 py-2.5 bg-[#00a78e] text-white rounded-lg text-sm font-semibold hover:bg-[#008f79] shadow-sm transition-all">
+          <button 
+            onClick={() => setIsAddModalOpen(true)}
+            className="flex items-center px-4 py-2.5 bg-[#00a78e] text-white rounded-lg text-sm font-semibold hover:bg-[#008f79] shadow-sm transition-all"
+          >
             <FiPlus className="mr-2" /> Add New Service
           </button>
         </div>
@@ -141,11 +132,11 @@ export default function DigitalServices() {
       {/* Top Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-5">
         {[
-          { label: 'Total Services', value: overview?.stats?.totalServices || 0, icon: <FiBox className="text-[#8b5cf6]" />, bg: 'bg-[#8b5cf6]/10', growth: overview?.stats?.growth?.totalServices },
-          { label: 'Active Services', value: overview?.stats?.activeServices || 0, icon: <FiCheckSquare className="text-[#10b981]" />, bg: 'bg-[#10b981]/10', growth: overview?.stats?.growth?.activeServices },
-          { label: 'Featured Services', value: overview?.stats?.featuredServices || 0, icon: <FiStar className="text-[#f59e0b]" />, bg: 'bg-[#f59e0b]/10', growth: overview?.stats?.growth?.featuredServices },
-          { label: 'Total Orders', value: overview?.stats?.totalOrders || 0, icon: <FiShoppingBag className="text-[#3b82f6]" />, bg: 'bg-[#3b82f6]/10', growth: overview?.stats?.growth?.totalOrders },
-          { label: 'Total Revenue', value: formatCurrency(overview?.stats?.totalRevenue || 0), icon: <FiDollarSign className="text-[#00a78e]" />, bg: 'bg-[#00a78e]/10', growth: overview?.stats?.growth?.totalRevenue }
+          { label: 'Total Services', value: overview?.totalServices || 0, icon: <FiBox className="text-[#8b5cf6]" />, bg: 'bg-[#8b5cf6]/10' },
+          { label: 'Active Services', value: overview?.activeServices || 0, icon: <FiCheckSquare className="text-[#10b981]" />, bg: 'bg-[#10b981]/10' },
+          { label: 'Featured Services', value: overview?.featuredServices || 0, icon: <FiStar className="text-[#f59e0b]" />, bg: 'bg-[#f59e0b]/10' },
+          { label: 'Total Orders', value: overview?.totalOrders || 0, icon: <FiShoppingBag className="text-[#3b82f6]" />, bg: 'bg-[#3b82f6]/10' },
+          { label: 'Total Revenue', value: formatCurrency(overview?.totalRevenue || 0), icon: <FiDollarSign className="text-[#00a78e]" />, bg: 'bg-[#00a78e]/10' }
         ].map((stat, i) => (
           <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-slate-200 flex items-start space-x-4 hover:shadow-md transition-shadow duration-200">
             <div className={`p-3.5 rounded-xl ${stat.bg} text-2xl shrink-0`}>
@@ -154,7 +145,6 @@ export default function DigitalServices() {
             <div>
               <p className="text-[13px] font-medium text-slate-500 mb-0.5">{stat.label}</p>
               <p className="text-2xl font-bold text-[#0f172a]">{stat.value}</p>
-              {renderGrowth(stat.growth)}
             </div>
           </div>
         ))}
@@ -214,7 +204,11 @@ export default function DigitalServices() {
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
               <option value="All Status">All Status</option>
-              {statusesConfig.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value="DRAFT">Draft</option>
+              <option value="PENDING_APPROVAL">Pending Approval</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="REJECTED">Rejected</option>
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -273,19 +267,19 @@ export default function DigitalServices() {
                     </div>
                     
                     <div className="mt-6">
-                      <p className="text-[13px] text-slate-500 mb-4">Starting from <span className="text-[#0f172a] font-bold text-lg ml-1">{service.isCustomPricing ? 'Custom' : formatCurrency(service.basePrice)}</span></p>
+                      <p className="text-[13px] text-slate-500 mb-4">Starting from <span className="text-[#0f172a] font-bold text-lg ml-1">{service.pricing?.basePrice ? formatCurrency(service.pricing.basePrice) : 'Custom'}</span></p>
                       <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-4">
                         <div>
                           <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1">Orders</p>
-                          <p className="font-bold text-[#0f172a]">{service.totalOrders}</p>
+                          <p className="font-bold text-[#0f172a]">{service.totalOrders || 0}</p>
                         </div>
                         <div>
                           <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1">Rating</p>
-                          <p className="font-bold text-[#0f172a] flex items-center"><FiStar className="text-[#f59e0b] mr-1.5 w-3.5 h-3.5 fill-current"/> {service.rating}</p>
+                          <p className="font-bold text-[#0f172a] flex items-center"><FiStar className="text-[#f59e0b] mr-1.5 w-3.5 h-3.5 fill-current"/> {service.rating || 'N/A'}</p>
                         </div>
                         <div>
                           <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1">Revenue</p>
-                          <p className="font-bold text-[#0f172a]">{formatCurrency(service.totalRevenue)}</p>
+                          <p className="font-bold text-[#0f172a]">{formatCurrency(service.totalRevenue || 0)}</p>
                         </div>
                       </div>
                     </div>
@@ -331,7 +325,7 @@ export default function DigitalServices() {
                             <div>
                               <p className="font-bold text-[#0f172a] text-[14px] leading-tight mb-1 truncate max-w-[250px]" title={service.title}>{service.title}</p>
                               <div className="flex items-center text-[12px] font-medium text-slate-500">
-                                <FiStar className="text-[#f59e0b] mr-1 w-3 h-3 fill-current"/> {service.rating} Rating
+                                <FiStar className="text-[#f59e0b] mr-1 w-3 h-3 fill-current"/> {service.rating || 'N/A'} Rating
                               </div>
                             </div>
                           </div>
@@ -342,13 +336,13 @@ export default function DigitalServices() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-[14px] font-bold text-[#0f172a]">
-                          {service.isCustomPricing ? 'Custom' : formatCurrency(service.basePrice)}
+                          {service.pricing?.basePrice ? formatCurrency(service.pricing.basePrice) : 'Custom'}
                         </td>
                         <td className="px-6 py-4 text-[14px] font-bold text-slate-700 text-center">
-                          {service.totalOrders}
+                          {service.totalOrders || 0}
                         </td>
                         <td className="px-6 py-4 text-[14px] font-bold text-[#0f172a] text-right">
-                          {formatCurrency(service.totalRevenue)}
+                          {formatCurrency(service.totalRevenue || 0)}
                         </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex justify-center items-center">
@@ -409,120 +403,155 @@ export default function DigitalServices() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6">
         
         {/* Top Performing Services */}
-        <div className="bg-white rounded-2xl shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-200 p-6 flex flex-col h-[400px]">
+        <div className="bg-white rounded-2xl shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-200 p-6 flex flex-col h-[400px] relative overflow-hidden group">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
           <h3 className="font-bold text-[17px] text-[#0f172a] mb-6">Top Performing Services</h3>
-          <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
-            <div className="flex justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400 pb-3 border-b border-slate-100 mb-4">
-              <span className="w-[45%]">Service Name</span>
-              <span className="w-[15%] text-center">Orders</span>
-              <span className="w-[25%] text-right">Revenue</span>
-              <span className="w-[15%] text-right">Rating</span>
+          
+          {!overview?.topPerforming || overview?.topPerforming?.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center pb-4">
+              <div className="w-16 h-16 bg-blue-50 text-blue-200 rounded-full flex items-center justify-center mb-4 border border-blue-100">
+                <FiStar className="w-7 h-7" />
+              </div>
+              <p className="text-sm font-bold text-slate-700 mb-1">No Top Performers Yet</p>
+              <p className="text-xs text-slate-400 max-w-[200px]">Once your services get orders and ratings, your top performers will appear here.</p>
             </div>
-            <div className="space-y-5">
-              {overview?.topPerforming?.map((ts, idx) => (
-                <div key={idx} className="flex justify-between items-center">
-                  <div className="w-[45%] flex items-center space-x-3">
-                    <span className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 text-slate-500 text-sm">
-                      {iconMap[ts.iconUrl] || <FiBox />}
+          ) : (
+            <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
+              <div className="flex justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400 pb-3 border-b border-slate-100 mb-4">
+                <span className="w-[45%]">Service Name</span>
+                <span className="w-[15%] text-center">Orders</span>
+                <span className="w-[25%] text-right">Revenue</span>
+                <span className="w-[15%] text-right">Rating</span>
+              </div>
+              <div className="space-y-5">
+                {overview?.topPerforming?.map((ts, idx) => (
+                  <div key={idx} className="flex justify-between items-center group-hover:bg-slate-50 transition-colors p-2 -mx-2 rounded-lg">
+                    <div className="w-[45%] flex items-center space-x-3">
+                      <span className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center shrink-0 text-slate-500 text-sm shadow-sm">
+                        {iconMap[ts.iconUrl] || <FiBox />}
+                      </span>
+                      <span className="text-[13px] font-semibold text-slate-700 truncate" title={ts.title}>{ts.title}</span>
+                    </div>
+                    <span className="w-[15%] text-center text-[13px] font-bold text-slate-700">{ts.totalOrders || 0}</span>
+                    <span className="w-[25%] text-right text-[13px] font-bold text-slate-700">{formatCurrency(ts.totalRevenue || 0)}</span>
+                    <span className="w-[15%] text-right flex items-center justify-end text-[13px] font-bold text-slate-700">
+                      <FiStar className="text-[#f59e0b] mr-1 w-3.5 h-3.5 fill-current"/> {ts.rating || 'N/A'}
                     </span>
-                    <span className="text-[13px] font-semibold text-slate-700 truncate" title={ts.title}>{ts.title}</span>
                   </div>
-                  <span className="w-[15%] text-center text-[13px] font-bold text-slate-700">{ts.totalOrders}</span>
-                  <span className="w-[25%] text-right text-[13px] font-bold text-slate-700">{formatCurrency(ts.totalRevenue)}</span>
-                  <span className="w-[15%] text-right flex items-center justify-end text-[13px] font-bold text-slate-700">
-                    <FiStar className="text-[#f59e0b] mr-1.5 w-3.5 h-3.5 fill-current"/> {ts.rating}
-                  </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Service Categories Chart */}
-        <div className="bg-white rounded-2xl shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-200 p-6 flex flex-col h-[400px]">
+        <div className="bg-white rounded-2xl shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-200 p-6 flex flex-col h-[400px] relative overflow-hidden group">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
           <h3 className="font-bold text-[17px] text-[#0f172a] mb-6">Service Categories</h3>
-          <div className="flex items-center flex-1">
-            <div className="w-[45%] h-full relative flex items-center justify-center">
-              <div className="w-full h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie 
-                      data={overview?.categoryDistribution || []} 
-                      cx="50%" cy="50%" 
-                      innerRadius={55} outerRadius={80} 
-                      paddingAngle={3} 
-                      dataKey="value"
-                      stroke="none"
-                    >
-                      {overview?.categoryDistribution?.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color || '#00a78e'} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }} />
-                  </PieChart>
-                </ResponsiveContainer>
+          
+          {!overview?.categoryDistribution || overview?.categoryDistribution?.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center pb-4">
+              <div className="w-16 h-16 bg-emerald-50 text-emerald-200 rounded-full flex items-center justify-center mb-4 border border-emerald-100">
+                <FiPieChart className="w-7 h-7" />
               </div>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-3xl font-bold text-[#0f172a] leading-none">{overview?.stats?.totalServices || 0}</span>
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-1">Total</span>
+              <p className="text-sm font-bold text-slate-700 mb-1">No Categories Charted</p>
+              <p className="text-xs text-slate-400 max-w-[200px]">Add multiple services to see a beautiful breakdown of your offerings.</p>
+            </div>
+          ) : (
+            <div className="flex items-center flex-1">
+              <div className="w-[45%] h-full relative flex items-center justify-center">
+                <div className="w-full h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie 
+                        data={overview?.categoryDistribution || []} 
+                        cx="50%" cy="50%" 
+                        innerRadius={55} outerRadius={80} 
+                        paddingAngle={3} 
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {overview?.categoryDistribution?.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color || '#00a78e'} />
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-white/40 rounded-full">
+                  <span className="text-3xl font-bold text-[#0f172a] leading-none">{overview?.totalServices || 0}</span>
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-1">Total</span>
+                </div>
+              </div>
+              <div className="w-[55%] pl-6">
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
+                  {overview?.categoryDistribution?.map((cat, idx) => (
+                    <div key={idx} className="flex justify-between items-center group/cat hover:bg-slate-50 p-1.5 -mx-1.5 rounded-md transition-colors">
+                      <div className="flex items-center truncate pr-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0 mr-3 shadow-sm" style={{ backgroundColor: cat.color }}></span>
+                        <span className="text-[12px] font-semibold text-slate-600 truncate group-hover/cat:text-slate-800 transition-colors">{cat.name}</span>
+                      </div>
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <span className="text-[13px] font-bold text-slate-700">{cat.value}</span>
+                        <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded w-10 text-center">{cat.percentage}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-            <div className="w-[55%] pl-6">
-              <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-2 no-scrollbar">
-                {overview?.categoryDistribution?.map((cat, idx) => (
-                  <div key={idx} className="flex justify-between items-center group">
-                    <div className="flex items-center truncate pr-2">
-                      <span className="w-2.5 h-2.5 rounded-full shrink-0 mr-3 shadow-sm" style={{ backgroundColor: cat.color }}></span>
-                      <span className="text-[12px] font-semibold text-slate-600 truncate group-hover:text-slate-800 transition-colors">{cat.name}</span>
+          )}
+        </div>
+
+        {/* Recent Service Orders */}
+        <div className="bg-white rounded-2xl shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-200 p-6 flex flex-col h-[400px] relative overflow-hidden group">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-pink-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="font-bold text-[17px] text-[#0f172a]">Recent Service Orders</h3>
+            <button className="text-[12px] font-bold text-[#00a78e] hover:text-[#008f79] transition-colors bg-[#00a78e]/5 px-3 py-1.5 rounded-md">View All</button>
+          </div>
+          
+          {!recentOrders || recentOrders.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center pb-4">
+              <div className="w-16 h-16 bg-orange-50 text-orange-200 rounded-full flex items-center justify-center mb-4 border border-orange-100">
+                <FiShoppingBag className="w-7 h-7" />
+              </div>
+              <p className="text-sm font-bold text-slate-700 mb-1">No Recent Orders</p>
+              <p className="text-xs text-slate-400 max-w-[200px]">When clients purchase your services, the most recent orders will appear here.</p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
+              <div className="space-y-4">
+                {recentOrders.map((order, idx) => (
+                  <div key={idx} className="flex items-center space-x-4 p-3 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                      <FiShoppingBag className="text-slate-400" />
                     </div>
-                    <div className="flex items-center space-x-2 shrink-0">
-                      <span className="text-[13px] font-bold text-slate-700">{cat.value}</span>
-                      <span className="text-[11px] font-medium text-slate-400 w-10 text-right">({cat.percentage}%)</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-bold text-[#0f172a] truncate">{order.serviceName}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{order.clientName}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[13px] font-bold text-[#0f172a]">{formatCurrency(order.amount)}</p>
+                      <p className="text-[10px] font-semibold text-slate-400">{order.date}</p>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
+          )}
         </div>
-
-        {/* Recent Service Orders */}
-        <div className="bg-white rounded-2xl shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-200 p-6 flex flex-col h-[400px]">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-[17px] text-[#0f172a]">Recent Service Orders</h3>
-            <button className="text-[12px] font-bold text-[#00a78e] hover:text-[#008f79] transition-colors">View All Orders</button>
-          </div>
-          <div className="flex-1 overflow-y-auto pr-2 no-scrollbar">
-            <div className="space-y-5">
-              {recentOrders.map((order, idx) => (
-                <div key={idx} className="flex justify-between items-center">
-                  <div className="flex items-center space-x-3 w-[50%]">
-                    <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 text-slate-500">
-                      <FiBox className="w-4 h-4" />
-                    </div>
-                    <div className="truncate">
-                      <p className="text-[13px] font-bold text-slate-700 truncate" title={order.serviceId?.title || 'Custom Service'}>{order.serviceId?.title || 'Custom Service'}</p>
-                      <p className="text-[11px] font-semibold text-slate-400 truncate">{order.customerName}</p>
-                    </div>
-                  </div>
-                  <div className="w-[25%] text-[13px] font-bold text-slate-700 text-center">
-                    {formatCurrency(order.amount)}
-                  </div>
-                  <div className="w-[25%] flex justify-end">
-                    <span className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md 
-                      ${order.status === 'Completed' ? 'bg-[#10b981]/10 text-[#10b981]' : 
-                        order.status === 'In Progress' ? 'bg-[#3b82f6]/10 text-[#3b82f6]' : 
-                        order.status === 'New' || order.status === 'Pending' ? 'bg-[#f59e0b]/10 text-[#f59e0b]' : 'bg-slate-100 text-slate-600'}`}>
-                      {order.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
       </div>
+
+      {/* Modals */}
+      <AddServiceModal 
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        categoriesConfig={categoriesConfig}
+        vendorModels={vendorModels}
+        onSuccess={fetchServices}
+      />
     </div>
   );
 }
