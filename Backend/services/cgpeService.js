@@ -53,7 +53,6 @@ class CgpeService {
       return response.data;
     } catch (error) {
       if (error.response?.status === 404) {
-        console.warn(`[CGPE_SERVICE_WARNING] Live endpoint '${endpoint}' not found (404). Falling back to strict sandbox mode.`);
         return this.simulateSandboxResponse(endpoint, data);
       }
       

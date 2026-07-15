@@ -62,7 +62,7 @@ const validationResultSchema = new mongoose.Schema({
   errors: [String],
   warnings: [String],
   validatedAt: Date
-}, { _id: false });
+}, { _id: false, suppressReservedKeysWarning: true });
 
 // ─── Main Schema ──────────────────────────────────────────────────────────────
 
