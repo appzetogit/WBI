@@ -82,6 +82,33 @@ const serviceCategorySchema = new mongoose.Schema({
     enum: ['worker', 'engineer'],
     default: 'worker',
     index: true
+  },
+  categoryCode: {
+    type: String,
+    trim: true
+  },
+  color: {
+    type: String,
+    default: '#3b82f6'
+  },
+  subCategories: [{
+    subCatCode: String,
+    subCatName: String,
+    defaultMilestones: [String],
+    requiredTools: [String],
+    estimatedDays: Number,
+    defaultChecklist: [String]
+  }],
+  projectTemplates: [{
+    templateName: String,
+    phases: [String],
+    requiredCertifications: [String],
+    defaultSLADays: Number
+  }],
+  complianceRequirements: {
+    certifications: [String],
+    insuranceRequired: { type: Boolean, default: false },
+    govtApprovalRequired: { type: Boolean, default: false }
   }
 }, {
   timestamps: true

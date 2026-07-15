@@ -223,6 +223,11 @@ const sendMISEmailToCompany = async (company, date) => {
 const startMISCronScheduler = () => {
   // '29 18 * * *' = 11:59 PM IST (UTC+5:30 offset)
   cron.schedule('29 18 * * *', async () => {
+    // Skip if DB is not connected
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('[MIS Cron] Skipping — MongoDB not connected.');
+      return;
+    }
     console.log('[MIS Cron] Triggered daily MIS email job...');
     try {
       const today = new Date();

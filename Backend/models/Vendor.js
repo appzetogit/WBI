@@ -170,6 +170,29 @@ const vendorSchema = new mongoose.Schema({
   operatingCities: [{
     type: String
   }],
+  operationalCities: [{
+    type: String
+  }],
+  maxCapacity: {
+    type: Number,
+    default: 10
+  },
+  vendorTier: {
+    type: String,
+    enum: ['bronze', 'silver', 'gold', 'platinum'],
+    default: 'bronze'
+  },
+  overallRating: {
+    type: Number,
+    default: 0
+  },
+  approvedServices: [{
+    categoryCode: String,
+    categoryName: String,
+    subServices: [String],
+    approvedAt: Date,
+    status: { type: String, enum: ['active', 'suspended'], default: 'active' }
+  }],
   service: {
     type: [String], // Changed to array for multiple categories
     default: [],
@@ -228,6 +251,15 @@ const vendorSchema = new mongoose.Schema({
   esiDocument: {
     type: String, // Cloudinary URL
     default: null
+  },
+  compliance: {
+    kycStatus: { type: String, enum: ['pending', 'verified', 'rejected'], default: 'pending' },
+    panVerified: { type: Boolean, default: false },
+    gstVerified: { type: Boolean, default: false },
+    pfRegistered: { type: Boolean, default: false },
+    esiRegistered: { type: Boolean, default: false },
+    slaSignedAt: Date,
+    agreementVersion: String
   },
   approvalStatus: {
     type: String,
@@ -318,6 +350,12 @@ const vendorSchema = new mongoose.Schema({
       type: String,
       default: null
     }
+  },
+  masterWallet: {
+    balance: { type: Number, default: 0 },
+    totalEarned: { type: Number, default: 0 },
+    pendingSettlement: { type: Number, default: 0 },
+    lastWithdrawalAt: Date
   },
   isActive: {
     type: Boolean,
@@ -415,6 +453,14 @@ const vendorSchema = new mongoose.Schema({
   activeAmc: {
     type: Number,
     default: 0
+  },
+  performance: {
+    slaAdherence: { type: Number, default: 0 },
+    completionRate: { type: Number, default: 0 },
+    damageIncidents: { type: Number, default: 0 },
+    avgRating: { type: Number, default: 0 },
+    totalProjects: { type: Number, default: 0 },
+    activeProjects: { type: Number, default: 0 }
   },
   completedJobs: {
     type: Number,

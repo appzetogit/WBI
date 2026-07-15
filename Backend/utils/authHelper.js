@@ -6,7 +6,7 @@ const User = require('../models/User');
 
 const COLLECTIONS = [
   { role: 'admin', model: Admin, redirect: '/admin/dashboard' },
-  { role: 'vendor', model: Vendor, redirect: '/vendor/dashboard' },
+  { role: 'vendor', model: Vendor, redirect: '/vendor/dynamic/dashboard' },
   { role: 'engineer', model: Engineer, redirect: '/engineer/dashboard' },
   { role: 'worker', model: Worker, redirect: '/worker/dashboard' },
   { role: 'user', model: User, redirect: '/user' }

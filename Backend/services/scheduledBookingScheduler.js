@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const { BOOKING_STATUS } = require('../utils/constants');
 const { getIO } = require('../sockets');
@@ -34,6 +35,12 @@ class ScheduledBookingScheduler {
   }
 
   async processScheduledBookings() {
+    // Skip if DB is not connected
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('[ScheduledBookingScheduler] Skipping — MongoDB not connected.');
+      return;
+    }
+
     try {
       const now = new Date();
       const matchThresholdTime = new Date(now.getTime() + this.leadTimeMs);

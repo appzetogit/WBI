@@ -16,10 +16,17 @@
 
 const Booking = require('../models/Booking');
 const Vendor = require('../models/Vendor');
+const mongoose = require('mongoose');
 const { BOOKING_STATUS } = require('../utils/constants');
 const { createNotification } = require('../controllers/notificationControllers/notificationController');
 
 const Settings = require('../models/Settings');
+
+/**
+ * Guard: Only run DB queries if Mongoose is actually connected
+ * Prevents MongoServerSelectionError spam during DB outage/reconnect
+ */
+const isDbConnected = () => mongoose.connection.readyState === 1;
 
 // Wave configuration
 let WAVE_CONFIG = {
@@ -86,6 +93,12 @@ class BookingScheduler {
    * @returns {boolean} true if any booking was processed, false if idle
    */
   async processWaves() {
+    // Skip if DB is not connected — prevents MongoServerSelectionError spam
+    if (!isDbConnected()) {
+      console.warn('[BookingScheduler] Skipping wave processing — MongoDB not connected.');
+      return false;
+    }
+
     try {
       const BookingRequest = require('../models/BookingRequest');
 

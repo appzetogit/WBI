@@ -59,10 +59,10 @@ const changelogSchema = new mongoose.Schema({
 
 const validationResultSchema = new mongoose.Schema({
   passed: { type: Boolean, default: false },
-  errors: [String],
+  validationErrors: [String],   // renamed from 'errors' — Mongoose reserved keyword
   warnings: [String],
   validatedAt: Date
-}, { _id: false, suppressReservedKeysWarning: true });
+}, { _id: false });
 
 // ─── Main Schema ──────────────────────────────────────────────────────────────
 

@@ -1,31 +1,80 @@
 const mongoose = require('mongoose');
 
 /**
- * Connect to MongoDB
+ * Connect to MongoDB Atlas with production-grade retry logic and TLS support
  */
 const connectDB = async () => {
   const primaryUri = process.env.MONGODB_URI;
-  
-  // Disable query buffering globally to avoid memory exhaustion during database timeouts/retries
+
+  if (!primaryUri) {
+    console.error('❌ MONGODB_URI is not set in environment variables!');
+    process.exit(1);
+  }
+
+  // Disable query buffering globally to avoid memory exhaustion during retries
   mongoose.set('bufferCommands', false);
+
+  let retryCount = 0;
+  const MAX_RETRIES = 10;
+  const RETRY_DELAY_MS = 5000;
 
   const connectWithRetry = async () => {
     try {
-      console.log('Attempting to connect to MongoDB Atlas...');
+      console.log(`[DB] Attempting MongoDB Atlas connection (attempt ${retryCount + 1})...`);
+
       const conn = await mongoose.connect(primaryUri, {
-        family: 4, // Use IPv4, skip trying IPv6
-        serverSelectionTimeoutMS: 5000,
+        family: 4,                        // Force IPv4 — avoids IPv6 resolution delays on EC2
+        serverSelectionTimeoutMS: 30000,  // Increased from 5s → 30s for production stability
+        socketTimeoutMS: 45000,           // Close sockets after 45s of inactivity
+        connectTimeoutMS: 30000,          // TCP connection timeout
+        heartbeatFrequencyMS: 10000,      // How often to check server health
+        maxPoolSize: 10,                  // Max simultaneous connections
+        minPoolSize: 2,                   // Keep at least 2 connections warm
+        retryWrites: true,
+        w: 'majority',
       });
 
-      mongoose.connection.on('error', err => {
-        console.error('MongoDB runtime error:', err);
+      // Runtime error listener (reconnect handled by mongoose internally)
+      mongoose.connection.on('error', (err) => {
+        console.error('[DB] MongoDB runtime error:', err.message);
       });
 
-      console.log(`✅ MongoDB Connected Successfully: ${conn.connection.host}`);
+      mongoose.connection.on('disconnected', () => {
+        console.warn('[DB] MongoDB disconnected. Mongoose will auto-reconnect...');
+      });
+
+      mongoose.connection.on('reconnected', () => {
+        console.log('[DB] ✅ MongoDB reconnected successfully.');
+      });
+
+      console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+      retryCount = 0; // Reset on success
     } catch (error) {
-      console.error('❌ MongoDB Connection Failed:', error.message);
-      console.log('⏳ Retrying in 5 seconds... (Hint: Please whitelist your IP in MongoDB Atlas!)');
-      setTimeout(connectWithRetry, 5000); // Dynamic retry without crashing server
+      retryCount++;
+
+      // Log the specific error type for debugging
+      if (error.message.includes('ECONNREFUSED')) {
+        console.error(`[DB] ❌ Connection REFUSED to MongoDB Atlas. EC2 Server IP may not be whitelisted.`);
+        console.error(`[DB]    → Go to MongoDB Atlas → Network Access → Add IP: (your EC2 public IP)`);
+        console.error(`[DB]    → Or temporarily allow 0.0.0.0/0 for testing`);
+        console.error(`[DB]    → Attempted URI host: ${primaryUri.split('@')[1]?.split('/')[0] || 'unknown'}`);
+      } else if (error.message.includes('Authentication failed')) {
+        console.error(`[DB] ❌ Authentication failed. Check MONGODB_URI username/password.`);
+      } else if (error.message.includes('ETIMEOUT') || error.message.includes('ENOTFOUND')) {
+        console.error(`[DB] ❌ DNS/Timeout error. Check internet connectivity or DNS settings on server.`);
+      } else {
+        console.error(`[DB] ❌ MongoDB Connection Failed:`, error.message);
+      }
+
+      if (retryCount >= MAX_RETRIES) {
+        console.error(`[DB] ❌ Max retries (${MAX_RETRIES}) reached. Server will continue running without DB.`);
+        console.error(`[DB]    → Fix the Atlas Network Access whitelist and restart the server.`);
+        return; // Don't crash the process — let API return 503 gracefully
+      }
+
+      const delay = Math.min(RETRY_DELAY_MS * retryCount, 30000); // Exponential backoff, max 30s
+      console.log(`[DB] ⏳ Retrying in ${delay / 1000}s... (${retryCount}/${MAX_RETRIES})`);
+      setTimeout(connectWithRetry, delay);
     }
   };
 
@@ -33,4 +82,3 @@ const connectDB = async () => {
 };
 
 module.exports = connectDB;
-

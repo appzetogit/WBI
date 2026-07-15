@@ -1,4 +1,5 @@
 const axios = require('axios');
+const https = require('https');
 
 class CgpeService {
   constructor() {
@@ -31,6 +32,13 @@ class CgpeService {
     }
 
     try {
+      // Create HTTPS agent to handle TLS compatibility issues (ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR)
+      const httpsAgent = new https.Agent({
+        rejectUnauthorized: true, // Keep SSL verification enabled for security
+        minVersion: 'TLSv1.2',   // Force minimum TLS 1.2 to avoid legacy TLS errors
+        maxVersion: 'TLSv1.3'
+      });
+
       const headers = {
         'Content-Type': 'application/json',
         'x-merchant-id': this.clientId,
@@ -42,7 +50,7 @@ class CgpeService {
         ...data
       };
 
-      const response = await axios.post(`${this.baseUrl}${endpoint}`, payload, { headers });
+      const response = await axios.post(`${this.baseUrl}${endpoint}`, payload, { headers, httpsAgent });
       
       // Explicitly check for API-level failures even if HTTP status is 200 OK
       if (response.data && (response.data.status === 'FAILED' || response.data.success === false)) {
@@ -53,6 +61,7 @@ class CgpeService {
       return response.data;
     } catch (error) {
       if (error.response?.status === 404) {
+        console.warn(`[CGPE_SERVICE_WARNING] Live endpoint '${endpoint}' not found (404). Falling back to strict sandbox mode. Check CGPE_BASE_URL and endpoint path.`);
         return this.simulateSandboxResponse(endpoint, data);
       }
       

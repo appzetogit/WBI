@@ -15,7 +15,7 @@ import CashLimitModal from '../common/CashLimitModal';
 import GlobalBookingAlert from '../common/GlobalBookingAlert';
 
 const navItems = [
-  { name: 'Dashboard', path: '/vendor/digital-solution/dashboard', icon: FiHome },
+  { name: 'Dashboard', path: '/vendor/dynamic/dashboard', icon: FiHome },
   { name: 'My Profile', path: '/vendor/digital-solution/my-profile', icon: FiUser },
   { name: 'Team & Engineers', path: '/vendor/digital-solution/engineers', icon: FiUsers },
   { name: 'Services', path: '/vendor/digital-solution/services', icon: FiBriefcase },

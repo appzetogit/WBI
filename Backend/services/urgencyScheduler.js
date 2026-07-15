@@ -1,11 +1,24 @@
 const cron = require('node-cron');
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Engineer = require('../models/Engineer');
 const { getIO } = require('../sockets');
 
+/**
+ * Guard: Only run DB queries if Mongoose is actually connected
+ * Prevents MongoServerSelectionError spam during DB outage/reconnect
+ */
+const isDbConnected = () => mongoose.connection.readyState === 1;
+
 // Run every minute
 const startUrgencyScheduler = () => {
   cron.schedule('* * * * *', async () => {
+    // Skip if DB is not connected — will retry next minute automatically
+    if (!isDbConnected()) {
+      console.warn('[UrgencyScheduler] Skipping — MongoDB not connected. Will retry next cycle.');
+      return;
+    }
+
     try {
       const now = new Date();
       const thirtyMinsAgo = new Date(now.getTime() - 30 * 60000);
@@ -31,7 +44,6 @@ const startUrgencyScheduler = () => {
           console.log(`[UrgencyScheduler] Auto-assigning booking ${booking.bookingNumber} (${timeoutReason})`);
           
           // Find best available worker (simplified for this context)
-          // In production, you might use $near and filter by skills
           const bestWorker = await Engineer.findOne({
             status: 'ONLINE',
             isOnline: true
@@ -42,7 +54,6 @@ const startUrgencyScheduler = () => {
             // Assign to worker
             booking.adminApprovalStatus = 'auto_assigned';
             booking.workerId = bestWorker._id;
-            // Optionally update booking status
             booking.adminLog.push({
               action: 'Auto-Assigned',
               reason: timeoutReason,
@@ -51,7 +62,7 @@ const startUrgencyScheduler = () => {
 
             await booking.save();
 
-            // Notify Worker
+            // Notify Worker via Socket.IO
             const io = getIO();
             if (io) {
               io.to(`worker_${bestWorker._id}`).emit('auto_assigned_job', {
@@ -59,11 +70,9 @@ const startUrgencyScheduler = () => {
                 message: `You have been automatically assigned a new job: ${booking.bookingNumber}`
               });
             }
-            // Add FCM Push here
             
             console.log(`[UrgencyScheduler] Successfully auto-assigned booking ${booking.bookingNumber} to Worker ${bestWorker._id}`);
           } else {
-            // console.log(`[UrgencyScheduler] No available workers for auto-assigning booking ${booking.bookingNumber}`);
             booking.adminLog.push({
               action: 'Auto-Assign Failed',
               reason: 'No online workers found at timeout',
@@ -75,11 +84,16 @@ const startUrgencyScheduler = () => {
         }
       }
     } catch (error) {
-      console.error('[UrgencyScheduler] Error processing timeouts:', error);
+      // Log full error but don't crash the cron
+      if (error.name === 'MongoServerSelectionError' || error.message?.includes('ECONNREFUSED')) {
+        console.error('[UrgencyScheduler] DB connection lost during cron. Will retry next cycle.');
+      } else {
+        console.error('[UrgencyScheduler] Error processing timeouts:', error.message);
+      }
     }
   });
 
-  console.log('[UrgencyScheduler] Started cron job for 30m/10m timeouts');
+  console.log('[UrgencyScheduler] Started — running every minute (30m/10m timeout check)');
 };
 
 module.exports = { startUrgencyScheduler };

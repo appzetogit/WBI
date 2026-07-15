@@ -1,8 +1,12 @@
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Worker = require('../models/Worker');
 const BookingEvent = require('../models/BookingEvent');
 const { getIO } = require('../sockets');
 const { sendNotificationToUser } = require('./firebaseAdmin');
+
+/** Guard: Only run DB queries if Mongoose is connected */
+const isDbConnected = () => mongoose.connection.readyState === 1;
 
 async function logBookingEvent(bookingId, statusFrom, statusTo, triggeredBy, remarks) {
   try {
@@ -19,6 +23,11 @@ async function logBookingEvent(bookingId, statusFrom, statusTo, triggeredBy, rem
 }
 
 async function runPaymentExpiryChecks() {
+  if (!isDbConnected()) {
+    console.warn('[PaymentExpiryScheduler] Skipping — MongoDB not connected.');
+    return;
+  }
+
   try {
     const io = getIO();
     const now = new Date();

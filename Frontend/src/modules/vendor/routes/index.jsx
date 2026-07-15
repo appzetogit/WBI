@@ -78,6 +78,18 @@ const DigitalServices = lazyLoad(() => import('../pages/DigitalServices/DigitalS
 const ProjectOSList = lazyLoad(() => import('../../project-os/pages/ProjectList'));
 const ProjectOSDashboard = lazyLoad(() => import('../../project-os/pages/ProjectDashboard'));
 
+// ── NEW DYNAMIC PANEL ENGINE COMPONENTS ───────────────
+const DynamicVendorLayout = lazyLoad(() => import('../components/layout/DynamicVendorLayout'));
+const DynamicDashboard = lazyLoad(() => import('../pages/Dashboard/DynamicDashboard'));
+const BusinessIntake = lazyLoad(() => import('../pages/BusinessIntake/BusinessIntake'));
+const ProjectList = lazyLoad(() => import('../pages/ProjectOS/ProjectList'));
+const ProjectDetails = lazyLoad(() => import('../pages/ProjectOS/ProjectDetails'));
+const Workforce = lazyLoad(() => import('../pages/Workforce/Workforce'));
+const QualityControl = lazyLoad(() => import('../pages/QualityControl/QualityControl'));
+const Finance = lazyLoad(() => import('../pages/Finance/Finance'));
+const Performance = lazyLoad(() => import('../pages/Performance/Performance'));
+const Compliance = lazyLoad(() => import('../pages/Compliance/Compliance'));
+
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F8FCFC]" />
 );
@@ -96,11 +108,11 @@ const VendorRoutes = () => {
             <Route path="pending-approval" element={<AnimatedPage><PendingApproval /></AnimatedPage>} />
 
             {/* Base Redirect */}
-            <Route path="/" element={<Navigate to="digital-solution/dashboard" replace />} />
+            <Route path="/" element={<Navigate to="dynamic/dashboard" replace />} />
 
             {/* Digital Solution specific routes (Main Vendor Layout now) */}
             <Route element={<ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute>}>
-              <Route path="digital-solution/dashboard" element={<AnimatedPage><Dashboard /></AnimatedPage>} />
+              <Route path="digital-solution/dashboard" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
               <Route path="digital-solution/my-profile" element={<AnimatedPage><DigitalProfile /></AnimatedPage>} />
               <Route path="digital-solution/booking-alerts" element={<AnimatedPage><BookingAlerts /></AnimatedPage>} />
               <Route path="digital-solution/booking-alert/:id" element={<AnimatedPage><BookingAlert /></AnimatedPage>} />
@@ -140,17 +152,30 @@ const VendorRoutes = () => {
             <Route path="project-os" element={<ProtectedRoute userType="vendor"><ProjectOSList /></ProtectedRoute>} />
             <Route path="project-os/:id/*" element={<ProtectedRoute userType="vendor"><ProjectOSDashboard /></ProtectedRoute>} />
 
+            {/* ── NEW DYNAMIC PANEL ENGINE ─────── */}
+            <Route element={<ProtectedRoute userType="vendor"><DynamicVendorLayout /></ProtectedRoute>}>
+              <Route path="dynamic/dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
+              <Route path="dynamic/business-intake/*" element={<AnimatedPage><BusinessIntake /></AnimatedPage>} />
+              <Route path="dynamic/projects/*" element={<AnimatedPage><ProjectList /></AnimatedPage>} />
+              <Route path="dynamic/projects/:projectId" element={<AnimatedPage><ProjectDetails /></AnimatedPage>} />
+              <Route path="dynamic/workforce/*" element={<AnimatedPage><Workforce /></AnimatedPage>} />
+              <Route path="dynamic/quality/*" element={<AnimatedPage><QualityControl /></AnimatedPage>} />
+              <Route path="dynamic/finance/*" element={<AnimatedPage><Finance /></AnimatedPage>} />
+              <Route path="dynamic/performance/*" element={<AnimatedPage><Performance /></AnimatedPage>} />
+              <Route path="dynamic/compliance/*" element={<AnimatedPage><Compliance /></AnimatedPage>} />
+            </Route>
+
             {/* Fallbacks for old routes to redirect to new structure */}
-            <Route path="dashboard" element={<Navigate to="/vendor/digital-solution/dashboard" replace />} />
-            <Route path="projects" element={<Navigate to="/vendor/digital-solution/projects" replace />} />
-            <Route path="engineers" element={<Navigate to="/vendor/digital-solution/engineers" replace />} />
-            <Route path="work-orders" element={<Navigate to="/vendor/digital-solution/work-orders" replace />} />
-            <Route path="earnings" element={<Navigate to="/vendor/digital-solution/earnings" replace />} />
-            <Route path="settings" element={<Navigate to="/vendor/digital-solution/settings" replace />} />
-            <Route path="notifications" element={<Navigate to="/vendor/digital-solution/notifications" replace />} />
-            <Route path="reviews" element={<Navigate to="/vendor/digital-solution/reviews" replace />} />
-            <Route path="support" element={<Navigate to="/vendor/digital-solution/support" replace />} />
-            <Route path="*" element={<Navigate to="/vendor/digital-solution/dashboard" replace />} />
+            <Route path="dashboard" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            <Route path="projects" element={<Navigate to="/vendor/dynamic/projects" replace />} />
+            <Route path="engineers" element={<Navigate to="/vendor/dynamic/workforce" replace />} />
+            <Route path="work-orders" element={<Navigate to="/vendor/dynamic/projects" replace />} />
+            <Route path="earnings" element={<Navigate to="/vendor/dynamic/finance" replace />} />
+            <Route path="settings" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            <Route path="notifications" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            <Route path="reviews" element={<Navigate to="/vendor/dynamic/performance" replace />} />
+            <Route path="support" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            <Route path="*" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
           </Routes>
             </AnimatePresence>
       </Suspense>

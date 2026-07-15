@@ -139,7 +139,7 @@ exports.validateTemplate = async (req, res) => {
 
     const passed = errors.length === 0;
     await ProjectTemplate.findByIdAndUpdate(req.params.id, {
-      validationResult: { passed, errors, warnings, validatedAt: new Date() }
+      validationResult: { passed, validationErrors: errors, warnings, validatedAt: new Date() }
     });
 
     res.json({ success: true, passed, errors, warnings });
@@ -163,7 +163,7 @@ exports.publishTemplate = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Template must pass validation before publishing',
-        errors: template.validationResult?.errors || []
+        errors: template.validationResult?.validationErrors || []
       });
     }
 
@@ -200,7 +200,7 @@ exports.cloneTemplate = async (req, res) => {
       status: 'DRAFT',
       baseTemplateId: source._id,
       createdBy: req.user._id,
-      validationResult: { passed: false, errors: [], warnings: [] },
+      validationResult: { passed: false, validationErrors: [], warnings: [] },
       changelog: []
     });
 

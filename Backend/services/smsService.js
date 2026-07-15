@@ -86,9 +86,8 @@ const sendSMS = async (phone, message) => {
  * @param {string} otp - OTP code
  */
 const sendOTP = async (phone, otp) => {
-  // DLT-compliant message format exactly as approved by the provider
-  // Template from screenshot: Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is 123456.BGADEC
-  const message = `Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is ${otp}.BGADEC`;
+  // Updated Template as per user request
+  const message = `Welcome to the TazkY application powered by WBI. Your OTP for registration is ${otp}.`;
 
   console.log(`[SMS] Attempting to send OTP to ${phone}`);
   console.log(`[SMS] Message: ${message}`);
