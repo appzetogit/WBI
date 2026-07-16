@@ -42,7 +42,7 @@ const sendOTP = async (req, res) => {
     await storeOTP(phone, otpHash);
 
     // 4. Send OTP via SMS (Fire and forget)
-    sendSMSOTP(phone, otp).then(smsResult => {
+    sendSMSOTP(phone, otp, 'engineer').then(smsResult => {
       if (!smsResult.success) {
         console.warn(`[OTP] SMS failed for ${phone}, but OTP stored`);
       }

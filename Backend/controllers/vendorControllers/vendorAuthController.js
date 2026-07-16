@@ -71,9 +71,9 @@ const sendOTP = async (req, res) => {
     await storeOTP(phone, otpHash);
     console.timeEnd('sendOTP_store');
 
-    // 4. Send OTP via SMS (Fire and forget)
+    // 4. Send OTP via SMS
     console.time('sendOTP_sms_trigger');
-    sendSMSOTP(phone, otp).then(smsResult => {
+    sendSMSOTP(phone, otp, 'vendor').then(smsResult => {
       if (!smsResult.success) {
         console.warn(`[OTP] SMS failed for vendor ${phone}, but OTP stored`);
       }

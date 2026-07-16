@@ -57,8 +57,8 @@ const sendOTP = async (req, res) => {
     // 3. Store OTP (Redis primary, MongoDB fallback)
     await storeOTP(phone, otpHash);
 
-    // 4. Send OTP via SMS (Fire and forget for faster API response)
-    sendSMSOTP(phone, otp).then(smsResult => {
+    // 4. Send OTP via SMS
+    sendSMSOTP(phone, otp, 'user').then(smsResult => {
       if (!smsResult.success) {
         console.warn(`[OTP] SMS failed for ${phone}, but OTP stored`);
       }
