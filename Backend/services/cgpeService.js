@@ -141,32 +141,16 @@ class CgpeService {
   }
 
   /**
-   * Verify Bank Account details (Penny Drop with fallback to Pennyless)
+   * Verify Bank Account details (Penny Drop)
    */
   async verifyBank(accountNumber, ifsc) {
     const accNumberStr = String(accountNumber);
     const ifscStr = String(ifsc);
 
-    let result;
-    try {
-      result = await this.makeRequest('/api/v1/verify/bank', {
-        accountNumber: accNumberStr,
-        ifscCode: ifscStr
-      });
-    } catch (error) {
-      console.warn(`[CGPE_SERVICE] Penny drop failed for ${accNumberStr}, falling back to pennyless. Error: ${error.message}`);
-      try {
-        result = await this.makeRequest('/api/v1/verify/bank-pennyless', {
-          accountNumber: accNumberStr,
-          ifscCode: ifscStr
-        });
-      } catch (pennylessError) {
-        console.error(`[CGPE_SERVICE] Pennyless also failed: ${pennylessError.message}`);
-        // If pennyless is not assigned or unauthorized, or fails, the user should know the original penny drop error
-        // as that is the primary method they are trying to use.
-        throw new Error(error.message || pennylessError.message);
-      }
-    }
+    const result = await this.makeRequest('/api/v1/verify/bank', {
+      accountNumber: accNumberStr,
+      ifscCode: ifscStr
+    });
 
     const bankResult = result.result || {};
 
