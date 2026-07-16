@@ -60,8 +60,17 @@ class CgpeService {
 
       return response.data;
     } catch (error) {
-      // Extract the actual error message from the provider if available
-      const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || 'Verification failed due to invalid details or provider error.';
+      // Log full CGPE error response for debugging on production
+      console.error('[CGPE_SERVICE_ERROR] Full response:', JSON.stringify(error.response?.data || error.message));
+      console.error('[CGPE_SERVICE_ERROR] Status:', error.response?.status);
+      console.error('[CGPE_SERVICE_ERROR] Endpoint:', endpoint);
+
+      const resData = error.response?.data || {};
+      // Surface IP restriction error clearly
+      if (resData.message && resData.message.toLowerCase().includes('ip not allowed')) {
+        throw new Error(`CGPE API Error: Your server IP (${resData.error?.clientIP || 'unknown'}) is not whitelisted. Please add this IP in your CGPE merchant dashboard under IP Whitelist settings.`);
+      }
+      const errorMessage = resData.message || resData.error || error.message || 'Verification failed due to invalid details or provider error.';
       throw new Error(`Verification Failed: ${errorMessage} (Status: ${error.response?.status || 'Unknown'})`);
     }
   }
