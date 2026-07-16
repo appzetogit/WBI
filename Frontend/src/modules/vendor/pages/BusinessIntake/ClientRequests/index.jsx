@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { UserCircle, RefreshCw } from 'lucide-react';
-import { fetchOpportunities, fetchOpportunityById } from '../../services/businessIntakeService';
-import OpportunityCard from './components/OpportunityCard';
-import OpportunityDrawer from './components/OpportunityDrawer';
-import { SkeletonGrid } from './components/SkeletonCard';
-import EmptyState from './components/EmptyState';
-import KYCBanner from './components/KYCBanner';
+import { fetchOpportunities, fetchOpportunityById } from '../../../services/businessIntakeService';
+import OpportunityCard from '../components/OpportunityCard';
+import OpportunityDrawer from '../components/OpportunityDrawer';
+import { SkeletonGrid } from '../components/SkeletonCard';
+import EmptyState from '../components/EmptyState';
+import KYCBanner from '../components/KYCBanner';
 
 const ClientRequests = () => {
   const [data, setData] = useState([]);

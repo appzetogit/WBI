@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Star, RefreshCw, CheckCircle, XCircle, MapPin, TrendingUp } from 'lucide-react';
-import { fetchInvitations, acceptInvitation, declineInvitation, formatBudget } from '../../services/businessIntakeService';
-import CountdownTimer from './components/CountdownTimer';
-import { SkeletonGrid } from './components/SkeletonCard';
-import EmptyState from './components/EmptyState';
-import KYCBanner from './components/KYCBanner';
-import OpportunityDrawer from './components/OpportunityDrawer';
+import { fetchInvitations, acceptInvitation, declineInvitation, formatBudget } from '../../../services/businessIntakeService';
+import CountdownTimer from '../components/CountdownTimer';
+import { SkeletonGrid } from '../components/SkeletonCard';
+import EmptyState from '../components/EmptyState';
+import KYCBanner from '../components/KYCBanner';
+import OpportunityDrawer from '../components/OpportunityDrawer';
 
 const DeclineModal = ({ invitationId, onDecline, onClose }) => {
   const [reason, setReason] = useState('');

@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Layers, AlertTriangle, RefreshCw } from 'lucide-react';
-import { fetchOpportunities, fetchOpportunityById, formatBudget } from '../../services/businessIntakeService';
-import OpportunityDrawer from './components/OpportunityDrawer';
-import { SkeletonGrid } from './components/SkeletonCard';
-import EmptyState from './components/EmptyState';
-import KYCBanner from './components/KYCBanner';
-import { useVendorConfig } from '../../context/VendorConfigContext';
-import { deadlineCountdown, typeLabels } from '../../services/businessIntakeService';
+import { fetchOpportunities, fetchOpportunityById, formatBudget } from '../../../services/businessIntakeService';
+import OpportunityDrawer from '../components/OpportunityDrawer';
+import { SkeletonGrid } from '../components/SkeletonCard';
+import EmptyState from '../components/EmptyState';
+import KYCBanner from '../components/KYCBanner';
+import { useVendorConfig } from '../../../context/VendorConfigContext';
+import { deadlineCountdown, typeLabels } from '../../../services/businessIntakeService';
 import { Clock, MapPin } from 'lucide-react';
 
 const CapacityWidget = ({ totalSites, vendorCapacity = 200 }) => {

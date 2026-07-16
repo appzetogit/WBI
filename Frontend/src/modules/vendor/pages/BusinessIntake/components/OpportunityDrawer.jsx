@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, MapPin, Clock, Users, Building2, TrendingUp, FileText, Download, Send } from 'lucide-react';
-import { formatBudget, deadlineCountdown, typeLabels } from '../../services/businessIntakeService';
+import { formatBudget, deadlineCountdown, typeLabels } from '../../../services/businessIntakeService';
 import BidForm from './BidForm';
 
 const OpportunityDrawer = ({ opportunity, onClose, onBidSubmitted }) => {

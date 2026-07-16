@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Trophy, CheckCircle, TrendingUp, RefreshCw, Handshake, MapPin } from 'lucide-react';
-import { fetchAcceptedWork, formatINR } from '../../services/businessIntakeService';
-import { SkeletonGrid } from './components/SkeletonCard';
-import EmptyState from './components/EmptyState';
+import { fetchAcceptedWork, formatINR } from '../../../services/businessIntakeService';
+import { SkeletonGrid } from '../components/SkeletonCard';
+import EmptyState from '../components/EmptyState';
 
 const AwardCard = ({ item }) => {
   return (

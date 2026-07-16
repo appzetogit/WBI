@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { submitBid } from '../../services/businessIntakeService';
+import { submitBid } from '../../../services/businessIntakeService';
 
 const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
   const [form, setForm] = useState({

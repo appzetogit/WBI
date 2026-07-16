@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FileText, Download, RefreshCw, Clock, MapPin, TrendingUp } from 'lucide-react';
-import { fetchOpportunities, fetchOpportunityById, formatBudget, deadlineCountdown } from '../../services/businessIntakeService';
-import OpportunityDrawer from './components/OpportunityDrawer';
-import { SkeletonGrid } from './components/SkeletonCard';
-import EmptyState from './components/EmptyState';
-import KYCBanner from './components/KYCBanner';
+import { fetchOpportunities, fetchOpportunityById, formatBudget, deadlineCountdown } from '../../../services/businessIntakeService';
+import OpportunityDrawer from '../components/OpportunityDrawer';
+import { SkeletonGrid } from '../components/SkeletonCard';
+import EmptyState from '../components/EmptyState';
+import KYCBanner from '../components/KYCBanner';
 
 const RFQCard = ({ opp, onView }) => {
   const countdown = deadlineCountdown(opp.deadline);

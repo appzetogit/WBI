@@ -1,6 +1,6 @@
 import React from 'react';
 import { MapPin, Clock, Users, Building2, TrendingUp, Eye, Zap } from 'lucide-react';
-import { formatBudget, deadlineCountdown, typeLabels, priorityConfig } from '../../services/businessIntakeService';
+import { formatBudget, deadlineCountdown, typeLabels, priorityConfig } from '../../../services/businessIntakeService';
 
 const OpportunityCard = ({ opportunity, onView, onBid, compact = false }) => {
   const {

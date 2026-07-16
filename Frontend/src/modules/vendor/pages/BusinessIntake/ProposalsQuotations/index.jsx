@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { FileText, Plus, Send, Edit, Download, Eye, RefreshCw } from 'lucide-react';
 import {
   fetchProposals, createProposal, updateProposal, sendProposal, downloadProposalPdf
-} from '../../services/businessIntakeService';
-import EmptyState from './components/EmptyState';
-import KYCBanner from './components/KYCBanner';
+} from '../../../services/businessIntakeService';
+import EmptyState from '../components/EmptyState';
+import KYCBanner from '../components/KYCBanner';
 
 const STATUS_TABS = ['all', 'draft', 'sent', 'viewed', 'accepted', 'rejected'];
 
