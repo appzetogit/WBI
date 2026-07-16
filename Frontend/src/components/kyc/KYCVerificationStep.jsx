@@ -2,12 +2,45 @@ import React, { useState, useEffect, useImperativeHandle, forwardRef, useRef, us
 import { FiCheckCircle, FiAlertCircle, FiUpload, FiLoader, FiShield } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { kycService } from '../../services/kycService';
+import { uploadToCloudinary } from '../../utils/cloudinaryUpload';
+
+/**
+ * Compress an image File/Blob to max 1200px width/height at 80% JPEG quality.
+ * Returns a compressed Blob.
+ */
+const compressImage = (file, { maxWidth = 1200, maxHeight = 1200, quality = 0.8 } = {}) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      // Scale down proportionally
+      if (width > maxWidth || height > maxHeight) {
+        const ratio = Math.min(maxWidth / width, maxHeight / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => {
+        if (blob) resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+        else reject(new Error('Compression failed'));
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+};
 
 const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId, redirectUrl, onComplete, onBeforeDigiLockerInitiate }, ref) => {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [verifications, setVerifications] = useState({});
   const [activeUploads, setActiveUploads] = useState({});
+  const [uploadProgress, setUploadProgress] = useState({}); // { [documentType]: 0-100 }
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -58,14 +91,20 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
 
     canvas.toBlob(async (blob) => {
       try {
-        const fileUrl = canvas.toDataURL('image/jpeg');
-        // 1. Upload the image
+        // Compress the captured selfie before uploading
+        const selfieFile = new File([blob], 'selfie.jpg', { type: 'image/jpeg' });
+        const compressed = await compressImage(selfieFile, { maxWidth: 800, maxHeight: 800, quality: 0.75 });
+
+        // 1. Upload directly to Cloudinary (not as base64)
+        const fileUrl = await uploadToCloudinary(compressed, 'kyc_selfies');
+
+        // 2. Save the Cloudinary URL to backend
         const uploadRes = await kycService.uploadDocument({ 
           role, entityId, documentType: rule.documentType, fileUrl, fileKey: 'selfie-capture' 
         });
 
         if (uploadRes.success) {
-          // 2. Call Face Match API
+          // 3. Call Face Match API
           const matchRes = await kycService.verifySelfieMatch({ role, entityId });
           if (matchRes.success) {
              toast.success('Selfie verified successfully against ID document!');
@@ -218,30 +257,45 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
   const handleFileUpload = async (e, rule) => {
     const file = e.target.files[0];
     if (!file) return;
-    
-    if (file.size > rule.maxFileSize) {
-      return toast.error(`File size must be less than ${rule.maxFileSize / (1024 * 1024)}MB`);
+
+    const maxSize = rule.maxFileSize || 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      return toast.error(`File size must be less than ${maxSize / (1024 * 1024)}MB`);
     }
 
     setActiveUploads(p => ({ ...p, [rule.documentType]: true }));
     try {
-      // Simulate file upload (replace with actual upload logic to Cloudinary/S3)
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const fileUrl = reader.result; 
-        const res = await kycService.uploadDocument({ 
-          role, entityId, documentType: rule.documentType, fileUrl, fileKey: 'mock-key' 
-        });
-        if (res.success) {
-          toast.success(`${rule.label} uploaded successfully`);
-          setVerifications(p => ({ ...p, [rule.documentType]: { status: 'uploaded', fileUrl } }));
+      let fileToUpload = file;
+
+      // Compress images before upload to reduce upload size & time
+      if (file.type.startsWith('image/')) {
+        try {
+          fileToUpload = await compressImage(file);
+        } catch {
+          // If compression fails, fall back to original file
+          fileToUpload = file;
         }
-        setActiveUploads(p => ({ ...p, [rule.documentType]: false }));
-      };
-      reader.readAsDataURL(file);
+      }
+
+      // Upload directly to Cloudinary (binary, not base64)
+      const fileUrl = await uploadToCloudinary(fileToUpload, 'kyc_documents', (pct) => {
+        setUploadProgress(p => ({ ...p, [rule.documentType]: pct }));
+      });
+
+      // Save the Cloudinary URL to backend (small JSON payload, not the file bytes)
+      const res = await kycService.uploadDocument({ 
+        role, entityId, documentType: rule.documentType, fileUrl, fileKey: fileToUpload.name
+      });
+
+      if (res.success) {
+        toast.success(`${rule.label} uploaded successfully`);
+        setVerifications(p => ({ ...p, [rule.documentType]: { status: 'uploaded', fileUrl } }));
+      }
     } catch (err) {
       toast.error(err.message || 'File upload failed');
+    } finally {
       setActiveUploads(p => ({ ...p, [rule.documentType]: false }));
+      setUploadProgress(p => ({ ...p, [rule.documentType]: 0 }));
     }
   };
 
@@ -371,11 +425,25 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
 
                   {(rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') && (
                     <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-6 hover:bg-gray-50 transition-colors text-center">
-                      <input type="file" accept={rule.allowedMimeTypes ? rule.allowedMimeTypes.join(',') : 'image/*'} onChange={(e) => handleFileUpload(e, rule)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                      <FiUpload className="w-6 h-6 text-gray-400 mx-auto mb-2" />
-                      <p className="text-sm font-medium text-gray-600">Click or drag file to upload</p>
-                      <p className="text-xs text-gray-400 mt-1">Max size: {(rule.maxFileSize || (5 * 1024 * 1024)) / (1024 * 1024)}MB</p>
-                      {activeUploads[rule.documentType] && <div className="mt-2 text-xs text-blue-600 font-bold">Uploading...</div>}
+                      <input type="file" accept={rule.allowedMimeTypes ? rule.allowedMimeTypes.join(',') : 'image/*'} onChange={(e) => handleFileUpload(e, rule)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={!!activeUploads[rule.documentType]} />
+                      {activeUploads[rule.documentType] ? (
+                        <>
+                          <FiLoader className="w-6 h-6 text-blue-500 mx-auto mb-2 animate-spin" />
+                          <p className="text-sm font-semibold text-blue-600">Uploading... {uploadProgress[rule.documentType] || 0}%</p>
+                          <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5">
+                            <div
+                              className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                              style={{ width: `${uploadProgress[rule.documentType] || 0}%` }}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <FiUpload className="w-6 h-6 text-gray-400 mx-auto mb-2" />
+                          <p className="text-sm font-medium text-gray-600">Click or drag file to upload</p>
+                          <p className="text-xs text-gray-400 mt-1">Max size: {(rule.maxFileSize || (5 * 1024 * 1024)) / (1024 * 1024)}MB</p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

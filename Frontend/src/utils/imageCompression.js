@@ -7,7 +7,7 @@
  * @param {number} options.quality - Quality of the output image (0 to 1).
  * @returns {Promise<File>} - A promise that resolves with the compressed File.
  */
-export const compressImage = (file, options = { maxWidth: 1920, maxHeight: 1920, quality: 0.7 }) => {
+export const compressImage = (file, options = { maxWidth: 900, maxHeight: 900, quality: 0.65 }) => {
   return new Promise((resolve, reject) => {
     const { maxWidth, maxHeight, quality } = options;
     const fileName = file.name;

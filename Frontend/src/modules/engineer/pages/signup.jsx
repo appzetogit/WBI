@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { FiUser, FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowRight, FiArrowLeft, FiChevronLeft, FiMapPin, FiBriefcase, FiUploadCloud, FiVideo, FiCamera, FiCheck, FiX, FiTag } from 'react-icons/fi';
+import { FiUser, FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowRight, FiArrowLeft, FiChevronLeft, FiMapPin, FiBriefcase, FiUploadCloud, FiVideo, FiCamera, FiCheck, FiX, FiTag, FiLoader } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import LogoLoader from '../../../components/common/LogoLoader';
 import { engineerAuthService } from '../../../services/authService';
@@ -8,6 +8,7 @@ import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import Logo from '../../../components/common/Logo';
 import ValidatedInput from '../../../components/common/ValidatedInput';
 import { validators } from '../../../utils/validationUtils';
+import { uploadSelfieToCloudinary, uploadToCloudinary } from '../../../utils/cloudinaryUpload';
 
 const generateObjectId = () => {
   const timestamp = Math.floor(new Date().getTime() / 1000).toString(16);
@@ -66,8 +67,11 @@ export default function EngineerSignup() {
   // Dynamic step rendering state
   const [dynamicSteps, setDynamicSteps] = useState([]);
   const [paymentData, setPaymentData] = useState(null);
+  const [couponCode, setCouponCode] = useState('');
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
+  // 'selfieUrl' | 'introVideoUrl' | null — tracks which field is uploading
+  const [uploadingField, setUploadingField] = useState(null);
 
   useEffect(() => {
     localStorage.removeItem('engineerAccessToken');
@@ -206,16 +210,36 @@ export default function EngineerSignup() {
     }));
   };
 
-  const handleFileRead = (e, callback) => {
+  /**
+   * Upload selfie / intro-video directly to Cloudinary.
+   * Selfie → compressed to 600×600 / 65% JPEG.
+   * Video → uploaded as-is (no browser-side video compression).
+   */
+  const handleMediaUpload = async (e, fieldName) => {
     const file = e.target.files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        toast.error('File size must be less than 5MB');
-        return;
+    if (!file) return;
+    const isVideo = file.type.startsWith('video/');
+    const maxSize = isVideo ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast.error(`File must be under ${maxSize / (1024 * 1024)}MB`);
+      return;
+    }
+    setUploadingField(fieldName);
+    const toastId = toast.loading(isVideo ? 'Uploading video…' : 'Uploading photo…');
+    try {
+      let url;
+      if (fieldName === 'selfieUrl') {
+        url = await uploadSelfieToCloudinary(file, 'engineer_selfies');
+      } else {
+        url = await uploadToCloudinary(file, 'engineer_media', undefined, { skipCompression: true });
       }
-      const reader = new FileReader();
-      reader.onloadend = () => callback(reader.result);
-      reader.readAsDataURL(file);
+      setFormData(p => ({ ...p, [fieldName]: url }));
+      toast.success(isVideo ? 'Video uploaded!' : 'Photo uploaded!', { id: toastId });
+    } catch (err) {
+      console.error('[MediaUpload]', err);
+      toast.error('Upload failed. Please try again.', { id: toastId });
+    } finally {
+      setUploadingField(null);
     }
   };
 
@@ -861,7 +885,12 @@ export default function EngineerSignup() {
                       <label className="block text-sm font-bold text-gray-700 mb-2">Selfie Photo {config?.engineerConfig?.selfieRequired && '*'}</label>
                       <p className="text-xs text-gray-500 mb-3">Clear selfie of your face.</p>
                       <div className="relative border-2 border-dashed border-gray-300 rounded-2xl h-40 flex flex-col items-center justify-center bg-gray-50 overflow-hidden hover:border-[#4F46E5] transition-colors cursor-pointer w-full">
-                        {formData.selfieUrl ? (
+                        {uploadingField === 'selfieUrl' ? (
+                          <>
+                            <FiLoader className="w-8 h-8 text-[#4F46E5] animate-spin mb-2" />
+                            <span className="text-xs font-semibold text-[#4F46E5]">Uploading…</span>
+                          </>
+                        ) : formData.selfieUrl ? (
                           <img src={formData.selfieUrl} alt="Selfie" className="w-full h-full object-cover" />
                         ) : (
                           <>
@@ -871,7 +900,7 @@ export default function EngineerSignup() {
                             <span className="text-xs font-semibold text-[#4F46E5]">Take Selfie or Upload</span>
                           </>
                         )}
-                        <input type="file" accept="image/*" capture="user" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileRead(e, val => setFormData(p => ({...p, selfieUrl: val})))} />
+                        <input type="file" accept="image/*" capture="user" disabled={!!uploadingField} className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleMediaUpload(e, 'selfieUrl')} />
                       </div>
                     </div>
 
@@ -879,7 +908,12 @@ export default function EngineerSignup() {
                       <label className="block text-sm font-bold text-gray-700 mb-2">Short Intro Video {config?.engineerConfig?.videoRequired && '*'}</label>
                       <p className="text-xs text-gray-500 mb-3">10-second video introducing yourself.</p>
                       <div className="relative border-2 border-dashed border-gray-300 rounded-2xl h-40 flex flex-col items-center justify-center bg-gray-50 overflow-hidden hover:border-[#4F46E5] transition-colors cursor-pointer w-full">
-                        {formData.introVideoUrl ? (
+                        {uploadingField === 'introVideoUrl' ? (
+                          <>
+                            <FiLoader className="w-8 h-8 text-[#4F46E5] animate-spin mb-2" />
+                            <span className="text-xs font-semibold text-[#4F46E5]">Uploading video…</span>
+                          </>
+                        ) : formData.introVideoUrl ? (
                           <div className="w-full h-full bg-black flex items-center justify-center">
                             <video src={formData.introVideoUrl} controls className="w-full max-h-full" />
                           </div>
@@ -891,8 +925,8 @@ export default function EngineerSignup() {
                             <span className="text-xs font-semibold text-[#4F46E5]">Record or Upload Video</span>
                           </>
                         )}
-                        <input type="file" accept="video/mp4,video/webm" capture="user" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => handleFileRead(e, val => setFormData(p => ({...p, introVideoUrl: val})))} />
-                        {formData.introVideoUrl && (
+                        <input type="file" accept="video/mp4,video/webm" capture="user" disabled={!!uploadingField} className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={(e) => handleMediaUpload(e, 'introVideoUrl')} />
+                        {formData.introVideoUrl && !uploadingField && (
                           <button type="button" onClick={() => setFormData(p => ({...p, introVideoUrl: null}))} className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center z-20 shadow-md">
                             <FiX className="w-3 h-3" />
                           </button>
