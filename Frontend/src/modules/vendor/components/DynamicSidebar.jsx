@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import useBusinessIntakeCounts from '../hooks/useBusinessIntakeCounts';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useVendorConfig } from '../context/VendorConfigContext';
 import {
@@ -23,6 +24,7 @@ const DynamicSidebar = () => {
   const { sidebarSections } = useVendorConfig();
   const [expandedSections, setExpandedSections] = useState({});
   const location = useLocation();
+  const { counts } = useBusinessIntakeCounts();
 
   const toggleSection = (sectionName) => {
     setExpandedSections(prev => ({
@@ -37,14 +39,14 @@ const DynamicSidebar = () => {
       path: '/vendor/dynamic/business-intake', 
       icon: Briefcase,
       subItems: [
-        { name: 'All Opportunities', path: '/vendor/dynamic/business-intake/all' },
-        { name: 'Client Requests', path: '/vendor/dynamic/business-intake/requests' },
-        { name: 'B2B Opportunities', path: '/vendor/dynamic/business-intake/b2b' },
-        { name: 'Bulk Requirements', path: '/vendor/dynamic/business-intake/bulk' },
-        { name: 'Bid / Quote Requests', path: '/vendor/dynamic/business-intake/bids' },
-        { name: 'Direct Invitations', path: '/vendor/dynamic/business-intake/invitations' },
-        { name: 'Proposals & Quotations', path: '/vendor/dynamic/business-intake/proposals' },
-        { name: 'Accepted Work', path: '/vendor/dynamic/business-intake/accepted' }
+        { name: 'All Opportunities', path: '/vendor/dynamic/business-intake/all', badge: counts.allOpportunities },
+        { name: 'Client Requests', path: '/vendor/dynamic/business-intake/requests', badge: counts.clientRequests },
+        { name: 'B2B Opportunities', path: '/vendor/dynamic/business-intake/b2b', badge: counts.b2bOpportunities },
+        { name: 'Bulk Requirements', path: '/vendor/dynamic/business-intake/bulk', badge: counts.bulkRequirements },
+        { name: 'Bid / Quote Requests', path: '/vendor/dynamic/business-intake/rfq', badge: counts.bidQuoteRequests },
+        { name: 'Direct Invitations', path: '/vendor/dynamic/business-intake/invitations', badge: counts.directInvitations, badgeRed: true },
+        { name: 'Proposals & Quotations', path: '/vendor/dynamic/business-intake/proposals', badge: counts.proposalsPending },
+        { name: 'Accepted Work', path: '/vendor/dynamic/business-intake/accepted', badge: counts.acceptedThisWeek }
       ]
     },
     'Clients & Contracts': {
@@ -179,14 +181,21 @@ const DynamicSidebar = () => {
                         key={subItem.name}
                         to={subItem.path}
                         className={({ isActive }) =>
-                          `block px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                          `flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                             isActive
                               ? 'text-white font-bold bg-gray-800'
                               : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                           }`
                         }
                       >
-                        {subItem.name}
+                        <span>{subItem.name}</span>
+                        {subItem.badge > 0 && (
+                          <span className={`ml-2 min-w-[18px] h-[18px] text-[10px] font-bold flex items-center justify-center rounded-full px-1 ${
+                            subItem.badgeRed ? 'bg-red-500 text-white' : 'bg-blue-600 text-white'
+                          }`}>
+                            {subItem.badge > 99 ? '99+' : subItem.badge}
+                          </span>
+                        )}
                       </NavLink>
                     ))}
                   </div>

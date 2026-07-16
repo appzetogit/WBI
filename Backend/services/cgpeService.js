@@ -141,13 +141,29 @@ class CgpeService {
   }
 
   /**
-   * Verify Bank Account details (Penny Drop)
+   * Verify Bank Account details (Penny Drop with fallback to Pennyless)
    */
   async verifyBank(accountNumber, ifsc) {
-    const result = await this.makeRequest('/api/v1/verify/bank', {
-      accountNumber,
-      ifscCode: ifsc  // CGPE API expects 'ifscCode' not 'ifsc'
-    });
+    const accNumberStr = String(accountNumber);
+    const ifscStr = String(ifsc);
+
+    let result;
+    try {
+      result = await this.makeRequest('/api/v1/verify/bank', {
+        accountNumber: accNumberStr,
+        ifscCode: ifscStr
+      });
+    } catch (error) {
+      console.warn(`[CGPE_SERVICE] Penny drop failed for ${accNumberStr}, falling back to pennyless. Error: ${error.message}`);
+      try {
+        result = await this.makeRequest('/api/v1/verify/bank-pennyless', {
+          accountNumber: accNumberStr,
+          ifscCode: ifscStr
+        });
+      } catch (pennylessError) {
+        throw pennylessError;
+      }
+    }
 
     const bankResult = result.result || {};
 
@@ -161,7 +177,7 @@ class CgpeService {
       data: {
         accountHolderName: bankResult.account_holder_name,
         accountNumberMasked: bankResult.account_number,
-        ifsc: bankResult.account_ifsc || ifsc,
+        ifsc: bankResult.account_ifsc || ifscStr,
         isValid: bankResult.is_valid
       },
       requestId: result.tranx_id || `req_${Date.now()}`

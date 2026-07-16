@@ -268,6 +268,7 @@ app.use('/api/vendors/service-offerings', require('./routes/vendor-routes/vendor
 app.use('/api/workers/one-time-bookings', require('./routes/worker-routes/workerOneTimeBooking.routes'));
 app.use('/api/worker/bookings', require('./routes/worker-routes/bookingResponse.routes'));
 app.use('/api/vendors/digital', require('./routes/vendor-routes/digital.routes'));
+app.use('/api/vendor/business-intake', require('./routes/vendor-routes/businessIntake.routes'));
 
 // Worker routes
 app.use('/api/worker/services', require('./routes/worker-routes/workerServices.routes'));

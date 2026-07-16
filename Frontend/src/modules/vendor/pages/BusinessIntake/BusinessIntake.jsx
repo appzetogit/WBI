@@ -1,27 +1,29 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AllOpportunities from './AllOpportunities';
-
-// Temporary placeholder for unbuilt pages
-const Placeholder = ({ title }) => (
-  <div className="p-6 bg-gray-50 min-h-screen">
-    <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
-    <p className="text-gray-500 mt-2">This module is currently being built as per the implementation plan.</p>
-  </div>
-);
+import ClientRequests from './ClientRequests';
+import B2BOpportunities from './B2BOpportunities';
+import BulkRequirements from './BulkRequirements';
+import BidQuoteRequests from './BidQuoteRequests';
+import DirectInvitations from './DirectInvitations';
+import ProposalsQuotations from './ProposalsQuotations';
+import AcceptedWork from './AcceptedWork';
 
 const BusinessIntake = () => {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="all" replace />} />
       <Route path="all" element={<AllOpportunities />} />
-      <Route path="requests" element={<Placeholder title="Client Requests" />} />
-      <Route path="b2b" element={<Placeholder title="B2B Opportunities" />} />
-      <Route path="bulk" element={<Placeholder title="Bulk Requirements" />} />
-      <Route path="rfq" element={<Placeholder title="Bid / Quote Requests" />} />
-      <Route path="invitations" element={<Placeholder title="Direct Invitations" />} />
-      <Route path="proposals" element={<Placeholder title="Proposals & Quotations" />} />
-      <Route path="accepted" element={<Placeholder title="Accepted Work" />} />
+      <Route path="requests" element={<ClientRequests />} />
+      <Route path="b2b" element={<B2BOpportunities />} />
+      <Route path="bulk" element={<BulkRequirements />} />
+      <Route path="rfq" element={<BidQuoteRequests />} />
+      {/* Dynamic sidebar paths use "bids" but in router it was "rfq" - let's map both to be safe or just use rfq */}
+      <Route path="bids" element={<Navigate to="../rfq" replace />} />
+      
+      <Route path="invitations" element={<DirectInvitations />} />
+      <Route path="proposals" element={<ProposalsQuotations />} />
+      <Route path="accepted" element={<AcceptedWork />} />
     </Routes>
   );
 };
