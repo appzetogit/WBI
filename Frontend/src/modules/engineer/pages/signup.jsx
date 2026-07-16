@@ -401,6 +401,10 @@ export default function EngineerSignup() {
               return false;
             }
           }
+          if (field.type === 'tel' && !isPhoneVerified) {
+            toast.error('Please verify your mobile number with OTP before proceeding');
+            return false;
+          }
         }
       }
       return true;

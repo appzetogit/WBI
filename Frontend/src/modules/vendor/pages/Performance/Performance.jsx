@@ -20,7 +20,7 @@ const Performance = () => {
           <h2 className="text-sm font-medium text-blue-200 uppercase tracking-widest">Current Tier</h2>
           <p className="text-3xl font-bold mt-1">{vendorProfile?.vendorTier?.toUpperCase() || 'BRONZE'}</p>
           <p className="text-sm text-blue-100 mt-4 max-w-xs">
-            Maintain >95% SLA and 4.5+ Rating to unlock Silver Tier benefits.
+            Maintain &gt;95% SLA and 4.5+ Rating to unlock Silver Tier benefits.
           </p>
         </div>
 
