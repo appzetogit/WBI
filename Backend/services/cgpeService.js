@@ -60,14 +60,9 @@ class CgpeService {
 
       return response.data;
     } catch (error) {
-      if (error.response?.status === 404) {
-        console.warn(`[CGPE_SERVICE_WARNING] Live endpoint '${endpoint}' not found (404). Falling back to strict sandbox mode. Check CGPE_BASE_URL and endpoint path.`);
-        return this.simulateSandboxResponse(endpoint, data);
-      }
-      
       // Extract the actual error message from the provider if available
       const errorMessage = error.response?.data?.message || error.response?.data?.error || error.message || 'Verification failed due to invalid details or provider error.';
-      throw new Error(`Verification Failed: ${errorMessage}`);
+      throw new Error(`Verification Failed: ${errorMessage} (Status: ${error.response?.status || 'Unknown'})`);
     }
   }
 
