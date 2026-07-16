@@ -161,7 +161,10 @@ class CgpeService {
           ifscCode: ifscStr
         });
       } catch (pennylessError) {
-        throw pennylessError;
+        console.error(`[CGPE_SERVICE] Pennyless also failed: ${pennylessError.message}`);
+        // If pennyless is not assigned or unauthorized, or fails, the user should know the original penny drop error
+        // as that is the primary method they are trying to use.
+        throw new Error(error.message || pennylessError.message);
       }
     }
 
