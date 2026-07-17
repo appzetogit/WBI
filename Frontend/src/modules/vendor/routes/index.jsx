@@ -82,13 +82,17 @@ const ProjectOSDashboard = lazyLoad(() => import('../../project-os/pages/Project
 const DynamicVendorLayout = lazyLoad(() => import('../components/layout/DynamicVendorLayout'));
 const DynamicDashboard = lazyLoad(() => import('../pages/Dashboard/DynamicDashboard'));
 const BusinessIntake = lazyLoad(() => import('../pages/BusinessIntake/BusinessIntake'));
+const ClientsContracts = lazyLoad(() => import('../pages/ClientsContracts/ClientsContracts'));
+const ProjectOperations = lazyLoad(() => import('../pages/ProjectOperations/ProjectOperations'));
 const ProjectList = lazyLoad(() => import('../pages/ProjectOS/ProjectList'));
 const ProjectDetails = lazyLoad(() => import('../pages/ProjectOS/ProjectDetails'));
 const Workforce = lazyLoad(() => import('../pages/Workforce/Workforce'));
+const Resources = lazyLoad(() => import('../pages/Resources/Resources'));
 const QualityControl = lazyLoad(() => import('../pages/QualityControl/QualityControl'));
 const Finance = lazyLoad(() => import('../pages/Finance/Finance'));
 const Performance = lazyLoad(() => import('../pages/Performance/Performance'));
 const Compliance = lazyLoad(() => import('../pages/Compliance/Compliance'));
+const Support = lazyLoad(() => import('../pages/Support/Support'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F8FCFC]" />
@@ -156,13 +160,17 @@ const VendorRoutes = () => {
             <Route element={<ProtectedRoute userType="vendor"><DynamicVendorLayout /></ProtectedRoute>}>
               <Route path="dynamic/dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
               <Route path="dynamic/business-intake/*" element={<AnimatedPage><BusinessIntake /></AnimatedPage>} />
-              <Route path="dynamic/projects/*" element={<AnimatedPage><ProjectList /></AnimatedPage>} />
-              <Route path="dynamic/projects/:projectId" element={<AnimatedPage><ProjectDetails /></AnimatedPage>} />
+              <Route path="dynamic/clients/*" element={<AnimatedPage><ClientsContracts /></AnimatedPage>} />
+              <Route path="dynamic/projects/*" element={<AnimatedPage><ProjectOperations /></AnimatedPage>} />
               <Route path="dynamic/workforce/*" element={<AnimatedPage><Workforce /></AnimatedPage>} />
+              <Route path="dynamic/resources/*" element={<AnimatedPage><Resources /></AnimatedPage>} />
               <Route path="dynamic/quality/*" element={<AnimatedPage><QualityControl /></AnimatedPage>} />
               <Route path="dynamic/finance/*" element={<AnimatedPage><Finance /></AnimatedPage>} />
               <Route path="dynamic/performance/*" element={<AnimatedPage><Performance /></AnimatedPage>} />
               <Route path="dynamic/compliance/*" element={<AnimatedPage><Compliance /></AnimatedPage>} />
+              <Route path="dynamic/notifications/*" element={<AnimatedPage><Notifications /></AnimatedPage>} />
+              <Route path="dynamic/support/*" element={<AnimatedPage><Support /></AnimatedPage>} />
+              <Route path="dynamic/settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
             </Route>
 
             {/* Fallbacks for old routes to redirect to new structure */}
@@ -171,10 +179,10 @@ const VendorRoutes = () => {
             <Route path="engineers" element={<Navigate to="/vendor/dynamic/workforce" replace />} />
             <Route path="work-orders" element={<Navigate to="/vendor/dynamic/projects" replace />} />
             <Route path="earnings" element={<Navigate to="/vendor/dynamic/finance" replace />} />
-            <Route path="settings" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
-            <Route path="notifications" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            <Route path="settings" element={<Navigate to="/vendor/dynamic/settings" replace />} />
+            <Route path="notifications" element={<Navigate to="/vendor/dynamic/notifications" replace />} />
             <Route path="reviews" element={<Navigate to="/vendor/dynamic/performance" replace />} />
-            <Route path="support" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            <Route path="support" element={<Navigate to="/vendor/dynamic/support" replace />} />
             <Route path="*" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
           </Routes>
             </AnimatePresence>

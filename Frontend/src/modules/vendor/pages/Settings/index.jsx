@@ -1,292 +1,184 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FiBell, FiVolume2, FiGlobe, FiInfo, FiLogOut, FiTrash2, FiMapPin, FiSettings, FiShield, FiUserX, FiChevronRight } from 'react-icons/fi';
-import { toast } from 'react-hot-toast';
-import { vendorAuthService } from '../../../../services/authService';
-import api from '../../../../services/api';
-const getPushService = () => import('../../../../services/pushNotificationService');
-const registerFCMToken = async (...args) => (await getPushService()).registerFCMToken(...args);
-const removeFCMToken = async (...args) => (await getPushService()).removeFCMToken(...args);
+import React, { useCallback, useEffect, useState } from 'react';
+import { Building2, CreditCard, Lock, Plug, Save, Settings as SettingsIcon, Users } from 'lucide-react';
+import { fetchVendorSettings, updateVendorSettings } from '../../services/globalModulesService';
+
+const sectionConfig = [
+  { key: 'company', label: 'Company Profile', icon: Building2 },
+  { key: 'team', label: 'Team Settings', icon: Users },
+  { key: 'services', label: 'Service Settings', icon: SettingsIcon },
+  { key: 'finance', label: 'Finance Settings', icon: CreditCard },
+  { key: 'notifications', label: 'Notifications', icon: SettingsIcon },
+  { key: 'security', label: 'Security', icon: Lock },
+  { key: 'integrations', label: 'Integrations', icon: Plug }
+];
+
+const Toggle = ({ label, checked, onChange }) => (
+  <button type="button" onClick={onChange} className="flex items-center justify-between w-full p-3 text-left bg-gray-50 rounded-lg">
+    <span className="text-sm font-medium text-gray-700">{label}</span>
+    <span className={`w-10 h-5 rounded-full p-0.5 transition-colors ${checked ? 'bg-blue-600' : 'bg-gray-300'}`}>
+      <span className={`block w-4 h-4 bg-white rounded-full transition-transform ${checked ? 'translate-x-5' : ''}`} />
+    </span>
+  </button>
+);
 
 const Settings = () => {
-  const navigate = useNavigate();
-  const [settings, setSettings] = useState({
-    notifications: true,
-    soundAlerts: true,
-    language: 'en',
-  });
-  const [isLoading, setIsLoading] = useState(true);
+  const [settings, setSettings] = useState(null);
+  const [active, setActive] = useState('company');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        setIsLoading(true);
-        // Fallback to local storage initially for fast render
-        const savedSettings = JSON.parse(localStorage.getItem('vendorSettings') || '{}');
-        if (Object.keys(savedSettings).length > 0) {
-          setSettings(prev => ({ ...prev, ...savedSettings }));
-        }
-
-        // Fetch production settings from backend
-        const response = await api.get('/vendors/settings');
-        if (response.data?.success && response.data?.data?.settings) {
-          const backendSettings = response.data.data.settings;
-          setSettings(prev => ({ ...prev, ...backendSettings }));
-          localStorage.setItem('vendorSettings', JSON.stringify(backendSettings));
-        }
-      } catch (error) {
-        console.error('Error loading settings from backend:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadSettings();
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetchVendorSettings();
+      setSettings(res.data.data || {});
+    } catch {
+      setSettings({});
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const saveSettingsToBackend = async (newSettings) => {
+  useEffect(() => { load(); }, [load]);
+
+  const updatePath = (path, value) => {
+    setSettings((current) => {
+      const next = structuredClone(current || {});
+      let ref = next;
+      const keys = path.split('.');
+      keys.slice(0, -1).forEach((key) => {
+        ref[key] = ref[key] || {};
+        ref = ref[key];
+      });
+      ref[keys[keys.length - 1]] = value;
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
     try {
-      await api.put('/vendors/settings', newSettings);
-      localStorage.setItem('vendorSettings', JSON.stringify(newSettings));
+      await updateVendorSettings(settings || {});
+      await load();
     } catch (error) {
-      console.error('Failed to sync settings with backend:', error);
-      toast.error('Failed to sync settings to cloud');
+      alert(error.response?.data?.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleToggle = async (key) => {
-    const newValue = !settings[key];
-    const updatedSettings = { ...settings, [key]: newValue };
-    setSettings(updatedSettings);
-    
-    // Sync to backend in background
-    saveSettingsToBackend({ [key]: newValue });
-
-    // Handle FCM Token registration/removal if notifications toggled
-    if (key === 'notifications') {
-      if (newValue) {
-        try {
-          await registerFCMToken('vendor', true);
-          toast.success('Push Notifications enabled');
-        } catch (error) {
-          console.error('Error enabling notifications:', error);
-          toast.error('Failed to enable push notifications');
-        }
-      } else {
-        try {
-          await removeFCMToken('vendor');
-          toast.success('Push Notifications disabled');
-        } catch (error) {
-          console.error('Error disabling notifications:', error);
-        }
-      }
+  const render = () => {
+    if (!settings) return null;
+    if (active === 'company') {
+      const p = settings.companyProfile || {};
+      return (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {[
+            ['Company Name', 'companyName'],
+            ['GST', 'gst'],
+            ['PAN', 'pan'],
+            ['Address', 'address'],
+            ['Website', 'website']
+          ].map(([label, key]) => (
+            <label key={key} className="text-sm font-medium text-gray-700">
+              {label}
+              <input value={p[key] || ''} onChange={(e) => updatePath(`companyProfile.${key}`, e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg" />
+            </label>
+          ))}
+        </div>
+      );
     }
-  };
-
-  const handleLanguageChange = (lang) => {
-    const updatedSettings = { ...settings, language: lang };
-    setSettings(updatedSettings);
-    
-    // Sync to backend in background
-    saveSettingsToBackend({ language: lang });
-    toast.success(`Language changed to ${lang === 'en' ? 'English' : 'Hindi'}`);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await vendorAuthService.logout();
-      toast.success('Logged out successfully');
-      navigate('/vendor/login');
-    } catch (error) {
-      localStorage.removeItem('vendorAccessToken');
-      localStorage.removeItem('vendorRefreshToken');
-      localStorage.removeItem('vendorData');
-      toast.success('Logged out successfully');
-      navigate('/vendor/login');
+    if (active === 'team') {
+      const t = settings.teamSettings || {};
+      return (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <InfoList title="Departments" items={t.departments} />
+          <InfoList title="Roles" items={t.roles} />
+          <InfoList title="Permissions" items={t.permissions} />
+          <Toggle label="Invitations Enabled" checked={t.invitationsEnabled !== false} onChange={() => updatePath('teamSettings.invitationsEnabled', !t.invitationsEnabled)} />
+        </div>
+      );
     }
-  };
-
-  const handleDeleteAccount = async () => {
-    if (window.confirm('Are you absolutely sure you want to delete your account? This action cannot be undone and you will lose all your data.')) {
-      try {
-        await api.delete('/vendors/profile');
-        toast.success('Account deleted successfully');
-        localStorage.clear();
-        navigate('/');
-      } catch (error) {
-        console.error('Error deleting account:', error);
-        toast.error('Failed to delete account');
-      }
+    if (active === 'services') {
+      return (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {(settings.serviceSettings || []).map((service) => (
+            <div key={service.serviceCategoryCode} className="p-4 border border-gray-200 rounded-xl">
+              <h3 className="font-bold text-gray-900">{service.serviceCategoryName}</h3>
+              <p className="mt-1 text-xs text-gray-500">Coverage: {service.coverageAreas?.join(', ')}</p>
+              <p className="mt-1 text-xs text-gray-500">Pricing: {service.pricingModel} · Hours: {service.workingHours}</p>
+              <span className={`inline-flex mt-3 text-xs px-2 py-1 rounded-full ${service.emergencyAvailable ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                Emergency {service.emergencyAvailable ? 'available' : 'off'}
+              </span>
+            </div>
+          ))}
+        </div>
+      );
     }
+    if (active === 'finance') {
+      const f = settings.financeSettings || {};
+      return (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <InfoList title="Payment Methods" items={f.paymentMethods} />
+          <InfoList title="Bank Accounts" items={(f.bankAccounts || []).map((b) => `${b.bank} ${b.accountMasked}${b.primary ? ' (Primary)' : ''}`)} />
+          <label className="text-sm font-medium text-gray-700">Invoice Prefix<input value={f.invoicePrefix || ''} onChange={(e) => updatePath('financeSettings.invoicePrefix', e.target.value)} className="block w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg" /></label>
+          <label className="text-sm font-medium text-gray-700">Commission %<input type="number" value={f.commissionPercent || 0} onChange={(e) => updatePath('financeSettings.commissionPercent', Number(e.target.value))} className="block w-full px-3 py-2 mt-1 border border-gray-200 rounded-lg" /></label>
+        </div>
+      );
+    }
+    if (active === 'notifications') {
+      const n = settings.notificationSettings || {};
+      return <div className="grid grid-cols-1 gap-3 md:grid-cols-2">{['email', 'sms', 'push', 'whatsapp', 'marketing', 'systemAlerts'].map((key) => <Toggle key={key} label={key.replace(/([A-Z])/g, ' $1')} checked={Boolean(n[key])} onChange={() => updatePath(`notificationSettings.${key}`, !n[key])} />)}</div>;
+    }
+    if (active === 'security') {
+      const s = settings.security || {};
+      return (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Toggle label="2FA Enabled" checked={Boolean(s.twoFactorEnabled)} onChange={() => updatePath('security.twoFactorEnabled', !s.twoFactorEnabled)} />
+          <div className="p-4 bg-gray-50 rounded-xl"><p className="text-2xl font-bold">{s.activeSessions || 0}</p><p className="text-xs text-gray-500">Active Sessions</p></div>
+          <InfoList title="Devices" items={(s.devices || []).map((d) => d.name)} />
+          <InfoList title="API Tokens" items={(s.apiTokens || []).map((t) => t.label)} />
+        </div>
+      );
+    }
+    const integrations = settings.integrations || {};
+    return <div className="grid grid-cols-1 gap-3 md:grid-cols-2">{['googleMaps', 'paymentGateway', 'smsProvider', 'cloudStorage', 'email'].map((key) => <Toggle key={key} label={key.replace(/([A-Z])/g, ' $1')} checked={Boolean(integrations[key])} onChange={() => updatePath(`integrations.${key}`, !integrations[key])} />)}</div>;
   };
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto font-sans text-gray-900 animate-fade-in">
-      
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-8">
-        <div className="w-12 h-12 bg-teal-50 rounded-2xl flex items-center justify-center">
-          <FiSettings className="w-6 h-6 text-teal-600" />
-        </div>
+    <div className="min-h-full p-6 bg-gray-50/80 lg:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">Settings & Preferences</h1>
-          <p className="text-gray-500 mt-1">Manage your account settings, notifications, and language.</p>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
+            <span className="flex items-center justify-center w-9 h-9 bg-blue-600 rounded-xl"><SettingsIcon className="w-5 h-5 text-white" /></span>
+            Settings
+          </h1>
+          <p className="mt-1.5 ml-[46px] text-sm text-gray-500">Vendor account, services, finance, security and integrations read dynamically by every module.</p>
         </div>
+        <button onClick={save} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg disabled:opacity-60"><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}</button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left Column - Main Settings */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Notifications Panel */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 transition-all hover:shadow-md">
-            <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
-              <FiBell className="text-teal-600" /> Notifications
-            </h2>
-            <div className="space-y-6">
-              <div className="flex items-center justify-between group">
-                <div>
-                  <h3 className="font-semibold text-gray-800">Push Notifications</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">Receive real-time alerts for new bookings and updates.</p>
-                </div>
-                <button
-                  onClick={() => handleToggle('notifications')}
-                  className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 ${
-                    settings.notifications ? 'bg-teal-600' : 'bg-gray-200'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      settings.notifications ? 'translate-x-8' : 'translate-x-1'
-                    } shadow-sm`}
-                  />
-                </button>
-              </div>
-              <div className="h-px bg-gray-100 w-full"></div>
-              <div className="flex items-center justify-between group">
-                <div>
-                  <h3 className="font-semibold text-gray-800">Sound Alerts</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">Play a notification sound when a new job arrives.</p>
-                </div>
-                <button
-                  onClick={() => handleToggle('soundAlerts')}
-                  className={`relative inline-flex h-7 w-14 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 ${
-                    settings.soundAlerts ? 'bg-teal-600' : 'bg-gray-200'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                      settings.soundAlerts ? 'translate-x-8' : 'translate-x-1'
-                    } shadow-sm`}
-                  />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Localization Panel */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 transition-all hover:shadow-md">
-            <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
-              <FiGlobe className="text-teal-600" /> Localization
-            </h2>
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                onClick={() => handleLanguageChange('en')}
-                className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col ${
-                  settings.language === 'en' 
-                  ? 'border-teal-600 bg-teal-50/50 shadow-sm' 
-                  : 'border-gray-100 hover:border-gray-200 bg-white'
-                }`}
-              >
-                <span className={`font-bold ${settings.language === 'en' ? 'text-teal-700' : 'text-gray-700'}`}>English</span>
-                <span className="text-sm text-gray-500 mt-1">Default</span>
+      {loading ? <div className="h-72 bg-white border border-gray-200 rounded-xl animate-pulse" /> : (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
+          <div className="p-2 bg-white border border-gray-200 rounded-xl shadow-sm">
+            {sectionConfig.map(({ key, label, icon: Icon }) => (
+              <button key={key} onClick={() => setActive(key)} className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg ${active === key ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}>
+                <Icon className="w-4 h-4" /> {label}
               </button>
-              <button
-                onClick={() => handleLanguageChange('hi')}
-                className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col ${
-                  settings.language === 'hi' 
-                  ? 'border-teal-600 bg-teal-50/50 shadow-sm' 
-                  : 'border-gray-100 hover:border-gray-200 bg-white'
-                }`}
-              >
-                <span className={`font-bold ${settings.language === 'hi' ? 'text-teal-700' : 'text-gray-700'}`}>हिंदी</span>
-                <span className="text-sm text-gray-500 mt-1">Hindi</span>
-              </button>
-            </div>
+            ))}
           </div>
-
-          {/* Business Address */}
-          <div 
-            onClick={() => navigate('/vendor/address-management')}
-            className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 transition-all hover:shadow-md hover:border-teal-100 cursor-pointer group"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
-                  <FiMapPin className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-gray-800 group-hover:text-teal-600 transition-colors">Manage Business Address</h3>
-                  <p className="text-sm text-gray-500 mt-0.5">Update your service location and radius.</p>
-                </div>
-              </div>
-              <FiChevronRight className="w-5 h-5 text-gray-400 group-hover:text-teal-600 transition-colors" />
-            </div>
-          </div>
-
+          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm lg:col-span-3">{render()}</div>
         </div>
-
-        {/* Right Column - Danger Zone & Info */}
-        <div className="space-y-6">
-          
-          {/* Security & Access */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
-            <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
-              <FiShield className="text-teal-600" /> Account Security
-            </h2>
-            <div className="space-y-4">
-              <button
-                onClick={handleLogout}
-                className="w-full py-3.5 px-4 bg-gray-50 hover:bg-gray-100 text-gray-800 font-bold rounded-2xl flex items-center justify-center gap-2 transition-colors border border-gray-200"
-              >
-                <FiLogOut className="w-5 h-5" /> Sign Out
-              </button>
-              
-              <div className="h-px bg-gray-100 w-full my-4"></div>
-              
-              <div className="p-4 bg-rose-50/50 border border-rose-100 rounded-2xl">
-                <h3 className="font-bold text-rose-800 flex items-center gap-2 mb-1">
-                  <FiUserX /> Danger Zone
-                </h3>
-                <p className="text-xs text-rose-600/80 mb-4 leading-relaxed">
-                  Permanently delete your account and all associated data. This action cannot be reversed.
-                </p>
-                <button
-                  onClick={handleDeleteAccount}
-                  className="w-full py-2.5 px-4 bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 hover:border-rose-300 font-bold rounded-xl transition-colors text-sm"
-                >
-                  Delete Account
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* About App */}
-          <div className="bg-gray-50/50 rounded-3xl p-6 border border-gray-100 text-center">
-            <div className="w-12 h-12 bg-white shadow-sm border border-gray-100 rounded-2xl mx-auto flex items-center justify-center mb-3">
-              <FiInfo className="w-6 h-6 text-teal-600" />
-            </div>
-            <h3 className="font-bold text-gray-800">WBI Vendor Portal</h3>
-            <p className="text-sm text-gray-500 mt-1">Version 1.0.0 (Production)</p>
-            <p className="text-xs text-gray-400 mt-4">© {new Date().getFullYear()} Wetzel Barron Infosystem Pvt Ltd.<br/>All rights reserved.</p>
-          </div>
-
-        </div>
-      </div>
+      )}
     </div>
   );
 };
 
-export default Settings;
+const InfoList = ({ title, items = [] }) => (
+  <div className="p-4 bg-gray-50 rounded-xl">
+    <p className="mb-2 text-sm font-semibold text-gray-800">{title}</p>
+    <div className="flex flex-wrap gap-2">{items.length ? items.map((item) => <span key={item} className="px-2 py-1 text-xs text-gray-700 bg-white border border-gray-200 rounded-full">{item}</span>) : <span className="text-xs text-gray-400">No values</span>}</div>
+  </div>
+);
 
+export default Settings;

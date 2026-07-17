@@ -1,90 +1,125 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Activity, Award, BarChart3, Star, TrendingUp, Users } from 'lucide-react';
 import { useVendorConfig } from '../../context/VendorConfigContext';
-import { BarChart3, TrendingUp, AlertTriangle, ShieldCheck, Target, Award } from 'lucide-react';
+import { fetchPerformance, formatINR, statusColors } from '../../services/globalModulesService';
+
+const Metric = ({ label, value, hint }) => (
+  <div className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm">
+    <p className="text-2xl font-bold text-gray-900">{value}</p>
+    <p className="mt-1 text-xs font-medium text-gray-500">{label}</p>
+    {hint && <p className="mt-1 text-[11px] text-gray-400">{hint}</p>}
+  </div>
+);
 
 const Performance = () => {
-  const { vendorProfile } = useVendorConfig();
+  const { approvedServices = [] } = useVendorConfig() || {};
+  const [category, setCategory] = useState('');
+  const [data, setData] = useState({ summary: {}, services: [] });
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetchPerformance(category ? { category } : {});
+      setData(res.data.data || { summary: {}, services: [] });
+    } catch {
+      setData({ summary: {}, services: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, [category]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const s = data.summary || {};
+  const charts = s.charts || [];
+  const maxRevenue = Math.max(...charts.map((c) => c.revenue || 0), 1);
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Performance Metrics</h1>
-        <p className="text-gray-500">Track your SLA adherence, ratings, and platform tier status.</p>
+    <div className="min-h-full p-6 bg-gray-50/80 lg:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900">
+            <span className="flex items-center justify-center w-9 h-9 bg-blue-600 rounded-xl"><Activity className="w-5 h-5 text-white" /></span>
+            Performance
+          </h1>
+          <p className="mt-1.5 ml-[46px] text-sm text-gray-500">Dynamic KPIs, engineer productivity, revenue, quality and growth by service.</p>
+        </div>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg">
+          <option value="">All Services</option>
+          {approvedServices.map((service) => <option key={service.categoryCode || service.code} value={service.categoryCode || service.code}>{service.categoryName || service.name}</option>)}
+        </select>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        {/* Tier Card */}
-        <div className="bg-gradient-to-br from-blue-900 to-indigo-900 rounded-xl shadow-lg p-6 text-white flex flex-col justify-center items-center text-center">
-          <Award className="w-16 h-16 text-yellow-400 mb-4" />
-          <h2 className="text-sm font-medium text-blue-200 uppercase tracking-widest">Current Tier</h2>
-          <p className="text-3xl font-bold mt-1">{vendorProfile?.vendorTier?.toUpperCase() || 'BRONZE'}</p>
-          <p className="text-sm text-blue-100 mt-4 max-w-xs">
-            Maintain &gt;95% SLA and 4.5+ Rating to unlock Silver Tier benefits.
-          </p>
-        </div>
-
-        {/* Metrics Grid */}
-        <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Overall Rating</p>
-                <h3 className="text-3xl font-bold text-gray-900 mt-1">{vendorProfile?.overallRating || '4.8'}<span className="text-lg text-gray-400">/5</span></h3>
-              </div>
-              <div className="p-3 bg-yellow-50 rounded-lg">
-                <Target className="w-6 h-6 text-yellow-600" />
-              </div>
-            </div>
-            <div className="w-full bg-gray-100 rounded-full h-2">
-              <div className="bg-yellow-400 h-2 rounded-full" style={{ width: '96%' }}></div>
-            </div>
-            <p className="text-xs text-green-600 mt-2 flex items-center"><TrendingUp className="w-3 h-3 mr-1" /> Top 10% of vendors</p>
+      {loading ? (
+        <div className="h-72 bg-white border border-gray-200 rounded-xl animate-pulse" />
+      ) : (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+            <Metric label="Performance Score" value={`${s.performanceScore || 0}%`} hint={`Rank #${s.leaderboardRank || '-'}`} />
+            <Metric label="Vendor Rating" value={`${(s.vendorRating || 0).toFixed?.(1) || s.vendorRating}/5`} />
+            <Metric label="SLA Compliance" value={`${s.slaCompliance || 0}%`} />
+            <Metric label="Project Success" value={`${s.projectSuccessRate || 0}%`} />
+            <Metric label="Revenue" value={formatINR(s.revenue)} />
+            <Metric label="Profit" value={formatINR(s.profit)} />
+            <Metric label="Team Productivity" value={`${s.teamProductivity || 0}%`} />
+            <Metric label="Customer Satisfaction" value={`${s.customerSatisfaction || 0}%`} />
+            <Metric label="Repeat Clients" value={s.repeatClients || 0} />
+            <Metric label="Bid Win Rate" value={`${s.bidWinRate || 0}%`} />
           </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <p className="text-sm font-medium text-gray-500">SLA Adherence</p>
-                <h3 className="text-3xl font-bold text-gray-900 mt-1">94%</h3>
-              </div>
-              <div className="p-3 bg-green-50 rounded-lg">
-                <ShieldCheck className="w-6 h-6 text-green-600" />
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+            <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm xl:col-span-2">
+              <h2 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800"><BarChart3 className="w-4 h-4" /> Revenue Trend & SLA</h2>
+              <div className="flex items-end h-52 gap-3">
+                {charts.map((point) => (
+                  <div key={point.label} className="flex flex-col items-center justify-end flex-1 h-full gap-2">
+                    <div className="w-full bg-blue-100 rounded-t-lg" style={{ height: `${Math.max(8, ((point.revenue || 0) / maxRevenue) * 100)}%` }} />
+                    <span className="text-[10px] text-gray-400">{point.label}</span>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="w-full bg-gray-100 rounded-full h-2">
-              <div className="bg-green-500 h-2 rounded-full" style={{ width: '94%' }}></div>
+            <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
+              <h2 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800"><Award className="w-4 h-4" /> Dynamic Service KPIs</h2>
+              <div className="space-y-3">
+                {(s.dynamicKpis || []).map((kpi) => (
+                  <div key={kpi.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{kpi.label}</p>
+                      <p className="text-xs text-gray-500">Target {kpi.target}</p>
+                    </div>
+                    <span className={`text-xs font-bold px-2 py-1 rounded-md border ${statusColors[kpi.status] || statusColors.good}`}>{kpi.value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Target: 95% for next tier</p>
           </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Quality Rejections</p>
-                <h3 className="text-3xl font-bold text-gray-900 mt-1">12</h3>
-              </div>
-              <div className="p-3 bg-red-50 rounded-lg">
-                <AlertTriangle className="w-6 h-6 text-red-600" />
-              </div>
+          <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
+            <h2 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800"><Users className="w-4 h-4" /> Engineer Performance</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-xs text-left text-gray-500 uppercase bg-gray-50">
+                  <tr><th className="px-4 py-3">Engineer</th><th className="px-4 py-3">Jobs</th><th className="px-4 py-3">Quality</th><th className="px-4 py-3">Attendance</th><th className="px-4 py-3">Rating</th><th className="px-4 py-3">Safety</th></tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(s.engineers || []).map((engineer) => (
+                    <tr key={engineer.name}>
+                      <td className="px-4 py-3"><p className="font-semibold text-gray-900">{engineer.name}</p><p className="text-xs text-gray-500">{engineer.role}</p></td>
+                      <td className="px-4 py-3">{engineer.completedJobs}</td>
+                      <td className="px-4 py-3">{engineer.qualityScore}%</td>
+                      <td className="px-4 py-3">{engineer.attendancePercent}%</td>
+                      <td className="px-4 py-3 flex items-center gap-1"><Star className="w-3 h-3 text-amber-500 fill-amber-400" /> {engineer.customerRating}</td>
+                      <td className="px-4 py-3">{engineer.safetyScore}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <p className="text-xs text-red-600 mt-2 flex items-center"><TrendingUp className="w-3 h-3 mr-1" /> +2 from last month</p>
-          </div>
-
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <p className="text-sm font-medium text-gray-500">Total Projects Completed</p>
-                <h3 className="text-3xl font-bold text-gray-900 mt-1">142</h3>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <BarChart3 className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-            <p className="text-xs text-gray-500 mt-2">Lifetime metrics</p>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -103,6 +103,7 @@ export default defineConfig({
       'recharts',
       'nprogress',
       'react-hot-toast',
+      'sonner',
     ],
   },
 })

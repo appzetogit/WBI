@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Star, RefreshCw, CheckCircle, XCircle, MapPin, TrendingUp } from 'lucide-react';
+import { Star, CheckCircle, XCircle, MapPin, TrendingUp } from 'lucide-react';
 import { fetchInvitations, acceptInvitation, declineInvitation, formatBudget } from '../../../services/businessIntakeService';
 import CountdownTimer from '../components/CountdownTimer';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import EmptyState from '../components/EmptyState';
-import KYCBanner from '../components/KYCBanner';
 import OpportunityDrawer from '../components/OpportunityDrawer';
 
 const DeclineModal = ({ invitationId, onDecline, onClose }) => {
@@ -178,20 +177,7 @@ const DirectInvitations = () => {
   const handleDecline = (id) => setData(prev => prev.filter(i => i._id !== id));
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <KYCBanner />
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Star className="h-6 w-6 text-amber-500 fill-amber-500" /> Direct Invitations
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Exclusive opportunities where you were personally selected</p>
-        </div>
-        <button onClick={load} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </button>
-      </div>
-
+    <>
       {loading ? (
         <SkeletonGrid count={3} />
       ) : data.length === 0 ? (
@@ -217,7 +203,7 @@ const DirectInvitations = () => {
       {selectedOpp && (
         <OpportunityDrawer opportunity={selectedOpp} onClose={() => setSelectedOpp(null)} />
       )}
-    </div>
+    </>
   );
 };
 

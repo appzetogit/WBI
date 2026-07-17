@@ -1,0 +1,57 @@
+import React from 'react';
+import { Search } from 'lucide-react';
+import { useQuality } from '../context/QualityContext';
+import { useVendorConfig } from '../../../context/VendorConfigContext';
+
+const FilterBar = ({ onApply, statusOptions }) => {
+  const { search, setSearch, filters, updateFilter } = useQuality();
+  const { approvedServices = [] } = useVendorConfig() || {};
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+      <form
+        onSubmit={(e) => { e.preventDefault(); onApply?.(); }}
+        className="flex flex-wrap gap-3 items-center"
+      >
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search projects, clients, codes, engineers..."
+            className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50/50"
+          />
+        </div>
+        <select
+          value={filters.category}
+          onChange={(e) => updateFilter('category', e.target.value)}
+          className="px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white"
+        >
+          <option value="">All Services</option>
+          {approvedServices.map((s) => (
+            <option key={s.categoryCode || s.code} value={s.categoryCode || s.code}>
+              {s.categoryName || s.name}
+            </option>
+          ))}
+        </select>
+        {statusOptions && statusOptions.length > 0 && (
+          <select
+            value={filters.status}
+            onChange={(e) => updateFilter('status', e.target.value)}
+            className="px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white"
+          >
+            <option value="">All Status</option>
+            {statusOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        )}
+        <button type="submit" className="px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+          Apply
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default FilterBar;

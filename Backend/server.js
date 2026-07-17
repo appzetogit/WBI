@@ -272,6 +272,13 @@ app.use('/api/workers/one-time-bookings', require('./routes/worker-routes/worker
 app.use('/api/worker/bookings', require('./routes/worker-routes/bookingResponse.routes'));
 app.use('/api/vendors/digital', require('./routes/vendor-routes/digital.routes'));
 app.use('/api/vendor/business-intake', require('./routes/vendor-routes/businessIntake.routes'));
+app.use('/api/vendor/clients-contracts', require('./routes/vendor-routes/clientsContracts.routes'));
+app.use('/api/vendor/project-ops', require('./routes/vendor-routes/projectOps.routes'));
+app.use('/api/vendor/workforce', require('./routes/vendor-routes/workforceOps.routes'));
+app.use('/api/vendor/resources', require('./routes/vendor-routes/resourcesOps.routes'));
+app.use('/api/vendor/quality', require('./routes/vendor-routes/qualityControl.routes'));
+app.use('/api/vendor/finance', require('./routes/vendor-routes/finance.routes'));
+app.use('/api/vendor/global', require('./routes/vendor-routes/globalModules.routes'));
 
 // Worker routes
 app.use('/api/worker/services', require('./routes/worker-routes/workerServices.routes'));

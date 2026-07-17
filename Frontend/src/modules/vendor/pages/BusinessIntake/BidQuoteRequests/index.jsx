@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { FileText, Download, RefreshCw, Clock, MapPin, TrendingUp } from 'lucide-react';
+import { FileText, Download, Clock, MapPin, TrendingUp } from 'lucide-react';
 import { fetchOpportunities, fetchOpportunityById, formatBudget, deadlineCountdown } from '../../../services/businessIntakeService';
 import OpportunityDrawer from '../components/OpportunityDrawer';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import EmptyState from '../components/EmptyState';
-import KYCBanner from '../components/KYCBanner';
 
 const RFQCard = ({ opp, onView }) => {
   const countdown = deadlineCountdown(opp.deadline);
@@ -83,20 +82,7 @@ const BidQuoteRequests = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <KYCBanner />
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <FileText className="h-6 w-6 text-green-600" /> Bid / Quote Requests
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Formal RFQs from enterprises and government bodies. Download specs and submit structured bids.</p>
-        </div>
-        <button onClick={load} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </button>
-      </div>
-
+    <>
       {loading ? (
         <SkeletonGrid count={4} />
       ) : data.length === 0 ? (
@@ -111,7 +97,7 @@ const BidQuoteRequests = () => {
         <OpportunityDrawer opportunity={selectedOpp} onClose={() => setSelectedOpp(null)}
           onBidSubmitted={() => { setSelectedOpp(null); load(); }} />
       )}
-    </div>
+    </>
   );
 };
 

@@ -32,6 +32,8 @@ const getOpportunities = async (req, res) => {
       city,
       minBudget,
       maxBudget,
+      priority,
+      search,
       sort = 'createdAt',
       order = 'desc',
       page = 1,
@@ -47,8 +49,22 @@ const getOpportunities = async (req, res) => {
     if (type) filter.type = type;
     if (category) filter.categoryCode = category;
     if (city) filter['requirements.cities'] = { $in: [new RegExp(city, 'i')] };
+    if (priority) filter.priority = priority;
     if (minBudget) filter['budget.min'] = { $gte: Number(minBudget) };
     if (maxBudget) filter['budget.max'] = { $lte: Number(maxBudget) };
+
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filter.$or = [
+        { title: searchRegex },
+        { categoryName: searchRegex },
+        { 'clientInfo.name': searchRegex },
+        { 'clientInfo.company': searchRegex },
+        { 'clientInfo.city': searchRegex },
+        { 'requirements.cities': searchRegex },
+        { subServices: searchRegex }
+      ];
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sortObj = { [sort]: order === 'asc' ? 1 : -1 };
@@ -460,19 +476,34 @@ const getProposals = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [proposals, total] = await Promise.all([
+    const [proposals, total, statusCounts] = await Promise.all([
       VendorProposal.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .populate('opportunityId', 'title categoryName clientInfo.company requirements.cities')
+        .populate('opportunityId', 'title categoryName clientInfo.company clientInfo.name requirements.cities budget')
         .lean(),
-      VendorProposal.countDocuments(filter)
+      VendorProposal.countDocuments(filter),
+      VendorProposal.aggregate([
+        { $match: { vendorId: new mongoose.Types.ObjectId(vendorId) } },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ])
     ]);
+
+    const counts = statusCounts.reduce((acc, c) => ({ ...acc, [c._id]: c.count }), {});
 
     res.status(200).json({
       success: true,
       data: proposals,
+      statusCounts: {
+        all: Object.values(counts).reduce((s, v) => s + v, 0),
+        draft: counts.draft || 0,
+        sent: counts.sent || 0,
+        viewed: counts.viewed || 0,
+        accepted: counts.accepted || 0,
+        rejected: counts.rejected || 0,
+        negotiating: counts.negotiating || 0,
+      },
       pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) }
     });
   } catch (error) {
@@ -827,7 +858,7 @@ const getCounts = async (req, res) => {
     const vendorId = req.user._id || req.user.id;
     const vid = new mongoose.Types.ObjectId(vendorId);
 
-    const [typeCounts, invitationCount, pendingProposals, acceptedWork] = await Promise.all([
+    const [typeCounts, invitationCount, pendingProposals, acceptedWork, acceptedThisWeek, pendingQuotes] = await Promise.all([
       // Open opportunities per type
       Opportunity.aggregate([
         { $match: { eligibleVendors: vid, status: 'open' } },
@@ -837,11 +868,20 @@ const getCounts = async (req, res) => {
       Opportunity.countDocuments({ type: 'direct_invitation', eligibleVendors: vid, status: 'open' }),
       // Proposals awaiting client response (sent/viewed)
       VendorProposal.countDocuments({ vendorId: vid, status: { $in: ['sent', 'viewed', 'negotiating'] } }),
+      // Total accepted work
+      Opportunity.countDocuments({ status: 'awarded', 'awardedTo.vendorId': vid }),
       // Accepted this week
       Opportunity.countDocuments({
         status: 'awarded',
         'awardedTo.vendorId': vid,
         'awardedTo.awardedAt': { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+      }),
+      // Open RFQs where vendor has not yet bid
+      Opportunity.countDocuments({
+        type: 'bid_quote_request',
+        eligibleVendors: vid,
+        status: 'open',
+        bids: { $not: { $elemMatch: { vendorId: vid } } }
       })
     ]);
 
@@ -859,7 +899,9 @@ const getCounts = async (req, res) => {
         bidQuoteRequests: counts['bid_quote_request'] || 0,
         directInvitations: invitationCount,
         proposalsPending: pendingProposals,
-        acceptedThisWeek: acceptedWork
+        pendingQuotes: pendingQuotes + pendingProposals,
+        acceptedWork,
+        acceptedThisWeek
       }
     });
   } catch (error) {

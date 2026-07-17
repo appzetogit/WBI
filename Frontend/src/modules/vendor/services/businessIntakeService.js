@@ -88,11 +88,35 @@ export const deadlineCountdown = (deadline) => {
 };
 
 export const typeLabels = {
-  client_request: { label: 'Client Request', color: 'bg-blue-100 text-blue-700' },
-  b2b_opportunity: { label: 'B2B Opportunity', color: 'bg-purple-100 text-purple-700' },
-  bulk_requirement: { label: 'Bulk Requirement', color: 'bg-orange-100 text-orange-700' },
-  bid_quote_request: { label: 'RFQ / Bid', color: 'bg-green-100 text-green-700' },
-  direct_invitation: { label: 'Direct Invitation', color: 'bg-amber-100 text-amber-700' }
+  client_request: { label: 'Client Request', badge: 'Individual Client', color: 'bg-blue-50 text-blue-700 border border-blue-100' },
+  b2b_opportunity: { label: 'B2B Opportunity', badge: 'B2B Opportunity', color: 'bg-violet-50 text-violet-700 border border-violet-100' },
+  bulk_requirement: { label: 'Bulk Requirement', badge: 'Bulk Requirement', color: 'bg-orange-50 text-orange-700 border border-orange-100' },
+  bid_quote_request: { label: 'RFQ / Bid', badge: 'Bid Request', color: 'bg-emerald-50 text-emerald-700 border border-emerald-100' },
+  direct_invitation: { label: 'Direct Invitation', badge: 'Direct Invitation', color: 'bg-amber-50 text-amber-700 border border-amber-100' }
+};
+
+export const getActionLabel = (type) => {
+  switch (type) {
+    case 'client_request': return 'Accept';
+    case 'b2b_opportunity': return 'Bid Now';
+    case 'bulk_requirement': return 'Submit Quote';
+    case 'bid_quote_request': return 'Submit Quote';
+    case 'direct_invitation': return 'Respond';
+    default: return 'Apply';
+  }
+};
+
+export const timeAgo = (date) => {
+  if (!date) return '';
+  const diff = Date.now() - new Date(date).getTime();
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 };
 
 export const priorityConfig = {

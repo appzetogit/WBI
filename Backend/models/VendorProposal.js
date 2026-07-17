@@ -40,6 +40,13 @@ const vendorProposalSchema = new mongoose.Schema({
     required: false, // Can be standalone
     default: null
   },
+  clientId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'VendorClient',
+    required: false,
+    default: null,
+    index: true
+  },
 
   title: { type: String, required: true, trim: true },
   coverLetter: { type: String, default: '' },

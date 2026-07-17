@@ -15,6 +15,8 @@ const DEFAULT_COUNTS = {
   bidQuoteRequests: 0,
   directInvitations: 0,
   proposalsPending: 0,
+  pendingQuotes: 0,
+  acceptedWork: 0,
   acceptedThisWeek: 0
 };
 
@@ -49,14 +51,22 @@ const useBusinessIntakeCounts = () => {
   useEffect(() => {
     if (!socket) return;
     const refresh = () => loadCounts();
+    socket.on('new_opportunity', refresh);
     socket.on('new-opportunity', refresh);
+    socket.on('bid_status_changed', refresh);
     socket.on('bid-status-changed', refresh);
+    socket.on('bid_accepted', refresh);
     socket.on('bid-accepted', refresh);
+    socket.on('direct_invitation', refresh);
     socket.on('direct-invitation', refresh);
     return () => {
+      socket.off('new_opportunity', refresh);
       socket.off('new-opportunity', refresh);
+      socket.off('bid_status_changed', refresh);
       socket.off('bid-status-changed', refresh);
+      socket.off('bid_accepted', refresh);
       socket.off('bid-accepted', refresh);
+      socket.off('direct_invitation', refresh);
       socket.off('direct-invitation', refresh);
     };
   }, [socket, loadCounts]);

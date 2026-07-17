@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Layers, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Layers, AlertTriangle } from 'lucide-react';
 import { fetchOpportunities, fetchOpportunityById, formatBudget } from '../../../services/businessIntakeService';
 import OpportunityDrawer from '../components/OpportunityDrawer';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import EmptyState from '../components/EmptyState';
-import KYCBanner from '../components/KYCBanner';
 import { useVendorConfig } from '../../../context/VendorConfigContext';
 import { deadlineCountdown, typeLabels } from '../../../services/businessIntakeService';
 import { Clock, MapPin } from 'lucide-react';
@@ -111,20 +110,7 @@ const BulkRequirements = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <KYCBanner />
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Layers className="h-6 w-6 text-orange-500" /> Bulk Requirements
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">Large-scale multi-site projects requiring significant capacity</p>
-        </div>
-        <button onClick={load} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </button>
-      </div>
-
+    <>
       {loading ? (
         <SkeletonGrid count={4} />
       ) : data.length === 0 ? (
@@ -141,7 +127,7 @@ const BulkRequirements = () => {
         <OpportunityDrawer opportunity={selectedOpp} onClose={() => setSelectedOpp(null)}
           onBidSubmitted={() => { setSelectedOpp(null); load(); }} />
       )}
-    </div>
+    </>
   );
 };
 

@@ -1,44 +1,125 @@
 /**
  * Seed Script: Business Intake Opportunities
- * Usage: node scripts/seedBusinessIntake.js <vendorId>
- * Example: node scripts/seedBusinessIntake.js 686abc123def456ghi789
+ * Usage:
+ *   node scripts/seedBusinessIntake.js                  → auto-picks first vendor
+ *   node scripts/seedBusinessIntake.js <vendorId>       → specific vendor
+ *   npm run seed:business-intake
  */
 
 require('dotenv').config();
 const mongoose = require('mongoose');
-const connectDB = require('../config/db');
 const Opportunity = require('../models/Opportunity');
+const VendorProposal = require('../models/VendorProposal');
+const Vendor = require('../models/Vendor');
 
-const VENDOR_ID = process.argv[2];
+const VENDOR_ID_ARG = process.argv[2];
+const DEMO_TAG = 'wbi-demo-seed';
 
-if (!VENDOR_ID) {
-  console.error('❌ Please provide a vendorId as argument: node scripts/seedBusinessIntake.js <vendorId>');
-  process.exit(1);
-}
+const connectForScript = async () => {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI is not set');
+  mongoose.set('bufferCommands', false);
+  await mongoose.connect(uri, {
+    family: 4,
+    serverSelectionTimeoutMS: 30000,
+    socketTimeoutMS: 45000,
+    connectTimeoutMS: 30000,
+  });
+  console.log(`✅ MongoDB Connected: ${mongoose.connection.host}`);
+};
 
-const INDIAN_CITIES = [
-  'Mumbai', 'Delhi', 'Bengaluru', 'Hyderabad', 'Chennai', 'Kolkata',
-  'Pune', 'Ahmedabad', 'Jaipur', 'Surat', 'Lucknow', 'Chandigarh',
-  'Bhopal', 'Indore', 'Nagpur', 'Visakhapatnam', 'Kochi', 'Coimbatore'
-];
-
-const SERVICE_CATEGORIES = [
-  { code: 'CCTV', name: 'CCTV & Surveillance' },
-  { code: 'SOLAR', name: 'Solar Energy Solutions' },
-  { code: 'NET', name: 'Networking & IT Infrastructure' },
-  { code: 'ATM', name: 'ATM Services & Maintenance' },
-  { code: 'ELEC', name: 'Electrical & Power Systems' },
-  { code: 'FIRE', name: 'Fire Safety & Protection' },
-  { code: 'AC', name: 'Air Conditioning & HVAC' },
-  { code: 'SEC', name: 'Security Systems & Access Control' }
-];
-
-const randomEl = (arr) => arr[Math.floor(Math.random() * arr.length)];
-const randomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const futureDate = (daysFromNow) => new Date(Date.now() + daysFromNow * 24 * 60 * 60 * 1000);
+const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000);
 
 const opportunities = [
-  // ── CLIENT REQUESTS (5) ──────────────────────────────
+  // ── CLIENT REQUESTS (design-matching + residential/commercial) ──
+  {
+    type: 'client_request',
+    title: 'Website Development — Corporate Portfolio Site',
+    description: 'Modern responsive website for a growing IT services company. React frontend, Node.js backend, CMS integration.',
+    categoryCode: 'WEB',
+    categoryName: 'Web Development',
+    subServices: ['React', 'Node.js', 'Responsive Design', 'CMS'],
+    clientInfo: {
+      clientType: 'company',
+      name: 'Ankit Verma',
+      company: 'NovaTech Solutions',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      phone: '9876543210'
+    },
+    requirements: {
+      totalSites: 1,
+      cities: ['Bengaluru'],
+      description: 'Corporate portfolio, 12 pages, admin panel, SEO setup',
+      contractDuration: '20 Days',
+      startDate: futureDate(7)
+    },
+    budget: { min: 60000, max: 80000, type: 'negotiable' },
+    deadline: futureDate(14),
+    expiresAt: futureDate(21),
+    priority: 'normal',
+    createdAt: hoursAgo(2),
+    updatedAt: hoursAgo(2),
+  },
+  {
+    type: 'client_request',
+    title: 'Mobile App Development — Food Delivery MVP',
+    description: 'Cross-platform food delivery app MVP for a local restaurant chain. Android + iOS.',
+    categoryCode: 'APP',
+    categoryName: 'App Development',
+    subServices: ['React Native', 'Firebase', 'Payment Gateway', 'Push Notifications'],
+    clientInfo: {
+      clientType: 'company',
+      name: 'Meera Kapoor',
+      company: 'SpiceRoute Foods Pvt Ltd',
+      city: 'Mumbai',
+      state: 'Maharashtra',
+      phone: '9811122233'
+    },
+    requirements: {
+      totalSites: 1,
+      cities: ['Mumbai'],
+      description: 'Customer app, rider app, restaurant dashboard — 45-day delivery',
+      contractDuration: '45 Days',
+      startDate: futureDate(10)
+    },
+    budget: { min: 250000, max: 400000, type: 'negotiable' },
+    deadline: futureDate(12),
+    expiresAt: futureDate(20),
+    priority: 'high',
+    createdAt: hoursAgo(5),
+    updatedAt: hoursAgo(5),
+  },
+  {
+    type: 'client_request',
+    title: 'EV Charging Station Installation — Mall Parking',
+    description: 'Install 4 fast-charging EV stations in basement parking of a premium mall.',
+    categoryCode: 'EV',
+    categoryName: 'EV Charging',
+    subServices: ['Fast Charging', 'Electrical Wiring', 'AMC', 'Load Management'],
+    clientInfo: {
+      clientType: 'company',
+      name: 'Rohit Desai',
+      company: 'MetroSquare Mall Management',
+      city: 'Pune',
+      state: 'Maharashtra',
+      phone: '9922334455'
+    },
+    requirements: {
+      totalSites: 1,
+      cities: ['Pune'],
+      description: '4 x 60kW DC fast chargers, cabling, billing integration',
+      contractDuration: '15 Days',
+      startDate: futureDate(5)
+    },
+    budget: { min: 450000, max: 650000, type: 'fixed' },
+    deadline: futureDate(8),
+    expiresAt: futureDate(15),
+    priority: 'urgent',
+    createdAt: hoursAgo(8),
+    updatedAt: hoursAgo(8),
+  },
   {
     type: 'client_request',
     title: 'CCTV Installation for Residential Bungalow',
@@ -49,6 +130,7 @@ const opportunities = [
     clientInfo: {
       clientType: 'individual',
       name: 'Rajesh Mehta',
+      company: 'Mehta Residence',
       city: 'Pune',
       state: 'Maharashtra',
       phone: '9812345678'
@@ -57,12 +139,15 @@ const opportunities = [
       totalSites: 1,
       cities: ['Pune'],
       description: '8 HD cameras, 1 DVR 16-channel, cable routing, mobile app setup',
+      contractDuration: '7 Days',
       startDate: futureDate(10)
     },
     budget: { min: 25000, max: 45000, type: 'negotiable' },
     deadline: futureDate(7),
     expiresAt: futureDate(14),
-    priority: 'normal'
+    priority: 'normal',
+    createdAt: hoursAgo(12),
+    updatedAt: hoursAgo(12),
   },
   {
     type: 'client_request',
@@ -74,6 +159,7 @@ const opportunities = [
     clientInfo: {
       clientType: 'individual',
       name: 'Priya Sharma',
+      company: 'Sharma Family Home',
       city: 'Jaipur',
       state: 'Rajasthan',
       phone: '9988776655'
@@ -82,12 +168,15 @@ const opportunities = [
       totalSites: 1,
       cities: ['Jaipur'],
       description: '5kW system, 15 panels, string inverter, AMC for 5 years',
+      contractDuration: '10 Days',
       startDate: futureDate(15)
     },
     budget: { min: 180000, max: 280000, type: 'fixed' },
     deadline: futureDate(10),
     expiresAt: futureDate(20),
-    priority: 'normal'
+    priority: 'normal',
+    createdAt: hoursAgo(18),
+    updatedAt: hoursAgo(18),
   },
   {
     type: 'client_request',
@@ -165,7 +254,68 @@ const opportunities = [
     priority: 'urgent'
   },
 
-  // ── B2B OPPORTUNITIES (5) ───────────────────────────
+  // ── B2B OPPORTUNITIES (enterprise companies) ─────────
+  {
+    type: 'b2b_opportunity',
+    title: '500 ATM Maintenance — Western India Rollout',
+    description: 'Leading private bank requires preventive maintenance engineers for 500 ATM sites across Maharashtra and Gujarat.',
+    categoryCode: 'ATM',
+    categoryName: 'ATM Maintenance',
+    subServices: ['Field Service', 'ATM Repair', 'Cash Dispenser', 'Preventive Maintenance'],
+    clientInfo: {
+      clientType: 'b2b',
+      company: 'HDFC Bank — Vendor Operations',
+      city: 'Mumbai',
+      state: 'Maharashtra',
+      gstNumber: '27HDFCB1234A1Z5',
+      companySize: '10000+ employees',
+      industry: 'Banking & Financial Services'
+    },
+    requirements: {
+      totalSites: 500,
+      cities: ['Mumbai', 'Pune', 'Nashik', 'Surat', 'Ahmedabad', 'Vadodara'],
+      description: '500 ATM sites, quarterly PMC, 4-hour breakdown SLA, certified engineers required',
+      contractDuration: '24 months',
+      specialRequirements: 'Minimum 50 certified ATM engineers required',
+      startDate: futureDate(30)
+    },
+    budget: { min: 15000000, max: 28000000, type: 'per_site' },
+    deadline: futureDate(18),
+    expiresAt: futureDate(30),
+    priority: 'urgent',
+    createdAt: hoursAgo(3),
+    updatedAt: hoursAgo(3),
+  },
+  {
+    type: 'b2b_opportunity',
+    title: 'Cloud Migration — ERP Modernization',
+    description: 'Mid-size manufacturing firm migrating on-prem ERP to AWS cloud with zero-downtime cutover.',
+    categoryCode: 'CLOUD',
+    categoryName: 'Cloud Services',
+    subServices: ['AWS', 'Docker', 'Kubernetes', 'DevOps', 'Migration'],
+    clientInfo: {
+      clientType: 'company',
+      company: 'Precision Tools India Ltd',
+      city: 'Chennai',
+      state: 'Tamil Nadu',
+      gstNumber: '33PTIL5678B2Z1',
+      companySize: '500-1000 employees',
+      industry: 'Manufacturing'
+    },
+    requirements: {
+      totalSites: 1,
+      cities: ['Chennai'],
+      description: 'AWS migration, containerization, CI/CD pipeline, 3-month project',
+      contractDuration: '90 Days',
+      startDate: futureDate(20)
+    },
+    budget: { min: 800000, max: 1500000, type: 'negotiable' },
+    deadline: futureDate(15),
+    expiresAt: futureDate(25),
+    priority: 'high',
+    createdAt: hoursAgo(6),
+    updatedAt: hoursAgo(6),
+  },
   {
     type: 'b2b_opportunity',
     title: 'Enterprise CCTV Rollout — Pan India Retail Chain',
@@ -586,47 +736,207 @@ const opportunities = [
   }
 ];
 
+const buildDemoProposals = (vendorObjectId, insertedOpps) => {
+  const oppId = (keyword) => {
+    const match = insertedOpps.find((o) => o.title.toLowerCase().includes(keyword.toLowerCase()));
+    return match?._id || insertedOpps[0]?._id || null;
+  };
+
+  const daysAgo = (d) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+
+  return [
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('Website Development'),
+      title: 'Quotation — Corporate Website for NovaTech Solutions',
+      coverLetter: `Dear Ankit,\n\nThank you for considering us for your corporate portfolio website. Our team specializes in React + Node.js builds with CMS integration.\n\nWe propose a phased delivery over 20 days with weekly demos.\n\n[${DEMO_TAG}]`,
+      pricing: {
+        lineItems: [
+          { description: 'UI/UX Design & Wireframes', quantity: 1, unitPrice: 15000, unit: 'lump', total: 15000 },
+          { description: 'React Frontend Development', quantity: 1, unitPrice: 35000, unit: 'lump', total: 35000 },
+          { description: 'Node.js Backend + CMS', quantity: 1, unitPrice: 22000, unit: 'lump', total: 22000 },
+        ],
+        subtotal: 72000,
+        gstPercentage: 18,
+        gstAmount: 12960,
+        totalAmount: 84960,
+        validUntil: futureDate(30),
+      },
+      timeline: { totalDays: 20, phases: [{ name: 'Design', duration: 5 }, { name: 'Development', duration: 12 }, { name: 'QA & Launch', duration: 3 }] },
+      teamStructure: [{ role: 'Full Stack Developer', count: 2, experience: '3+ years' }, { role: 'UI Designer', count: 1, experience: '2+ years' }],
+      status: 'draft',
+      createdAt: daysAgo(1),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('500 ATM Maintenance'),
+      title: 'Proposal — HDFC Bank ATM Maintenance Contract (500 Sites)',
+      coverLetter: `We are pleased to submit our comprehensive maintenance proposal for 500 ATM sites across Western India.\n\nOur certified field engineers maintain 99.2% uptime SLA for banking clients.\n\n[${DEMO_TAG}]`,
+      pricing: {
+        lineItems: [
+          { description: 'Quarterly Preventive Maintenance (500 sites)', quantity: 4, unitPrice: 850000, unit: 'quarter', total: 3400000 },
+          { description: 'Emergency Breakdown Response (4hr SLA)', quantity: 1, unitPrice: 1200000, unit: 'year', total: 1200000 },
+          { description: 'Spare Parts & Consumables Pool', quantity: 1, unitPrice: 450000, unit: 'year', total: 450000 },
+        ],
+        subtotal: 5050000,
+        gstPercentage: 18,
+        gstAmount: 909000,
+        totalAmount: 5959000,
+        validUntil: futureDate(45),
+      },
+      timeline: { totalDays: 730, phases: [{ name: 'Mobilization', duration: 30 }, { name: 'Rollout Phase 1', duration: 180 }, { name: 'Full Operations', duration: 520 }] },
+      teamStructure: [{ role: 'ATM Field Engineer', count: 50, experience: 'Certified' }, { role: 'Project Manager', count: 2, experience: '8+ years' }],
+      status: 'draft',
+      createdAt: daysAgo(2),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('Enterprise CCTV'),
+      title: 'Formal Quotation — StyleMart Retail CCTV Rollout (85 Stores)',
+      coverLetter: `StyleMart Retail Pvt Ltd,\n\nAttached is our formal quotation for IP-based CCTV upgrade across 85 retail locations with centralized NOC monitoring.\n\n[${DEMO_TAG}]`,
+      pricing: { subtotal: 12500000, gstPercentage: 18, gstAmount: 2250000, totalAmount: 14750000, validUntil: futureDate(20) },
+      timeline: { totalDays: 180 },
+      status: 'sent',
+      sentAt: daysAgo(3),
+      createdAt: daysAgo(5),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('Cloud Migration'),
+      title: 'Quotation — AWS Cloud Migration for Precision Tools India',
+      coverLetter: `Precision Tools India Ltd,\n\nOur DevOps team proposes a zero-downtime ERP migration to AWS with containerized microservices architecture.\n\n[${DEMO_TAG}]`,
+      pricing: { subtotal: 1180000, gstPercentage: 18, gstAmount: 212400, totalAmount: 1392400, validUntil: futureDate(15) },
+      timeline: { totalDays: 90 },
+      status: 'sent',
+      sentAt: daysAgo(4),
+      createdAt: daysAgo(6),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('Mobile App Development'),
+      title: 'Proposal — Food Delivery MVP for SpiceRoute Foods',
+      coverLetter: `SpiceRoute Foods Pvt Ltd,\n\nCross-platform MVP delivery including customer app, rider app, and restaurant dashboard.\n\n[${DEMO_TAG}]`,
+      pricing: { subtotal: 320000, gstPercentage: 18, gstAmount: 57600, totalAmount: 377600, validUntil: futureDate(25) },
+      timeline: { totalDays: 45 },
+      status: 'viewed',
+      sentAt: daysAgo(7),
+      viewedAt: daysAgo(2),
+      createdAt: daysAgo(8),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('Solar Installation 10kW'),
+      title: 'Accepted Quotation — 10kW Solar for Sunrise Textiles Mills',
+      coverLetter: `Project awarded and work in progress. 10kW 3-phase grid-tie solar installation.\n\n[${DEMO_TAG}]`,
+      pricing: { subtotal: 425000, gstPercentage: 12, gstAmount: 51000, totalAmount: 476000, validUntil: futureDate(10) },
+      timeline: { totalDays: 15 },
+      status: 'accepted',
+      sentAt: daysAgo(20),
+      viewedAt: daysAgo(18),
+      clientResponse: { date: daysAgo(15), message: 'Proposal accepted. Please proceed with site survey.' },
+      createdAt: daysAgo(22),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('RFQ: CCTV Infrastructure'),
+      title: 'Bid Response — AAI T3 Terminal CCTV Infrastructure',
+      coverLetter: `Airport Authority of India,\n\nTechnical and financial bid for world-class IP CCTV with AI analytics. Unfortunately not shortlisted.\n\n[${DEMO_TAG}]`,
+      pricing: { subtotal: 95000000, gstPercentage: 18, gstAmount: 17100000, totalAmount: 112100000, validUntil: futureDate(5) },
+      timeline: { totalDays: 365 },
+      status: 'rejected',
+      sentAt: daysAgo(30),
+      viewedAt: daysAgo(25),
+      clientResponse: { date: daysAgo(10), message: 'Not selected — L1 bidder policy applied.' },
+      createdAt: daysAgo(35),
+    },
+    {
+      vendorId: vendorObjectId,
+      opportunityId: oppId('EV Charging'),
+      title: 'Negotiating — EV Charging Stations for MetroSquare Mall',
+      coverLetter: `MetroSquare Mall Management,\n\nWe propose 4 x 60kW DC fast chargers with load management. Client requested revised pricing.\n\n[${DEMO_TAG}]`,
+      pricing: { subtotal: 580000, gstPercentage: 18, gstAmount: 104400, totalAmount: 684400, validUntil: futureDate(12) },
+      timeline: { totalDays: 15 },
+      status: 'negotiating',
+      sentAt: daysAgo(5),
+      viewedAt: daysAgo(3),
+      clientResponse: { date: daysAgo(1), message: 'Can you reduce total by 8%? Counter-offer under review.', counterOffer: 630000 },
+      createdAt: daysAgo(6),
+    },
+  ];
+};
+
 async function seed() {
-  await connectDB();
-  
-  console.log(`🌱 Seeding ${opportunities.length} opportunities for vendor: ${VENDOR_ID}`);
-  
-  // Delete existing seeded opportunities to avoid duplicates
-  await Opportunity.deleteMany({ 'clientInfo.phone': { $exists: true }, eligibleVendors: new mongoose.Types.ObjectId(VENDOR_ID) });
-  
-  const vendorObjectId = new mongoose.Types.ObjectId(VENDOR_ID);
+  await connectForScript();
 
-  // Add the awarded opportunities with bid data
-  opportunities.forEach(opp => {
-    opp.eligibleVendors = [vendorObjectId];
-    if (opp.status === 'awarded') {
-      opp.bids = [{
-        vendorId: vendorObjectId,
-        amount: opp.budget.min + Math.floor((opp.budget.max - opp.budget.min) * 0.7),
-        proposalText: 'Our team has the expertise and manpower to execute this project on time.',
-        timeline: 45,
-        teamSize: 5,
-        status: 'accepted',
-        submittedAt: opp.deadline || new Date()
-      }];
-      opp.awardedTo = {
-        vendorId: vendorObjectId,
-        awardedAt: opp.deadline || new Date()
-      };
+  let vendorIds = [];
+  if (VENDOR_ID_ARG) {
+    vendorIds = [VENDOR_ID_ARG];
+  } else {
+    const vendors = await Vendor.find({})
+      .select('_id businessName name email status')
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .lean();
+    if (!vendors.length) {
+      console.error('❌ No vendor found in database. Register a vendor first or pass vendorId.');
+      process.exit(1);
     }
-  });
+    vendorIds = vendors.map((v) => v._id.toString());
+    console.log(`📌 Seeding for ${vendorIds.length} vendor(s):`);
+    vendors.forEach((v) => console.log(`   • ${v.businessName || v.name} (${v._id})`));
+  }
 
-  const inserted = await Opportunity.insertMany(opportunities);
-  
-  console.log(`✅ Successfully seeded ${inserted.length} opportunities!`);
-  console.log(`📊 Breakdown:`);
-  console.log(`   - Client Requests: 5`);
-  console.log(`   - B2B Opportunities: 5`);
-  console.log(`   - Bulk Requirements: 3`);
-  console.log(`   - Bid/Quote Requests: 3`);
-  console.log(`   - Direct Invitations: 2`);
-  console.log(`   - Awarded (completed): 2`);
-  console.log(`\nRun this to test: GET /api/vendor/business-intake/opportunities (with vendor JWT)`);
+  // Remove previous demo seed
+  await Opportunity.deleteMany({ description: { $regex: DEMO_TAG, $options: 'i' } });
+  await VendorProposal.deleteMany({ coverLetter: { $regex: DEMO_TAG, $options: 'i' } });
+
+  let totalInserted = 0;
+  let totalProposals = 0;
+
+  for (const vendorId of vendorIds) {
+    const vendorObjectId = new mongoose.Types.ObjectId(vendorId);
+    const docs = opportunities.map((opp) => {
+      const doc = {
+        ...opp,
+        description: `${opp.description}\n\n[${DEMO_TAG}]`,
+        eligibleVendors: [vendorObjectId],
+      };
+      if (doc.status === 'awarded') {
+        doc.bids = [{
+          vendorId: vendorObjectId,
+          amount: doc.budget.min + Math.floor((doc.budget.max - doc.budget.min) * 0.7),
+          proposalText: 'Our team has the expertise and manpower to execute this project on time.',
+          timeline: 45,
+          teamSize: 5,
+          status: 'accepted',
+          submittedAt: doc.deadline || new Date()
+        }];
+        doc.awardedTo = {
+          vendorId: vendorObjectId,
+          awardedAt: doc.deadline || new Date()
+        };
+      }
+      return doc;
+    });
+    const inserted = [];
+    for (const doc of docs) {
+      const opp = new Opportunity(doc);
+      await opp.save();
+      inserted.push(opp);
+    }
+    totalInserted += inserted.length;
+
+    const proposalDocs = buildDemoProposals(vendorObjectId, inserted);
+    for (const pDoc of proposalDocs) {
+      const proposal = new VendorProposal(pDoc);
+      await proposal.save();
+      totalProposals += 1;
+    }
+  }
+
+  console.log(`✅ Successfully seeded ${totalInserted} opportunities across ${vendorIds.length} vendor(s)!`);
+  console.log(`✅ Successfully seeded ${totalProposals} proposals & quotations!`);
+  console.log('📊 Proposals tab: /vendor/dynamic/business-intake/proposals');
 
   await mongoose.connection.close();
   process.exit(0);
