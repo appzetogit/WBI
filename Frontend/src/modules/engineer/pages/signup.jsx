@@ -531,7 +531,7 @@ export default function EngineerSignup() {
         }
 
         const options = {
-          key: res.data.key || import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TYY4zOaT9M3tQ4',
+          key: res.data.key,
           amount: res.data.amount,
           currency: res.data.currency,
           name: 'WBI Engineer',
