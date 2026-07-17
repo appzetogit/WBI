@@ -24,6 +24,9 @@ connectDB();
 const { initRedis } = require('./services/redisService');
 initRedis();
 
+// Initialize BullMQ Workers
+require('./queues/registrationQueue');
+
 // Initialize Express app
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (Nginx) for express-rate-limit

@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+const { logAudit } = require('../../utils/auditLogger');
 const Engineer = require('../../models/Engineer');
 const { findUserAcrossCollections } = require('../../utils/authHelper');
 const { generateOTP, hashOTP, storeOTP, verifyOTP, checkRateLimit } = require('../../utils/redisOtp.util');
@@ -213,7 +215,12 @@ const register = async (req, res) => {
       });
     }
 
-    // Check existing
+    // Start Mongoose Transaction Session
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Check existing
     const existingEngineer = await Engineer.findOne({ $or: [{ phone }, { email }] });
     if (existingEngineer) {
       return res.status(400).json({
@@ -310,8 +317,8 @@ const register = async (req, res) => {
     const aadhaarDoc = processedDocuments.find(d => d.key === 'aadhaar' || d.key === 'aadhar' || d.key === 'Aadhaar Card Front');
     const panDoc = processedDocuments.find(d => d.key === 'pan' || d.key === 'PAN Card Photo');
 
-    // Create engineer
-    const engineer = await Engineer.create({
+    // Create engineer within transaction (array format required)
+    const [engineer] = await Engineer.create([{
       name, email, phone, password,
       serviceCategories: serviceCategories || [],
       subServices: subServices || [],
@@ -326,7 +333,6 @@ const register = async (req, res) => {
         city: city || '',
         pincode: pincode || ''
       },
-      // Documents fallback
       pan: {
         number: customFields?.panNumber || '',
         document: panDoc?.url || null
@@ -337,12 +343,10 @@ const register = async (req, res) => {
         pan: panDoc?.url || null,
         status: 'Pending'
       },
-      
       tshirtSize, toolsAvailable, otherTools, hasBike, vehicleNumber,
       drivingLicenseUrl: drivingLicenseUrlProcessed, rcUrl: rcUrlProcessed, 
       selfieUrl: selfieUrlProcessed, introVideoUrl: introVideoUrlProcessed,
       customFields: customFields || {},
-      
       engineerType: draft ? draft.engineerType : 'freelancer',
       vendorId: vendorId,
       joiningFeePaid: draft ? (draft.joiningFeeStatus === 'paid' || draft.joiningFeeStatus === 'skipped') : false,
@@ -352,14 +356,30 @@ const register = async (req, res) => {
       couponCode: draft ? draft.couponCode : '',
       razorpayOrderId: draft ? draft.razorpayOrderId : '',
       razorpayPaymentId: draft ? draft.razorpayPaymentId : '',
-
       status: ENGINEER_STATUS.OFFLINE,
       approvalStatus: 'pending' // Admin needs to approve
-    });
+    }], { session });
 
     // Generate JWT tokens with initial session
     const loginSessionId = Date.now().toString();
-    await Engineer.findByIdAndUpdate(engineer._id, { loginSessionId });
+    await Engineer.findByIdAndUpdate(engineer._id, { loginSessionId }, { session });
+
+    // Log the audit event within the transaction
+    await logAudit({
+      actionType: 'ENGINEER_REGISTERED',
+      eventMessage: `Engineer ${engineer.name} registered successfully via app from IP ${req.ip}`,
+      actorId: engineer._id,
+      actorRole: 'engineer',
+      targetId: engineer._id,
+      targetType: 'Engineer',
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+      session
+    });
+
+    // Commit transaction if all database writes succeed
+    await session.commitTransaction();
+    session.endSession();
 
     const tokens = generateTokenPair({
       userId: engineer._id,
@@ -372,12 +392,23 @@ const register = async (req, res) => {
     delete engineerRes.__v;
     engineerRes.id = engineer._id;
 
+    // Enqueue Heavy Operations to BullMQ (Scaling)
+    const { enqueueRegistrationTask } = require('../../queues/registrationQueue');
+    await enqueueRegistrationTask('KYC_VERIFICATION', { engineerId: engineer._id });
+    await enqueueRegistrationTask('WELCOME_NOTIFICATION', { phone: engineer.phone, email: engineer.email });
+
     res.status(201).json({
       success: true,
-      message: 'Registration successful. Account pending approval.',
+      message: 'Registration received! You will receive a confirmation SMS shortly. Account is pending approval.',
       engineer: engineerRes,
       ...tokens
     });
+    } catch (txError) {
+      // Rollback database writes if any part of the registration fails
+      await session.abortTransaction();
+      session.endSession();
+      throw txError;
+    }
   } catch (error) {
     console.error('Engineer registration error:', error);
     res.status(500).json({

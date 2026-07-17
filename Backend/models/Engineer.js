@@ -534,6 +534,15 @@ const engineerSchema = new mongoose.Schema({
   rejectionReason: {
     type: String,
     default: ''
+  },
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
@@ -544,6 +553,16 @@ engineerSchema.index({ status: 1 });
 engineerSchema.index({ serviceCategories: 1 });
 engineerSchema.index({ vendorId: 1 });
 engineerSchema.index({ geoLocation: '2dsphere' });
+engineerSchema.index({ isDeleted: 1 });
+
+// Soft Delete filter for all find operations
+engineerSchema.pre(/^find/, function(next) {
+  // If explicitly querying for deleted records (e.g. by Admin), skip this filter
+  if (this.getQuery().isDeleted === undefined) {
+    this.find({ isDeleted: { $ne: true } });
+  }
+  next();
+});
 
 // Hash password before saving
 engineerSchema.pre('save', async function (next) {

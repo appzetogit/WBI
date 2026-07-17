@@ -3,27 +3,11 @@ const mongoose = require('mongoose');
 const auditLogSchema = new mongoose.Schema({
   actionType: { 
     type: String, 
-    required: true,
-    enum: [
-      'BANK_DETAILS_UPDATE',
-      'WITHDRAWAL_REQUEST',
-      'WITHDRAWAL_APPROVED',
-      'WITHDRAWAL_REJECTED',
-      'PAYMENT_RELEASED',
-      'B2B_PROFILE_UPDATE',
-      'B2B_CONTACT_UPDATE',
-      'B2B_ADDRESS_UPDATE',
-      'B2B_LOGO_UPDATE',
-      'B2B_BRANCH_CREATE',
-      'B2B_BRANCH_UPDATE',
-      'B2B_BRANCH_DELETE',
-      'B2B_DOCUMENT_UPLOAD',
-      'B2B_DOCUMENT_REUPLOAD',
-      'B2B_BANK_VERIFY',
-      'B2B_PASSWORD_CHANGE',
-      'B2B_SESSIONS_LOGOUT',
-      'B2B_NOTIF_PREFS_UPDATE'
-    ]
+    required: true
+    // Enum removed to support flexible system-wide logging
+  },
+  eventMessage: { 
+    type: String 
   },
   actorId: { type: mongoose.Schema.Types.ObjectId, required: true }, // Who did it
   actorRole: { type: String, required: true }, // 'engineer', 'vendor', 'admin', 'worker'

@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react'; // Updated index to .jsx
 import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { Toaster as SonnerToaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from './routes';
 import { SocketProvider } from './context/SocketContext';
@@ -9,6 +10,7 @@ import { CityProvider } from './context/CityContext';
 import { LocationPermissionChecker } from './components/common/LocationPermissionChecker';
 import NavigationProgress from './components/common/NavigationProgress';
 import { useJsApiLoader } from '@react-google-maps/api';
+import ErrorBoundary from './components/common/ErrorBoundary';
 
 const libraries = ['places', 'geometry'];
 
@@ -62,33 +64,21 @@ function App() {
           <CityProvider>
             <CartProvider>
               <div className="App">
-                <AppRoutes />
-                <LocationPermissionChecker />
-                <Toaster
-                  position="top-center"
-                  reverseOrder={false}
-                  toastOptions={{
-                    duration: 2000, // Global default (reduced from 3000)
-                    style: {
-                      background: '#333',
-                      color: '#fff',
-                      borderRadius: '10px',
-                      padding: '12px 20px',
-                    },
-                    success: {
-                      duration: 1000, // 1 second as requested
-                      style: {
-                        background: '#10B981',
-                      },
-                    },
-                    error: {
-                      duration: 2000, // Reduced from 4000
-                      style: {
-                        background: '#EF4444',
-                      },
-                    },
-                  }}
-                />
+                <ErrorBoundary>
+                  <AppRoutes />
+                  <LocationPermissionChecker />
+                  <SonnerToaster richColors position="bottom-right" closeButton />
+                  <Toaster
+                    position="top-center"
+                    reverseOrder={false}
+                    toastOptions={{
+                      duration: 2000,
+                      style: { background: '#333', color: '#fff', borderRadius: '10px', padding: '12px 20px' },
+                      success: { duration: 1000, style: { background: '#10B981' } },
+                      error: { duration: 2000, style: { background: '#EF4444' } },
+                    }}
+                  />
+                </ErrorBoundary>
               </div>
             </CartProvider>
           </CityProvider>

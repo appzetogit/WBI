@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { FiUser, FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowRight, FiArrowLeft, FiChevronLeft, FiMapPin, FiBriefcase, FiUploadCloud, FiVideo, FiCamera, FiCheck, FiX, FiTag, FiLoader } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
+import { useDebouncedCallback } from 'use-debounce';
 import LogoLoader from '../../../components/common/LogoLoader';
 import { engineerAuthService } from '../../../services/authService';
 import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
@@ -9,6 +10,16 @@ import Logo from '../../../components/common/Logo';
 import ValidatedInput from '../../../components/common/ValidatedInput';
 import { validators } from '../../../utils/validationUtils';
 import { uploadSelfieToCloudinary, uploadToCloudinary } from '../../../utils/cloudinaryUpload';
+import optimizeCloudinaryUrl from '../../../utils/cloudinaryOptimize';
+
+/** Handle 429 Too Many Requests gracefully */
+const handleApiError = (err, fallbackMsg) => {
+  if (err?.response?.status === 429) {
+    toast.error('Please slow down — too many requests. Try again in a moment.', { icon: '🛑' });
+    return;
+  }
+  toast.error(err?.response?.data?.message || fallbackMsg);
+};
 
 const generateObjectId = () => {
   const timestamp = Math.floor(new Date().getTime() / 1000).toString(16);
@@ -33,13 +44,16 @@ export default function EngineerSignup() {
   const [config, setConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const kycRef = React.useRef(null);
+  const kycRef = useRef(null);
+  /** Single-flight guard — prevents any 2 API calls running simultaneously */
+  const isBusy = useRef(false);
 
   // OTP Verification State
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
   const [isPhoneVerified, setIsPhoneVerified] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
 
   // Document Verification State
   const [isAadhaarVerified, setIsAadhaarVerified] = useState(false);
@@ -308,11 +322,14 @@ export default function EngineerSignup() {
     });
   };
 
-  const handleSendOtp = async (phone) => {
+  // LAYER 1: Disable on click. LAYER 2: Debounced so rapid clicks only fire once after 400ms.
+  const handleSendOtp = useDebouncedCallback(async (phone) => {
     if (!phone || phone.length < 10) {
       toast.error('Please enter a valid 10-digit mobile number');
       return;
     }
+    if (sendingOtp) return; // LAYER 1: already in-flight
+    setSendingOtp(true);
     try {
       const res = await engineerAuthService.sendOTP(phone);
       if (res.success) {
@@ -322,15 +339,18 @@ export default function EngineerSignup() {
         toast.error(res.message || 'Failed to send OTP');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to send OTP');
+      handleApiError(err, 'Failed to send OTP');
+    } finally {
+      setSendingOtp(false);
     }
-  };
+  }, 400);
 
   const handleVerifyOtp = async (phone) => {
     if (!otp || otp.length !== 6) {
       toast.error('Please enter a valid 6-digit OTP');
       return;
     }
+    if (verifyingOtp) return; // LAYER 1: guard
     setVerifyingOtp(true);
     try {
       const res = await engineerAuthService.verifyLogin({ phone, otp });
@@ -341,7 +361,7 @@ export default function EngineerSignup() {
         toast.error(res.message || 'Invalid OTP');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Invalid OTP');
+      handleApiError(err, 'Invalid OTP');
     } finally {
       setVerifyingOtp(false);
     }
@@ -381,6 +401,7 @@ export default function EngineerSignup() {
       toast.error('Please provide PAN number, Full Name, and Date of Birth');
       return;
     }
+    if (verifyingPan) return; // LAYER 1: guard — prevents 10x clicks
     setVerifyingPan(true);
     try {
       const res = await engineerAuthService.verifyPanSignup(formData.panNumber, formData.panFullName, formData.panDob);
@@ -391,7 +412,7 @@ export default function EngineerSignup() {
         toast.error(res.message || 'PAN verification failed');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'PAN verification failed');
+      handleApiError(err, 'PAN verification failed');
     } finally {
       setVerifyingPan(false);
     }
@@ -741,17 +762,33 @@ export default function EngineerSignup() {
                       {field.type === 'tel' && (
                         <div className="mt-2">
                            {!isPhoneVerified && (
-                             <button type="button" onClick={() => handleSendOtp(formData[field.key])} className="text-sm text-[#4F46E5] font-semibold">
+                             // LAYER 1: Disable + spinner on click
+                             <button
+                               type="button"
+                               onClick={() => handleSendOtp(formData[field.key])}
+                               disabled={sendingOtp}
+                               className="text-sm text-[#4F46E5] font-semibold disabled:opacity-50 flex items-center gap-1"
+                             >
+                               {sendingOtp && <FiLoader className="w-3 h-3 animate-spin" />}
                                {otpSent ? 'Resend OTP' : 'Send OTP'}
                              </button>
                            )}
                            {otpSent && !isPhoneVerified && (
                               <div className="mt-2 flex gap-2">
                                 <input type="text" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full p-2 border rounded-lg" placeholder="6-digit OTP" />
-                                <button type="button" onClick={() => handleVerifyOtp(formData[field.key])} className="px-4 bg-gray-900 text-white rounded-lg font-medium">Verify</button>
+                                {/* LAYER 1: Disable + spinner on click */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyOtp(formData[field.key])}
+                                  disabled={verifyingOtp}
+                                  className="px-4 bg-gray-900 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  {verifyingOtp && <FiLoader className="w-3 h-3 animate-spin" />}
+                                  Verify
+                                </button>
                               </div>
                            )}
-                           {isPhoneVerified && <span className="text-green-600 text-sm font-medium">Verified</span>}
+                           {isPhoneVerified && <span className="text-green-600 text-sm font-medium">✓ Verified</span>}
                         </div>
                       )}
                     </div>
@@ -891,7 +928,7 @@ export default function EngineerSignup() {
                             <span className="text-xs font-semibold text-[#4F46E5]">Uploading…</span>
                           </>
                         ) : formData.selfieUrl ? (
-                          <img src={formData.selfieUrl} alt="Selfie" className="w-full h-full object-cover" />
+                          <img fetchPriority="low" loading="lazy" src={optimizeCloudinaryUrl(formData.selfieUrl, { width: 400 })} alt="Selfie" className="w-full h-full object-cover" />
                         ) : (
                           <>
                             <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mb-2">
@@ -1036,12 +1073,13 @@ export default function EngineerSignup() {
           </div>
 
           {/* Navigation Buttons */}
+          {/* LAYER 1: All nav buttons disabled while ANY operation is in progress */}
           <div className="flex justify-between items-center mt-10 border-t pt-6">
             {currentStep > 1 ? (
               <button
                 type="button"
                 onClick={() => setCurrentStep(prev => prev - 1)}
-                disabled={isSubmitting || verifyingOtp}
+                disabled={isSubmitting || verifyingOtp || sendingOtp || verifyingPan || verifyingAadhaar || !!uploadingField}
                 className="flex items-center px-6 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl font-medium transition-colors disabled:opacity-50"
               >
                 <FiArrowLeft className="mr-2" /> Back
@@ -1054,10 +1092,13 @@ export default function EngineerSignup() {
                 onClick={() => {
                   if (validateStep(currentStep)) setCurrentStep(prev => prev + 1);
                 }}
-                disabled={isSubmitting || verifyingOtp}
+                disabled={isSubmitting || verifyingOtp || sendingOtp || verifyingPan || verifyingAadhaar || !!uploadingField}
                 className="flex items-center px-8 py-2.5 bg-[#4F46E5] text-white rounded-xl font-semibold hover:bg-[#4338ca] shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Next <FiArrowRight className="ml-2" />
+                {(verifyingOtp || sendingOtp || verifyingPan || verifyingAadhaar || !!uploadingField)
+                  ? <><FiLoader className="animate-spin mr-2 w-4 h-4" /> Please wait...</>
+                  : <>Next <FiArrowRight className="ml-2" /></>
+                }
               </button>
             ) : (
               <button
@@ -1067,13 +1108,14 @@ export default function EngineerSignup() {
                 className="flex items-center px-10 py-3 bg-black text-white rounded-xl font-bold hover:bg-gray-900 shadow-sm transition-all disabled:opacity-50"
               >
                 {isSubmitting ? (
-                  <><LogoLoader fullScreen={false} /> Submitting...</>
+                  <><FiLoader className="animate-spin mr-2 w-4 h-4" /> Submitting...</>
                 ) : (
                   <>Submit Registration <FiCheckCircle className="ml-2 w-5 h-5" /></>
                 )}
               </button>
             )}
           </div>
+
 
         </div>
       </main>

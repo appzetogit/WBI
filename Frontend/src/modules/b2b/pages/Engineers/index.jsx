@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 
   FiSearch, FiFilter, FiRefreshCw, FiDownload, FiMapPin, 
@@ -10,8 +11,10 @@ import api from '../../../../services/api';
 import { useSocket } from '../../../../context/SocketContext';
 import EngineerDetailsDrawer from './components/EngineerDetailsDrawer';
 import EngineerTrackingModal from './components/EngineerTrackingModal';
+import SkeletonLoader from '../../../../components/common/SkeletonLoader';
 
 const Engineers = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const socket = useSocket();
 
@@ -255,7 +258,11 @@ const Engineers = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {isLoading ? (
-                  <tr><td colSpan={10} className="text-center py-16"><div className="animate-spin w-6 h-6 border-2 border-[#10AFA5] border-t-transparent rounded-full mx-auto" /></td></tr>
+                  <tr>
+                    <td colSpan={10} className="p-0">
+                      <SkeletonLoader type="list" count={5} className="mx-4 my-2" />
+                    </td>
+                  </tr>
                 ) : engineers.length > 0 ? (
                   engineers.map(eng => (
                     <tr key={eng._id} className="hover:bg-gray-50/50 transition-colors">
@@ -365,7 +372,7 @@ const Engineers = () => {
         <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2"><FiNavigation className="text-[#10AFA5]"/> Live Tracking</h3>
-            <button onClick={() => window.location.href='/b2b/live-tracking'} className="text-[10px] font-bold text-[#10AFA5] hover:underline">View All</button>
+            <button onClick={() => navigate('/b2b/live-tracking')} className="text-[10px] font-bold text-[#10AFA5] hover:underline">View All</button>
           </div>
           <div className="w-full h-40 bg-gray-100 rounded-lg overflow-hidden relative mb-4">
             <div className="absolute inset-0 bg-[url('https://maps.googleapis.com/maps/api/staticmap?center=19.0760,72.8777&zoom=11&size=400x200&sensor=false')] bg-cover opacity-70"/>

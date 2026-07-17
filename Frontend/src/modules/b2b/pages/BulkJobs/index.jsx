@@ -373,9 +373,9 @@ const BulkJobs = () => {
               </p>
             </div>
           </div>
-          <a href="/b2b/wallet" className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors">
-            Top Up Now
-          </a>
+          <Link to="/b2b/wallet" className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors">
+            Top Up Wallet
+          </Link>
         </div>
       )}
 

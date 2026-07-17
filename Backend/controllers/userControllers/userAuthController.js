@@ -247,9 +247,10 @@ const register = async (req, res) => {
       isEmailVerified: email ? false : true
     });
 
-    // Send Welcome Email
+    // Send Welcome Email via Queue (Scaling)
     if (email) {
-      sendWelcomeEmail(email, name).catch(err => console.error(err));
+      const { enqueueRegistrationTask } = require('../../queues/registrationQueue');
+      await enqueueRegistrationTask('WELCOME_NOTIFICATION', { email: email, name: name, type: 'user' });
     }
 
     // Generate JWT tokens with session

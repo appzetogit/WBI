@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'sonner';
 import { apiCache } from '../utils/apiCache';
 
 // API Base URL
@@ -167,20 +168,57 @@ api.interceptors.response.use(
         // Refresh failed, logout
         processQueue(refreshError, null);
         isRefreshing = false;
+        toast.error('Session expired. Please log in again.');
         handleLogout(role);
         return Promise.reject(refreshError);
       }
     }
 
-    // Handle 403 Forbidden - Role mismatch or Invalid Token
-    if (error.response?.status === 403) {
-      console.error('Access Denied (403):', error.response.data.message);
-      const message = error.response.data.message?.toLowerCase() || '';
-      const isPendingApproval = message.includes('pending') || message.includes('rejected') || message.includes('suspended');
-      const path = window.location.pathname;
-      if (!path.includes('/login') && !isPendingApproval) {
-        const { role } = getTokenKeys(originalRequest.url);
-        handleLogout(role);
+    // Determine role from request URL to handle logout if needed
+    const { role } = getTokenKeys(originalRequest.url);
+
+    // Global Error Handling via Sonner Toasts
+    if (error.response) {
+      const status = error.response.status;
+      const message = error.response.data?.message?.toLowerCase() || '';
+
+      switch (status) {
+        case 401:
+          // If it's a 401 on an auth endpoint (like wrong password), don't trigger global logout
+          if (!isAuthEndpoint) {
+            toast.error('Session expired. Please log in again.');
+            handleLogout(role);
+          }
+          break;
+        case 403:
+          {
+            console.error('Access Denied (403):', error.response.data?.message);
+            const isPendingApproval = message.includes('pending') || message.includes('rejected') || message.includes('suspended');
+            const path = window.location.pathname;
+            
+            if (!path.includes('/login') && !isPendingApproval) {
+              toast.error("Access denied. You don't have permission.");
+              handleLogout(role);
+            }
+          }
+          break;
+        case 429:
+          toast.warning("Please slow down. You're making too many requests.");
+          break;
+        case 500:
+          toast.error("Server error. We're looking into it, please try again later.");
+          break;
+        default:
+          // Fallback for 400s (Bad Request, Conflict, etc) to show the exact backend message
+          if (status >= 400 && status < 500 && error.response.data?.message) {
+            toast.error(error.response.data.message);
+          }
+          break;
+      }
+    } else if (error.request) {
+      // Network Error / No Response
+      if (!axios.isCancel(error)) {
+        toast.error("Network error. Please check your internet connection.");
       }
     }
 

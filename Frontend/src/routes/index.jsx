@@ -13,21 +13,6 @@ const WorkerRoutes = React.lazy(() => import('../modules/worker/routes'));
 const EngineerRoutes = React.lazy(() => import('../modules/engineer/routes'));
 const B2BRoutes = React.lazy(() => import('../modules/b2b/routes'));
 
-// Preload function for background fetching (Phase 13)
-const preloadRoutes = () => {
-  if (window.requestIdleCallback) {
-    window.requestIdleCallback(() => {
-      import('../modules/admin/routes');
-      import('../modules/engineer/routes');
-    });
-  } else {
-    setTimeout(() => {
-      import('../modules/admin/routes');
-      import('../modules/engineer/routes');
-    }, 2000);
-  }
-};
-
 const AppRoutes = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -40,9 +25,6 @@ const AppRoutes = () => {
     };
 
     window.addEventListener('auth:redirect', handleAuthRedirect);
-    
-    // Background prefetching for engineer/admin routes
-    preloadRoutes();
     
     return () => window.removeEventListener('auth:redirect', handleAuthRedirect);
   }, [navigate]);

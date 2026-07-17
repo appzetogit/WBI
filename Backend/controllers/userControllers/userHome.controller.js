@@ -317,8 +317,8 @@ const getHomeServices = async (req, res) => {
       services: groupedServices
     };
 
-    // Cache services data for 5 minutes (300 seconds)
-    await cacheHelper.setCache(cacheKey, responseData, 300);
+    // Cache response for 1 hour (3600 seconds) to handle high traffic
+    await cacheHelper.setCache(cacheKey, responseData, 3600);
     console.log(`[USER_HOME_SERVICES_CACHE_SET] Cached services data for key: ${cacheKey}`);
 
     res.status(200).json({

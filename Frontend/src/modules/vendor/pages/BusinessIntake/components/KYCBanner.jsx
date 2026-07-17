@@ -1,5 +1,6 @@
 import React from 'react';
 import { ShieldAlert } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const KYCBanner = ({ show = true }) => {
   if (!show) return null;
@@ -12,12 +13,12 @@ const KYCBanner = ({ show = true }) => {
           <p className="text-xs text-amber-700">You must complete KYC verification before submitting bids or accepting invitations.</p>
         </div>
       </div>
-      <a
-        href="/vendor/dynamic/compliance"
-        className="ml-4 px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors whitespace-nowrap"
+      <Link 
+        to="/vendor/dynamic/compliance" 
+        className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors"
       >
         Complete KYC →
-      </a>
+      </Link>
     </div>
   );
 };

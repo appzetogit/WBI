@@ -8,6 +8,7 @@ import {
 } from 'react-icons/fi';
 import Logo from '../../../../components/common/Logo';
 import toast from 'react-hot-toast';
+import PrefetchLink from '../../../../components/common/PrefetchLink';
 
 const navItems = [
   { name: 'Dashboard', path: '/b2b/dashboard', icon: FiHome },
@@ -140,7 +141,7 @@ const B2BLayout = () => {
                           {item.subItems.map((sub) => {
                             const isSubActive = location.pathname === sub.path || (sub.path === '/b2b/bulk-jobs/upload' && location.pathname === '/b2b/bulk-jobs');
                             return (
-                              <Link
+                              <PrefetchLink
                                 key={sub.name}
                                 to={sub.path}
                                 className={`flex items-center px-4 py-2 rounded-lg transition-all text-xs font-semibold ${
@@ -151,7 +152,7 @@ const B2BLayout = () => {
                               >
                                 <span className="w-1.5 h-1.5 rounded-full mr-2 bg-current shrink-0" />
                                 {sub.name}
-                              </Link>
+                              </PrefetchLink>
                             );
                           })}
                         </motion.div>
@@ -163,7 +164,7 @@ const B2BLayout = () => {
 
               const isActive = location.pathname === item.path || (item.path !== '/b2b/dashboard' && location.pathname.startsWith(item.path));
               return (
-                <Link
+                <PrefetchLink
                   key={item.name}
                   to={item.path}
                   className={`flex items-center px-4 py-2.5 rounded-xl transition-all group ${
@@ -174,7 +175,7 @@ const B2BLayout = () => {
                 >
                   <item.icon className={`w-5 h-5 mr-3 transition-colors ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-[#10AFA5]'}`} />
                   <span className="text-sm font-semibold">{item.name}</span>
-                </Link>
+                </PrefetchLink>
               );
             })}
           </nav>

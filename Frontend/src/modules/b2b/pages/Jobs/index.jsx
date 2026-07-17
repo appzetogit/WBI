@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
   FiSearch, FiFilter, FiRefreshCw, FiDownload, FiMapPin, 
   FiClock, FiCheckCircle, FiAlertCircle, FiMoreVertical, 
@@ -11,8 +13,10 @@ import api from '../../../../services/api';
 import { useSocket } from '../../../../context/SocketContext';
 import JobDetailsDrawer from './components/JobDetailsDrawer';
 import LiveTrackingModal from './components/LiveTrackingModal';
+import SkeletonLoader from '../../../../components/common/SkeletonLoader';
 
 const Jobs = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const socket = useSocket();
 
@@ -33,7 +37,7 @@ const Jobs = () => {
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
 
   // Drawers & Modals
   const [selectedJob, setSelectedJob] = useState(null);
@@ -119,6 +123,15 @@ const Jobs = () => {
 
   const jobs = jobsRes?.data || [];
   const pagination = jobsRes?.pagination || { page: 1, totalPages: 1, total: 0 };
+
+  // Virtual Scrolling
+  const parentRef = useRef(null);
+  const rowVirtualizer = useVirtualizer({
+    count: jobs.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 85,
+    overscan: 5,
+  });
 
   // Handlers
   const handleFilterChange = (key, value) => {
@@ -302,10 +315,10 @@ const Jobs = () => {
 
         {/* Jobs Table */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-visible">
-          <div className="overflow-x-auto min-h-[400px]">
+          <div ref={parentRef} className="overflow-x-auto min-h-[400px] max-h-[600px] overflow-y-auto relative">
             <table className="w-full text-left whitespace-nowrap">
-              <thead>
-                <tr className="bg-gray-50/50 border-b border-gray-100 text-[11px] uppercase tracking-wider font-bold text-gray-500">
+              <thead className="sticky top-0 z-10 bg-gray-50/50 shadow-sm">
+                <tr className="border-b border-gray-100 text-[11px] uppercase tracking-wider font-bold text-gray-500">
                   <th className="py-4 pl-6 pr-4">Job ID</th>
                   <th className="py-4 px-4">Customer Details</th>
                   <th className="py-4 px-4">Service</th>
@@ -320,11 +333,21 @@ const Jobs = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {isLoading ? (
-                  <tr><td colSpan={10} className="text-center py-12"><div className="animate-spin w-6 h-6 border-2 border-[#10AFA5] border-t-transparent rounded-full mx-auto" /></td></tr>
+                  <tr>
+                    <td colSpan={10} className="p-0">
+                      <SkeletonLoader type="list" count={5} className="mx-4 my-2" />
+                    </td>
+                  </tr>
                 ) : jobs.length > 0 ? (
-                  jobs.map((job) => (
-                    <tr key={job._id} className="hover:bg-gray-50/50 transition-colors text-sm">
-                      <td className="py-4 pl-6 pr-4">
+                  <>
+                    {rowVirtualizer.getVirtualItems().length > 0 && rowVirtualizer.getVirtualItems()[0]?.start > 0 && (
+                      <tr><td style={{ height: `${rowVirtualizer.getVirtualItems()[0]?.start}px` }} colSpan={10}></td></tr>
+                    )}
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const job = jobs[virtualRow.index];
+                      return (
+                        <tr key={job._id} data-index={virtualRow.index} ref={rowVirtualizer.measureElement} className="hover:bg-gray-50/50 transition-colors text-sm">
+                          <td className="py-4 pl-6 pr-4">
                         <p className="font-bold text-[#10AFA5]">{job.jobId}</p>
                         <p className="text-[10px] text-gray-400 mt-0.5">Batch: {job.batchId?.batchId || 'Manual'}</p>
                       </td>
@@ -411,8 +434,13 @@ const Jobs = () => {
                         </div>
                       </td>
                     </tr>
-                  ))
-                ) : (
+                  );
+                })}
+                {rowVirtualizer.getVirtualItems().length > 0 && rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end > 0 && (
+                  <tr><td style={{ height: `${rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end}px` }} colSpan={10}></td></tr>
+                )}
+              </>
+            ) : (
                   <tr><td colSpan={10} className="text-center py-16 text-gray-400 font-medium text-sm">No jobs found matching criteria.</td></tr>
                 )}
               </tbody>
@@ -469,7 +497,7 @@ const Jobs = () => {
         <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
           <h3 className="font-bold text-gray-900 mb-4">Quick Actions</h3>
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => window.location.href='/b2b/bulk-jobs/upload'} className="bg-[#E6F4F2] hover:bg-[#c9ebe7] text-[#10AFA5] p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
+            <button onClick={() => navigate('/b2b/bulk-jobs/upload')} className="bg-[#E6F4F2] hover:bg-[#c9ebe7] text-[#10AFA5] p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
               <FiUploadCloud className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Upload New Jobs</span>
             </button>
@@ -477,7 +505,7 @@ const Jobs = () => {
               <FiDownload className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Download Report</span>
             </button>
-            <button onClick={() => window.location.href='/b2b/wallet'} className="bg-green-50 hover:bg-green-100 text-green-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
+            <button onClick={() => navigate('/b2b/wallet')} className="bg-green-50 hover:bg-green-100 text-green-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
               <FiBriefcase className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Wallet & Payments</span>
             </button>

@@ -344,9 +344,15 @@ const register = async (req, res) => {
       }
     } catch (e) { console.error('Notify error', e); }
 
+    // Enqueue Heavy Operations to BullMQ (Scaling)
+    const { enqueueRegistrationTask } = require('../../queues/registrationQueue');
+    await enqueueRegistrationTask('KYC_VERIFICATION', { vendorId: vendor._id });
+    await enqueueRegistrationTask('BANK_PENNY_DROP', { vendorId: vendor._id, bankDetails: 'placeholder' });
+    await enqueueRegistrationTask('WELCOME_NOTIFICATION', { phone: vendor.phone, email: vendor.email });
+
     res.status(201).json({
       success: true,
-      message: 'Registration successful! Pending approval.',
+      message: 'Registration received! You will receive a confirmation SMS shortly. Your documents are being verified.',
       vendor: {
         id: vendor._id,
         name: vendor.name,
