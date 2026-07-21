@@ -387,6 +387,13 @@ exports.unifiedLogin = async (req, res) => {
 
     const { user: foundUser, role: resolvedRole, redirect: resolvedRedirect, model: matchedModel } = searchResult;
 
+    if (preferredRole && resolvedRole !== preferredRole) {
+      return res.status(404).json({
+        success: false,
+        message: `No ${preferredRole} account found with this mobile. Try the correct app or register.`
+      });
+    }
+
     // Verify Password
     if (!foundUser.password) {
       return res.status(401).json({
@@ -471,6 +478,8 @@ exports.unifiedLogin = async (req, res) => {
       refreshToken: tokens.refreshToken,
       user: userResponse,
       vendor: resolvedRole === 'vendor' ? userResponse : undefined,
+      engineer: resolvedRole === 'engineer' ? userResponse : undefined,
+      worker: resolvedRole === 'worker' ? userResponse : undefined,
       role: resolvedRole,
       profileId: foundUser._id.toString(),
       redirectTo: isPendingVendor ? '/vendor/pending-approval' : resolvedRedirect

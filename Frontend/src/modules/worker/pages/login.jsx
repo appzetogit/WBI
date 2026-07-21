@@ -55,7 +55,9 @@ const WorkerLogin = () => {
     try {
       const loginPayload = {
         mobile: formData.phone,
-        password: formData.password
+        password: formData.password,
+        preferredRole: 'worker',
+        role: 'worker'
       };
       const response = await sharedAuthService.unifiedLogin(loginPayload);
       if (response.success) {

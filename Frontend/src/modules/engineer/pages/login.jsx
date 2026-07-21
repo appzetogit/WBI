@@ -55,7 +55,9 @@ const EngineerLogin = () => {
     try {
       const loginPayload = {
         mobile: formData.phone,
-        password: formData.password
+        password: formData.password,
+        preferredRole: 'engineer',
+        role: 'engineer'
       };
 
       const response = await sharedAuthService.unifiedLogin(loginPayload);
