@@ -8,13 +8,13 @@ import {
 import { toast } from 'react-hot-toast';
 import verificationService from '../../../../services/verificationService';
 
-const VerificationManagement = () => {
+const VerificationManagement = ({ initialRole = '' }) => {
   const [activeTab, setActiveTab] = useState('pending');
   const [loading, setLoading] = useState(false);
   const [requests, setRequests] = useState([]);
   const [totalRequests, setTotalRequests] = useState(0);
   const [page, setPage] = useState(1);
-  const [roleFilter, setRoleFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState(initialRole);
   const [statusFilter, setStatusFilter] = useState('pending_verification');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);

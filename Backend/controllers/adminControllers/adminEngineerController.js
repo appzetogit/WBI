@@ -1,5 +1,18 @@
 const Engineer = require('../../models/Engineer');
 const Booking = require('../../models/Booking');
+const VendorOpsJob = require('../../models/VendorOpsJob');
+const Transaction = require('../../models/Transaction');
+const mongoose = require('mongoose');
+const {
+  formatEngineerServiceLabel,
+  aggregateEngineerPaymentStats,
+  buildEngineerPaymentSummary,
+  statsForEngineerId,
+  getEngineerPaymentSummaryForOne,
+  getTransactionBreakdownForEngineer,
+  getRecentWithdrawalsForEngineer,
+  roundMoney
+} = require('../../utils/engineerPaymentHelpers');
 const { validationResult } = require('express-validator');
 const { WORKER_STATUS, BOOKING_STATUS, VENDOR_STATUS } = require('../../utils/constants');
 const { createNotification } = require('../notificationControllers/notificationController');
@@ -253,31 +266,58 @@ const getEngineerJobs = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    const engOid = new mongoose.Types.ObjectId(id);
 
-    const query = { engineerId: id };
-    if (status) {
-      query.status = status;
-    }
+    const bookingQuery = { workerId: engOid };
+    if (status) bookingQuery.status = status;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const opsQuery = { engineerId: engOid };
+    if (status) opsQuery.status = status;
 
-    const jobs = await Booking.find(query)
-      .populate('userId', 'name phone')
-      .populate('serviceId', 'title iconUrl')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    const [bookings, opsJobs, bookingTotal, opsTotal] = await Promise.all([
+      Booking.find(bookingQuery)
+        .populate('userId', 'name phone')
+        .populate('serviceId', 'title iconUrl')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit, 10))
+        .lean(),
+      VendorOpsJob.find(opsQuery)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit, 10))
+        .lean(),
+      Booking.countDocuments(bookingQuery),
+      VendorOpsJob.countDocuments(opsQuery)
+    ]);
 
-    const total = await Booking.countDocuments(query);
+    const merged = [
+      ...bookings.map((b) => ({ ...b, jobSource: 'booking' })),
+      ...opsJobs.map((j) => ({
+        _id: j._id,
+        jobCode: j.jobCode,
+        title: j.title,
+        status: j.status,
+        clientName: j.clientName,
+        city: j.city,
+        budget: j.budget,
+        engineerPayout: j.engineerPayout,
+        payoutStatus: j.payoutStatus,
+        createdAt: j.createdAt,
+        completedAt: j.completedAt,
+        jobSource: 'vendor_ops'
+      }))
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     res.status(200).json({
       success: true,
-      data: jobs,
+      data: merged.slice(0, parseInt(limit, 10)),
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total: bookingTotal + opsTotal,
+        pages: Math.ceil((bookingTotal + opsTotal) / parseInt(limit, 10))
       }
     });
   } catch (error) {
@@ -290,16 +330,91 @@ const getEngineerJobs = async (req, res) => {
 };
 
 /**
- * Get engineer earnings
+ * Get engineer earnings and transaction history (admin)
  */
 const getEngineerEarnings = async (req, res) => {
-  // Placeholder for now, can be expanded if we track granular engineer earnings
-  res.status(200).json({
-    success: true,
-    data: {
-      totalEarnings: 0
+  try {
+    const { id } = req.params;
+    const { page = 1, limit = 25 } = req.query;
+
+    const engineer = await Engineer.findById(id).select(
+      'name phone email serviceCategories primaryCategory serviceCategory approvalStatus wallet bankDetails'
+    );
+    if (!engineer) {
+      return res.status(404).json({ success: false, message: 'Engineer not found' });
     }
-  });
+
+    const ledger = await getEngineerPaymentSummaryForOne(engineer._id);
+    const summary = buildEngineerPaymentSummary(engineer.toObject ? engineer.toObject() : engineer, {
+      ledgerEarnings: ledger.totalEarningsFromLedger,
+      ledgerCredits: ledger.ledgerCredits,
+      ledgerDebits: ledger.ledgerDebits,
+      pendingWithdrawal: ledger.pendingWithdrawal,
+      withdrawnAmount: ledger.withdrawnAmount
+    });
+
+    const txQuery = {
+      $or: [{ engineerId: engineer._id }, { workerId: engineer._id }]
+    };
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    const lim = parseInt(limit, 10);
+
+    const [transactions, total, breakdown, withdrawals] = await Promise.all([
+      Transaction.find(txQuery).sort({ createdAt: -1 }).skip(skip).limit(lim).lean(),
+      Transaction.countDocuments(txQuery),
+      getTransactionBreakdownForEngineer(engineer._id),
+      getRecentWithdrawalsForEngineer(engineer._id, 15)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        engineer: {
+          _id: engineer._id,
+          name: engineer.name,
+          phone: engineer.phone,
+          email: engineer.email,
+          serviceLabel: formatEngineerServiceLabel(engineer),
+          approvalStatus: engineer.approvalStatus,
+          bankDetails: engineer.bankDetails
+            ? {
+                upiId: engineer.bankDetails.upiId || null,
+                accountHolderName: engineer.bankDetails.accountHolderName || null,
+                bankName: engineer.bankDetails.bankName || null
+              }
+            : null
+        },
+        summary: {
+          availableBalance: summary.availableBalance,
+          totalEarnings: summary.totalEarned,
+          totalCredits: summary.totalCredits,
+          totalDebits: summary.totalDebits,
+          withdrawnAmount: summary.withdrawnAmount,
+          pendingWithdrawal: summary.pendingWithdrawal,
+          allocated: summary.allocated,
+          reconciliationDelta: summary.reconciliationDelta,
+          isReconciled: summary.isReconciled,
+          formula:
+            'Total earned ≈ Available + Pending payout + Withdrawn (small rounding differences possible)'
+        },
+        breakdown,
+        withdrawals,
+        transactions,
+        pagination: {
+          page: parseInt(page, 10),
+          limit: lim,
+          total,
+          pages: Math.ceil(total / lim) || 1
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get engineer earnings error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch engineer earnings.'
+    });
+  }
 };
 
 /**
@@ -325,24 +440,42 @@ const payEngineer = async (req, res) => {
       });
     }
 
-    // Update wallet balance
-    // Assuming balance is amount owed to Admin? 
-    // Usually admin pays engineer, so engineer balance increases or decreases?
-    // In this system, vendor owes admin (negative balance).
-    // For engineers, positive balance probably means earnings they can withdraw.
-    // If admin pays them, it should reduce their pending balance or just reflect as a transaction.
-    // If the user says "pay engineer", it usually means adding money to their wallet or clearing dues.
+    const credit = parseFloat(amount);
+    if (!engineer.wallet) {
+      engineer.wallet = { balance: 0, totalEarnings: 0, withdrawnAmount: 0, pendingBalance: 0 };
+    }
 
-    if (!engineer.wallet) engineer.wallet = { balance: 0 };
-    engineer.wallet.balance += parseFloat(amount);
-
+    const balanceBefore = Number(engineer.wallet.balance) || 0;
+    engineer.wallet.balance = balanceBefore + credit;
+    engineer.wallet.totalEarnings = (Number(engineer.wallet.totalEarnings) || 0) + credit;
     await engineer.save();
+
+    const adminId = req.user?.id || req.user?._id;
+    await Transaction.create({
+      engineerId: engineer._id,
+      type: 'earnings_credit',
+      amount: credit,
+      status: 'completed',
+      paymentMethod: 'bank_transfer',
+      description: notes?.trim()
+        ? `Admin payment: ${notes.trim()}`
+        : `Manual credit by admin`,
+      referenceId: reference?.trim() || null,
+      balanceBefore,
+      balanceAfter: engineer.wallet.balance,
+      metadata: {
+        source: 'admin_manual_pay',
+        adminId: adminId ? String(adminId) : null,
+        notes: notes?.trim() || null
+      }
+    });
 
     res.status(200).json({
       success: true,
-      message: `Successfully recorded payment of ₹${amount} to ${engineer.name}`,
+      message: `Successfully recorded payment of ₹${credit} to ${engineer.name}`,
       data: {
-        balance: engineer.wallet.balance
+        balance: engineer.wallet.balance,
+        totalEarnings: engineer.wallet.totalEarnings
       }
     });
   } catch (error) {
@@ -360,46 +493,22 @@ const payEngineer = async (req, res) => {
 const getAllEngineerJobs = async (req, res) => {
   try {
     const { status, page = 1, limit = 20, search } = req.query;
-
-    const query = { engineerId: { $exists: true, $ne: null } };
-    if (status) {
-      query.status = status;
-    }
-
-    // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // If search is provided, we need to find engineers by name first
-    if (search) {
-      const engineers = await Engineer.find({
-        $or: [
-          { name: { $regex: search, $options: 'i' } },
-          { phone: { $regex: search, $options: 'i' } }
-        ]
-      }).select('_id');
-
-      const engineerIds = engineers.map(w => w._id);
-      query.engineerId = { $in: engineerIds };
-    }
-
-    const jobs = await Booking.find(query)
-      .populate('engineerId', 'name phone profileImage')
-      .populate('userId', 'name phone')
-      .populate('serviceId', 'title iconUrl')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await Booking.countDocuments(query);
+    const { fetchAllEngineerJobsForAdmin } = require('../../utils/adminEngineerJobsList');
+    const { jobs, total, page: p, limit: l } = await fetchAllEngineerJobsForAdmin({
+      status: status === 'all' ? undefined : status,
+      page,
+      limit,
+      search
+    });
 
     res.status(200).json({
       success: true,
       data: jobs,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: p,
+        limit: l,
         total,
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / l) || 1
       }
     });
   } catch (error) {
@@ -416,16 +525,66 @@ const getAllEngineerJobs = async (req, res) => {
  */
 const getEngineerPaymentsSummary = async (req, res) => {
   try {
-    // For now, return engineers with non-zero balances or recent job activity
-    const engineers = await Engineer.find({
-      'wallet.balance': { $exists: true }
-    })
-      .select('name phone wallet email serviceCategory approvalStatus')
-      .sort({ 'wallet.balance': -1 });
+    const { search } = req.query;
+    const query = {};
+    if (search && String(search).trim()) {
+      const term = String(search).trim();
+      query.$or = [
+        { name: { $regex: term, $options: 'i' } },
+        { phone: { $regex: term, $options: 'i' } }
+      ];
+    }
+
+    const engineers = await Engineer.find(query)
+      .select(
+        'name phone wallet email serviceCategories primaryCategory serviceCategory approvalStatus completedJobs rating isActive'
+      )
+      .sort({ 'wallet.balance': -1, name: 1 })
+      .lean();
+
+    const ids = engineers.map((e) => e._id);
+    const maps = await aggregateEngineerPaymentStats(ids);
+
+    let totals = {
+      availableBalance: 0,
+      pendingWithdrawal: 0,
+      totalEarned: 0,
+      withdrawnAmount: 0
+    };
+
+    const data = engineers.map((e) => {
+      const stats = statsForEngineerId(maps, e._id);
+      const summary = buildEngineerPaymentSummary(e, stats);
+
+      totals.availableBalance += summary.availableBalance;
+      totals.pendingWithdrawal += summary.pendingWithdrawal;
+      totals.totalEarned += summary.totalEarned;
+      totals.withdrawnAmount += summary.withdrawnAmount;
+
+      return {
+        ...e,
+        serviceLabel: formatEngineerServiceLabel(e),
+        paymentSummary: summary,
+        wallet: {
+          balance: summary.availableBalance,
+          totalEarnings: summary.totalEarned,
+          withdrawnAmount: summary.withdrawnAmount,
+          pendingBalance: summary.pendingWithdrawal
+        }
+      };
+    });
 
     res.status(200).json({
       success: true,
-      data: engineers
+      data,
+      meta: {
+        totals: {
+          availableBalance: roundMoney(totals.availableBalance),
+          pendingWithdrawal: roundMoney(totals.pendingWithdrawal),
+          totalEarned: roundMoney(totals.totalEarned),
+          withdrawnAmount: roundMoney(totals.withdrawnAmount)
+        }
+      }
     });
   } catch (error) {
     console.error('Get engineer payments summary error:', error);

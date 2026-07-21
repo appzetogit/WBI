@@ -4,6 +4,8 @@ import { FiArrowLeft, FiUpload, FiX, FiCheckCircle, FiPlus, FiDollarSign, FiCloc
 import { toast } from 'react-hot-toast';
 import workerService from '../../../../services/workerService';
 import { SkeletonCard } from '../../../../components/common/SkeletonLoaders';
+import { compressImageToBase64 } from '../../../../utils/imageCompression';
+import { getUserFacingError } from '../../../../utils/userFacingError';
 
 const JobProgress = () => {
   const { id } = useParams();
@@ -63,27 +65,31 @@ const JobProgress = () => {
   };
 
   const handleMediaUpload = async (e) => {
-    const files = Array.from(e.target.files);
+    const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    
+
     setIsUploadingMedia(true);
-    const filePromises = files.map(f => new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(f);
-    }));
-    
-    const base64Files = await Promise.all(filePromises);
-    
     try {
-      const payload = { workPhotos: base64Files };
-      await workerService.uploadJobMedia(id, payload);
+      const base64Files = await Promise.all(
+        files.map((f) =>
+          f.type.startsWith('image/')
+            ? compressImageToBase64(f)
+            : new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(f);
+              })
+        )
+      );
+      await workerService.uploadJobMedia(id, { workPhotos: base64Files });
       setMediaFiles(prev => [...prev, ...base64Files]);
-      toast.success('Media uploaded!');
+      toast.success('Photos uploaded');
     } catch (err) {
-      toast.error('Upload failed');
+      toast.error(getUserFacingError(err, 'Upload failed. Please try again.'));
     } finally {
       setIsUploadingMedia(false);
+      if (e.target) e.target.value = '';
     }
   };
 
@@ -192,9 +198,9 @@ const JobProgress = () => {
       });
       
       toast.success('Job Completed Successfully!');
-      navigate(`/worker/job/${id}`); // Or to a success page
+      navigate(`/worker/job/${id}/success`);
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Failed to complete job');
+      toast.error(getUserFacingError(e, 'Failed to complete job. Please try again.'));
     } finally {
       setSubmitting(false);
     }

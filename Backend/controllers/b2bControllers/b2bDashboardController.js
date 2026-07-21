@@ -7,6 +7,7 @@ const B2BCompany = require('../../models/B2BCompany');
 const DeductionLedger = require('../../models/DeductionLedger');
 const DeviceHistory = require('../../models/DeviceHistory');
 const EngineerRating = require('../../models/EngineerRating');
+const { getPendingWalletGate } = require('../../services/b2bWalletService');
 
 // Helper to fill in dates for line chart overview
 function getDatesInRange(startDate, endDate) {
@@ -501,10 +502,11 @@ const getExecutiveMetrics = async (req, res) => {
   try {
     const companyId = new mongoose.Types.ObjectId(req.companyId);
     
-    const [jobs, wallet, transactions] = await Promise.all([
+    const [jobs, wallet, transactions, walletGate] = await Promise.all([
       B2BJob.find({ companyId }),
       B2BWallet.findOne({ companyId }),
-      B2BWalletTransaction.find({ companyId, type: 'job_deduction' })
+      B2BWalletTransaction.find({ companyId, type: 'job_deduction' }),
+      getPendingWalletGate(req.companyId)
     ]);
 
     const callsCompleted = jobs.filter(j => j.status === 'completed').length;
@@ -519,7 +521,7 @@ const getExecutiveMetrics = async (req, res) => {
       success: true,
       data: {
         callsCompleted: {
-          value: callsCompleted || 0, // Mock fallback handled via UI if 0
+          value: callsCompleted || 0,
           target: callsCompleted > 0 ? callsCompleted + 10 : 1500,
           trend: '+0%',
           label: 'Total closures this month'
@@ -532,12 +534,13 @@ const getExecutiveMetrics = async (req, res) => {
           label: 'Vs 24hr SLA Target'
         },
         walletUtilization: {
-          currentBalance: balance || 154320,
-          spentThisPeriod: spentThisPeriod || 245680,
-          burnRatePerDay: spentThisPeriod > 0 ? Math.round(spentThisPeriod / 30) : 8189,
-          daysUntilTopup: balance > 0 && spentThisPeriod > 0 ? Math.round(balance / (spentThisPeriod / 30)) : 18,
+          currentBalance: balance || 0,
+          spentThisPeriod: spentThisPeriod || 0,
+          burnRatePerDay: spentThisPeriod > 0 ? Math.round(spentThisPeriod / 30) : 0,
+          daysUntilTopup: balance > 0 && spentThisPeriod > 0 ? Math.round(balance / (spentThisPeriod / 30)) : 0,
           label: 'Runway based on run rate'
-        }
+        },
+        walletGate
       }
     });
   } catch (error) {

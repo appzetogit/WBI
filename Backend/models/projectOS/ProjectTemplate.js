@@ -90,6 +90,8 @@ const projectTemplateSchema = new mongoose.Schema({
 
   // Category mapping
   category: { type: String, required: true }, // e.g. "CCTV", "SOLAR", "DIGITAL"
+  /** Canonical SMS link (e.g. C01) — preferred over free-text category */
+  categoryCode: { type: String, trim: true, uppercase: true, index: true, default: null },
   subcategory: { type: String },
   supportedProjectTypes: [String],
 

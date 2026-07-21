@@ -2,6 +2,12 @@ const Engineer = require('../../models/Engineer');
 const Transaction = require('../../models/Transaction');
 const Booking = require('../../models/Booking');
 const Withdrawal = require('../../models/Withdrawal');
+const {
+  EARNING_TX_TYPES,
+  buildEngineerPaymentSummary,
+  statsForEngineerId,
+  aggregateEngineerPaymentStats
+} = require('../../utils/engineerPaymentHelpers');
 
 /**
  * Get engineer wallet with ledger balance
@@ -24,35 +30,31 @@ const getWallet = async (req, res) => {
       .select('bookingNumber serviceName completedAt vendorId finalAmount vendorBillId')
       .sort({ completedAt: -1 });
 
-    // Calculate Dynamic Wallet Balances
-    const completedTransactions = await Transaction.find({
-      engineerId: engineerId,
-      status: 'completed',
-      type: { $in: ['engineer_payment', 'commission', 'cash_collected', 'earnings_credit'] }
-    });
-    
-    const totalEarnings = completedTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    // Calculate Dynamic Wallet Balances (shared rules with admin payments)
+    const maps = await aggregateEngineerPaymentStats([engineerId]);
+    const stats = statsForEngineerId(maps, engineerId);
+    const summary = buildEngineerPaymentSummary(engineer.toObject(), stats);
 
-    const approvedWithdrawals = await Withdrawal.find({ engineerId, status: 'approved' });
-    const withdrawnAmount = approvedWithdrawals.reduce((sum, w) => sum + w.amount, 0);
-
-    const pendingWithdrawals = await Withdrawal.find({ engineerId, status: 'pending' });
-    const pendingWithdrawalAmount = pendingWithdrawals.reduce((sum, w) => sum + w.amount, 0);
-
-    // Save accurate synced data if not perfectly aligned
-    engineer.wallet.totalEarnings = totalEarnings;
-    engineer.wallet.withdrawnAmount = withdrawnAmount;
-    engineer.wallet.pendingBalance = pendingWithdrawalAmount;
+    engineer.wallet.totalEarnings = summary.totalEarned;
+    engineer.wallet.withdrawnAmount = summary.withdrawnAmount;
+    engineer.wallet.pendingBalance = summary.pendingWithdrawal;
     await engineer.save();
 
     res.status(200).json({
       success: true,
       data: {
-        balance: engineer.wallet?.balance || 0,
-        availableBalance: engineer.wallet?.balance || 0,
-        totalBalance: totalEarnings,
-        withdrawnAmount: withdrawnAmount,
-        pendingBalance: pendingWithdrawalAmount,
+        balance: summary.availableBalance,
+        availableBalance: summary.availableBalance,
+        totalBalance: summary.totalEarned,
+        totalEarnings: summary.totalEarned,
+        withdrawnAmount: summary.withdrawnAmount,
+        pendingWithdrawal: summary.pendingWithdrawal,
+        pendingBalance: summary.pendingWithdrawal,
+        totalCredits: summary.totalCredits,
+        totalDebits: summary.totalDebits,
+        allocated: summary.allocated,
+        reconciliationDelta: summary.reconciliationDelta,
+        isReconciled: summary.isReconciled,
         pendingBookings: pendingBookings
       }
     });
@@ -71,7 +73,7 @@ const getTransactions = async (req, res) => {
     const engineerId = req.user.id;
     const { page = 1, limit = 20, type } = req.query;
 
-    const query = { engineerId };
+    const query = { $or: [{ engineerId }, { workerId: engineerId }] };
 
     // Filter by type if provided
     if (type && type !== 'all') {
@@ -217,13 +219,40 @@ const getWalletSummary = async (req, res) => {
   }
 };
 
+const UPI_ID_REGEX = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9._-]{2,64}$/;
+
+const verifyUpi = async (req, res) => {
+  try {
+    const upiId = String(req.body?.upiId || '').trim().toLowerCase();
+    if (!upiId) {
+      return res.status(400).json({ success: false, message: 'UPI ID is required' });
+    }
+    if (!UPI_ID_REGEX.test(upiId)) {
+      return res.status(400).json({ success: false, message: 'Invalid UPI ID format (e.g. name@ybl)' });
+    }
+    const engineerId = req.user.id || req.user._id;
+    await Engineer.findByIdAndUpdate(engineerId, {
+      $set: { 'bankDetails.upiId': upiId }
+    }).catch(() => {});
+
+    res.status(200).json({
+      success: true,
+      message: 'UPI ID validated',
+      data: { upiId, verified: true }
+    });
+  } catch (error) {
+    console.error('verifyUpi error:', error);
+    res.status(500).json({ success: false, message: 'UPI verification failed' });
+  }
+};
+
 /**
  * Request Withdrawal
  */
 const requestWithdrawal = async (req, res) => {
   try {
     const engineerId = req.user.id;
-    const { amount, bankDetails } = req.body;
+    const { amount, bankDetails, method, upiId } = req.body;
     
     const engineer = await Engineer.findById(engineerId);
     if (!engineer) return res.status(404).json({ success: false, message: 'Engineer not found' });
@@ -236,6 +265,15 @@ const requestWithdrawal = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Insufficient balance' });
     }
 
+    const payoutDetails = { ...(bankDetails || {}) };
+    if (method === 'upi' || upiId) {
+      const id = String(upiId || payoutDetails.upiId || '').trim().toLowerCase();
+      if (!UPI_ID_REGEX.test(id)) {
+        return res.status(400).json({ success: false, message: 'Valid UPI ID is required' });
+      }
+      payoutDetails.upiId = id;
+    }
+
     // Deduct available balance
     engineer.wallet.balance -= amount;
     engineer.wallet.pendingBalance += amount;
@@ -245,7 +283,7 @@ const requestWithdrawal = async (req, res) => {
       engineerId,
       amount,
       status: 'pending',
-      bankDetails,
+      bankDetails: payoutDetails,
       requestDate: new Date()
     });
 
@@ -279,6 +317,29 @@ const requestWithdrawal = async (req, res) => {
     }
 
     res.status(200).json({ success: true, message: 'Withdrawal request submitted', data: withdrawal });
+
+    try {
+      const { notifyEngineer } = require('../../services/engineerNotify.service');
+      await notifyEngineer(engineerId, {
+        type: 'payout_requested',
+        category: 'payments',
+        title: 'Withdrawal submitted',
+        message: `₹${Number(amount).toLocaleString('en-IN')} withdrawal is being processed`,
+        relatedId: withdrawal._id,
+        relatedType: 'withdrawal',
+        data: { amount: String(amount) }
+      });
+    } catch (_) {}
+
+    try {
+      if (global.io) {
+        global.io.to(`engineer:${engineerId}`).emit('wallet:updated', {
+          availableBalance: engineer.wallet.balance,
+          pendingWithdrawal: engineer.wallet.pendingBalance,
+          message: `Withdrawal of ₹${amount} submitted — processing`
+        });
+      }
+    } catch (_) {}
   } catch (error) {
     console.error('Request withdrawal error:', error);
     res.status(500).json({ success: false, message: 'Failed to request withdrawal' });
@@ -290,5 +351,6 @@ module.exports = {
   getTransactions,
   requestPayout,
   getWalletSummary,
-  requestWithdrawal
+  requestWithdrawal,
+  verifyUpi
 };

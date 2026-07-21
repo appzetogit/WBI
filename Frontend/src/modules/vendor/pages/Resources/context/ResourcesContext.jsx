@@ -4,7 +4,7 @@ const ResourcesContext = createContext(null);
 
 export const ResourcesProvider = ({ children }) => {
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ category: '', status: '' });
+  const [filters, setFilters] = useState({ category: '', status: '', inventoryCategory: '', toolCategory: '' });
   const [refreshKey, setRefreshKey] = useState(0);
 
   const updateFilter = useCallback((k, v) => setFilters((p) => ({ ...p, [k]: v })), []);

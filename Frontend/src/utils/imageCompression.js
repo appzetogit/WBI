@@ -82,3 +82,41 @@ export const fileToBase64 = (file) => {
     reader.onerror = (error) => reject(error);
   });
 };
+
+/**
+ * Compress a File/Blob and return a JPEG data URL (for API payloads that still expect base64).
+ */
+export const compressImageToBase64 = async (
+  file,
+  options = { maxWidth: 1280, maxHeight: 1280, quality: 0.7 }
+) => {
+  const compressed = await compressImage(file, {
+    ...options,
+    // Force JPEG for smaller payloads when source is camera/heic-like
+  });
+  // Re-encode as JPEG via canvas if MIME is not image/*
+  if (!compressed.type.startsWith('image/')) {
+    return fileToBase64(compressed);
+  }
+  return new Promise((resolve, reject) => {
+    const src = URL.createObjectURL(compressed);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(src);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      try {
+        resolve(canvas.toDataURL('image/jpeg', options.quality ?? 0.7));
+      } catch (err) {
+        reject(err);
+      }
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(src);
+      reject(err);
+    };
+    img.src = src;
+  });
+};

@@ -7,7 +7,8 @@ const {
   getTransactions,
   requestPayout,
   getWalletSummary,
-  requestWithdrawal
+  requestWithdrawal,
+  verifyUpi
 } = require('../../controllers/engineerControllers/engineerWalletController');
 
 // Get wallet balance
@@ -25,6 +26,7 @@ router.post('/request-payout', authenticate, isEngineer, requestPayout);
 const { verifyBankForWithdrawal } = require('../../middleware/verificationMiddleware');
 
 // Request withdrawal
+router.post('/verify-upi', authenticate, isEngineer, verifyUpi);
 router.post('/withdraw', authenticate, isEngineer, verifyBankForWithdrawal, requestWithdrawal);
 
 module.exports = router;

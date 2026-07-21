@@ -4,6 +4,7 @@ const BASE = '/vendor/project-ops';
 
 export const fetchPOCounts = () => api.get(`${BASE}/counts`);
 export const fetchProjects = (params = {}) => api.get(`${BASE}/projects`, { params });
+export const createProject = (data) => api.post(`${BASE}/projects`, data);
 export const fetchProjectById = (id) => api.get(`${BASE}/projects/${id}`);
 export const updateProject = (id, data) => api.patch(`${BASE}/projects/${id}`, data);
 
@@ -16,6 +17,11 @@ export const updateMilestone = (id, data) => api.patch(`${BASE}/milestones/${id}
 
 export const fetchDispatches = (params = {}) => api.get(`${BASE}/dispatch`, { params });
 export const assignDispatch = (id, data) => api.post(`${BASE}/dispatch/${id}/assign`, data);
+
+export const fetchAssignableEngineers = (params = {}) => api.get(`${BASE}/engineers`, { params });
+export const assignEngineerToProject = (projectId, data) =>
+  api.post(`${BASE}/projects/${projectId}/assign-engineer`, data);
+export const fetchProjectJobs = (projectId) => api.get(`${BASE}/projects/${projectId}/jobs`);
 
 export const fetchLiveOps = () => api.get(`${BASE}/live`);
 export const fetchCalendar = (params = {}) => api.get(`${BASE}/calendar`, { params });

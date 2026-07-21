@@ -16,6 +16,12 @@ const transactionSchema = new mongoose.Schema({
     ref: 'Worker',
     default: null
   },
+  engineerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Engineer',
+    default: null,
+    index: true
+  },
   bookingId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
@@ -68,6 +74,7 @@ const transactionSchema = new mongoose.Schema({
 transactionSchema.index({ userId: 1, createdAt: -1 });
 transactionSchema.index({ vendorId: 1, createdAt: -1 });
 transactionSchema.index({ workerId: 1, createdAt: -1 });
+transactionSchema.index({ engineerId: 1, createdAt: -1 });
 transactionSchema.index({ bookingId: 1 });
 transactionSchema.index({ type: 1, status: 1 });
 

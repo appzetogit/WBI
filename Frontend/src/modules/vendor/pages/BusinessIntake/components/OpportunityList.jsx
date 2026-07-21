@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import { fetchOpportunities, fetchOpportunityById } from '../../../services/businessIntakeService';
+import { fetchOpportunities, fetchOpportunityById, acceptClientRequest } from '../../../services/businessIntakeService';
 import { useBusinessIntake } from '../context/BusinessIntakeContext';
 import OpportunityCard from './OpportunityCard';
 import OpportunityDrawer from './OpportunityDrawer';
 import { SkeletonGrid } from './SkeletonCard';
 import EmptyState from './EmptyState';
 import Pagination from './Pagination';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
+import { useNavigate } from 'react-router-dom';
 
 const ROUTE_TYPE_MAP = {
   all: '',
@@ -25,6 +27,8 @@ const OpportunityList = ({
   emptyIcon,
 }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { path } = useVendorBasePath();
   const segment = location.pathname.split('/').pop();
   const type = propType ?? ROUTE_TYPE_MAP[segment] ?? '';
 
@@ -35,11 +39,13 @@ const OpportunityList = ({
     bookmarks,
     toggleBookmark,
     refreshKey,
+    triggerRefresh,
   } = useBusinessIntake();
 
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [acceptingId, setAcceptingId] = useState(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0, limit: PAGE_SIZE });
   const [selectedOpp, setSelectedOpp] = useState(null);
@@ -95,6 +101,52 @@ const OpportunityList = ({
     }
   };
 
+  const refreshSelected = async () => {
+    if (!selectedOpp?._id) return;
+    try {
+      const res = await fetchOpportunityById(selectedOpp._id);
+      setSelectedOpp(res.data.data);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleAccept = async (id, opp) => {
+    if (opp?.type !== 'client_request') {
+      handleView(id, opp);
+      return;
+    }
+    if (opp.isMyTurnToRespond === false) {
+      setError('Another vendor is reviewing this project. Wait for your turn or open details.');
+      handleView(id, opp);
+      return;
+    }
+    setAcceptingId(id);
+    setError('');
+    try {
+      const amount = opp.budget?.max || opp.budget?.min || 0;
+      const res = await acceptClientRequest(id, {
+        amount,
+        proposalText: `Accepted: ${opp.title}`,
+        timeline: 30,
+        teamSize: 1,
+      });
+      triggerRefresh?.();
+      await load(page);
+      const projectId = res.data?.data?.projectId;
+      if (projectId) {
+        navigate(`${path('projects/os')}?assign=${projectId}&title=${encodeURIComponent(opp.title || '')}`);
+      } else {
+        navigate(path('projects/os'));
+      }
+    } catch (e) {
+      setError(e.response?.data?.message || 'Failed to accept request');
+      handleView(id, opp);
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= pagination.pages) {
       setPage(newPage);
@@ -128,13 +180,17 @@ const OpportunityList = ({
                 opportunity={opp}
                 onView={handleView}
                 onBid={handleView}
-                onAccept={handleView}
+                onAccept={handleAccept}
                 compact={viewMode === 'list'}
-                bookmarked={bookmarks.has(opp._id)}
+                bookmarked={bookmarks.has(opp._id) || !!opp.isBookmarked}
                 onBookmark={toggleBookmark}
               />
             ))}
           </div>
+
+          {acceptingId && (
+            <p className="text-center text-sm text-emerald-700 mt-3">Accepting request & creating project…</p>
+          )}
 
           <Pagination
             page={pagination.page}
@@ -143,6 +199,7 @@ const OpportunityList = ({
             limit={pagination.limit}
             onPageChange={handlePageChange}
             loading={loading}
+            itemLabel="opportunities"
           />
         </>
       )}
@@ -151,9 +208,20 @@ const OpportunityList = ({
         <OpportunityDrawer
           opportunity={selectedOpp}
           onClose={() => setSelectedOpp(null)}
-          onBidSubmitted={() => {
+          onBidSubmitted={async () => {
+            await refreshSelected();
+            load(page);
+          }}
+          onAccepted={(payload) => {
             setSelectedOpp(null);
             load(page);
+            const projectId = payload?.data?.projectId || payload?.projectId;
+            const title = selectedOpp?.title || '';
+            if (projectId) {
+              navigate(`${path('projects/os')}?assign=${projectId}&title=${encodeURIComponent(title)}`);
+            } else {
+              navigate(path('projects/os'));
+            }
           }}
         />
       )}

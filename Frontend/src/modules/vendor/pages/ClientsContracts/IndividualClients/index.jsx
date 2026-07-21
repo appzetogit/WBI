@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { UserCircle, X } from 'lucide-react';
 import { fetchClients, fetchClientById, formatINR, timeAgo, statusColors } from '../../../services/clientsContractsService';
 import { useClientsContracts } from '../context/ClientsContractsContext';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 import ClientCard from '../components/ClientCard';
 import EmptyState from '../../BusinessIntake/components/EmptyState';
 import Pagination from '../../BusinessIntake/components/Pagination';
@@ -50,6 +51,7 @@ const ClientDrawer = ({ client, onClose }) => {
 
 const IndividualClients = () => {
   const navigate = useNavigate();
+  const { basePath } = useVendorBasePath();
   const { search, filters, refreshKey } = useClientsContracts();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +117,7 @@ const IndividualClients = () => {
                 key={c._id}
                 client={c}
                 onView={handleView}
-                onChat={() => navigate('/vendor/dynamic/clients/conversations')}
+                onChat={() => navigate(`${basePath}/clients/conversations`)}
               />
             ))}
           </div>

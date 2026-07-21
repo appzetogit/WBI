@@ -81,6 +81,7 @@ export const SocketProvider = ({ children }) => {
     if (path.includes('/login') || path.includes('/signup')) return null;
     if (path.startsWith('/vendor')) return 'vendor';
     if (path.startsWith('/worker')) return 'worker';
+    if (path.startsWith('/engineer')) return 'engineer';
     if (path.startsWith('/admin')) return 'admin';
     if (path.startsWith('/user')) return 'user';
     if (path.startsWith('/b2b')) return 'b2b';
@@ -109,6 +110,9 @@ export const SocketProvider = ({ children }) => {
       case 'worker':
         tokenKey = 'workerAccessToken';
         break;
+      case 'engineer':
+        tokenKey = 'engineerAccessToken';
+        break;
       case 'admin':
         tokenKey = 'adminAccessToken';
         break;
@@ -121,7 +125,7 @@ export const SocketProvider = ({ children }) => {
         break;
     }
 
-    const token = localStorage.getItem(tokenKey);
+    const token = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey);
     // If no token, we don't connect
     if (!token) {
       if (activeSocketRef.current) {
@@ -155,7 +159,8 @@ export const SocketProvider = ({ children }) => {
       transports: ['websocket'], // Use WebSocket directly to prevent CORS/polling errors
       withCredentials: true,
       secure: SOCKET_URL.startsWith('https'),
-      rejectUnauthorized: false,
+      // Never disable TLS verification in production
+      ...(import.meta.env.DEV ? { rejectUnauthorized: false } : {}),
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
@@ -244,7 +249,16 @@ export const SocketProvider = ({ children }) => {
             if (data.relatedId) {
               if (userType === 'vendor') navigate(`/vendor/booking/${data.relatedId}`);
               else if (userType === 'worker') navigate(`/worker/job/${data.relatedId}`);
-              else navigate(`/user/booking/${data.relatedId}`);
+              else if (userType === 'engineer') {
+                const d = data.data || {};
+                if (d.isOpsJob === '1' || d.isOpsJob === true || data.relatedType === 'vendor_ops_job') {
+                  navigate(`/engineer/ops-jobs/${data.relatedId}`);
+                } else if (data.notifyCategory === 'payments' || data.relatedType === 'transaction' || data.relatedType === 'withdrawal') {
+                  navigate('/engineer/wallet');
+                } else {
+                  navigate(`/engineer/job/${data.relatedId}`);
+                }
+              } else navigate(`/user/booking/${data.relatedId}`);
             }
           }}
         />
@@ -256,6 +270,10 @@ export const SocketProvider = ({ children }) => {
 
       // Dispatch update events to refresh UI components
       if (userType === 'worker') window.dispatchEvent(new Event('workerJobsUpdated'));
+      if (userType === 'engineer') {
+        window.dispatchEvent(new Event('engineerJobsUpdated'));
+        window.dispatchEvent(new Event('workerNotificationsUpdated'));
+      }
       if (userType === 'vendor') {
         window.dispatchEvent(new Event('vendorJobsUpdated'));
         window.dispatchEvent(new Event('vendorNotificationsUpdated'));
@@ -383,6 +401,44 @@ export const SocketProvider = ({ children }) => {
         window.dispatchEvent(new Event('vendorJobsUpdated'));
         window.dispatchEvent(new Event('vendorStatsUpdated'));
       });
+
+      newSocket.on('onboarding:status_updated', (data) => {
+        window.dispatchEvent(new CustomEvent('vendorOnboardingUpdated', { detail: data }));
+        if (data?.provisioningPhase === 'completed' || data?.isActivated) {
+          toast.success('Partner workspace provisioned successfully.', { duration: 4000 });
+        }
+      });
+
+      const handleVendorOpsUpdate = (data, label) => {
+        window.dispatchEvent(new Event('vendorOpsUpdated'));
+        window.dispatchEvent(new Event('vendorNotificationsUpdated'));
+        toast.success(data?.message || label, { duration: 5000 });
+      };
+
+      newSocket.on('ops:job_accepted', (data) =>
+        handleVendorOpsUpdate(data, `${data?.engineerName || 'Engineer'} accepted the job`)
+      );
+      newSocket.on('ops:job_rejected', (data) =>
+        toast.error(data?.reason || 'Engineer declined the job', { duration: 5000 })
+      );
+      newSocket.on('ops:job_completed', (data) =>
+        handleVendorOpsUpdate(data, 'Field job completed')
+      );
+      newSocket.on('ops:engineer_assigned', (data) =>
+        handleVendorOpsUpdate(data, `Engineer assigned: ${data?.engineerName || ''}`)
+      );
+      newSocket.on('opportunity:new', () => {
+        window.dispatchEvent(new Event('vendorNotificationsUpdated'));
+        window.dispatchEvent(new CustomEvent('vendor-opportunity-new'));
+      });
+      newSocket.on('assignment:vendor_turn', (data) => {
+        playAlertRing();
+        toast('New project lead — review in Business Intake', {
+          duration: 6000,
+          onClick: () => navigate('/vendor/business-intake')
+        });
+        window.dispatchEvent(new Event('vendorNotificationsUpdated'));
+      });
     }
 
     // Listen for special Worker Job Assignments
@@ -459,10 +515,86 @@ export const SocketProvider = ({ children }) => {
       });
     }
 
+    // Vendor Ops jobs assigned to engineer (Business Intake → Project Ops assign)
+    if (userType === 'engineer') {
+      const handleOpsJobAssigned = (data) => {
+        if (isSoundEnabled('engineer')) {
+          playAlertRing();
+        }
+
+        const newJob = {
+          id: data.jobId,
+          _id: data.jobId,
+          jobId: data.jobId,
+          isOpsJob: true,
+          serviceName: data.title || 'Vendor Job',
+          serviceType: data.title || 'Vendor Job',
+          customerName: data.clientName || 'Client',
+          location: {
+            address: data.address || data.city || 'Location shared',
+          },
+          price: data.budget,
+          status: 'pending_acceptance',
+          createdAt: new Date().toISOString(),
+        };
+
+        window.dispatchEvent(new Event('ops:job_assigned'));
+        window.dispatchEvent(new Event('workerJobsUpdated'));
+        window.dispatchEvent(new Event('engineerJobsUpdated'));
+        window.dispatchEvent(new Event('workerNotificationsUpdated'));
+        window.dispatchEvent(new CustomEvent('showWorkerJobAlert', { detail: newJob }));
+      };
+
+      newSocket.on('ops:job_assigned', handleOpsJobAssigned);
+      newSocket.on('job:engineer_assigned', handleOpsJobAssigned);
+
+      newSocket.on('engineer:b2bJobOffer', (data) => {
+        if (isSoundEnabled('engineer')) playAlertRing();
+        window.dispatchEvent(new Event('engineerJobsUpdated'));
+        window.dispatchEvent(new Event('workerNotificationsUpdated'));
+        toast(`New B2B offer: ${data.service || data.jobId}`, {
+          duration: 5000,
+          onClick: () => navigate('/engineer/b2b-jobs')
+        });
+      });
+
+      newSocket.on('engineer:jobAssigned', (data) => {
+        window.dispatchEvent(new Event('engineerJobsUpdated'));
+        window.dispatchEvent(new Event('workerNotificationsUpdated'));
+        toast.success(`Job assigned: ${data.jobId}`, {
+          onClick: () => navigate('/engineer/b2b-jobs')
+        });
+      });
+
+      newSocket.on('wallet:credited', (data) => {
+        if (isSoundEnabled('engineer')) {
+          playNotificationSound();
+        }
+        toast.success(data.message || 'Wallet updated', {
+          duration: 5000,
+          onClick: () => navigate('/engineer/wallet')
+        });
+        window.dispatchEvent(new Event('engineerWalletUpdated'));
+        window.dispatchEvent(new Event('workerNotificationsUpdated'));
+      });
+
+      newSocket.on('freelancer:project_available', (data) => {
+        if (isSoundEnabled('engineer')) {
+          playAlertRing();
+        }
+        toast.success(data.title ? `New project: ${data.title}` : 'New freelancer project available', {
+          duration: 5000,
+          onClick: () => navigate('/engineer/ops-jobs')
+        });
+        window.dispatchEvent(new Event('engineerJobsUpdated'));
+        window.dispatchEvent(new Event('workerNotificationsUpdated'));
+      });
+    }
+
     return () => {
       newSocket.disconnect();
     };
-  }, [userType, location.pathname]); // Re-evaluate on path transitions to check for token/auth changes (excluding socket to prevent loop)
+  }, [userType, location.pathname, navigate]); // Re-evaluate on path transitions to check for token/auth changes (excluding socket to prevent loop)
 
   return (
     <SocketContext.Provider value={socket}>

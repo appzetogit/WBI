@@ -1,6 +1,7 @@
 const Booking = require('../../models/Booking');
 const Vendor = require('../../models/Vendor');
 const Worker = require('../../models/Worker');
+const Engineer = require('../../models/Engineer');
 const User = require('../../models/User');
 const Service = require('../../models/UserService');
 const { BOOKING_STATUS, PAYMENT_STATUS, VENDOR_STATUS } = require('../../utils/constants');
@@ -75,51 +76,96 @@ exports.getBookingReport = async (req, res) => {
  */
 exports.getVendorReport = async (req, res) => {
   try {
-    // Top vendors by revenue
-    const topVendors = await Booking.aggregate([
-      { $match: { status: BOOKING_STATUS.COMPLETED } },
-      {
-        $group: {
-          _id: '$vendorId',
-          totalRevenue: { $sum: '$finalAmount' },
-          bookingsCount: { $sum: 1 }
+    const now = new Date();
+    const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+    const [
+      totalVendors,
+      totalBookings,
+      vendorsThisMonth,
+      vendorsLastMonth,
+      topVendors,
+      statusDistribution,
+      categoryDistribution,
+      monthlyTrend
+    ] = await Promise.all([
+      Vendor.countDocuments(),
+      Booking.countDocuments({ vendorId: { $exists: true, $ne: null } }),
+      Vendor.countDocuments({ createdAt: { $gte: startOfThisMonth } }),
+      Vendor.countDocuments({
+        createdAt: { $gte: startOfLastMonth, $lte: endOfLastMonth }
+      }),
+      Booking.aggregate([
+        { $match: { status: BOOKING_STATUS.COMPLETED, vendorId: { $ne: null } } },
+        {
+          $group: {
+            _id: '$vendorId',
+            totalRevenue: { $sum: { $ifNull: ['$finalAmount', 0] } },
+            bookingsCount: { $sum: 1 }
+          }
+        },
+        { $sort: { totalRevenue: -1 } },
+        { $limit: 10 },
+        {
+          $lookup: {
+            from: 'vendors',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'vendor'
+          }
+        },
+        { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            businessName: { $ifNull: ['$vendor.businessName', 'Unknown'] },
+            name: '$vendor.name',
+            totalRevenue: 1,
+            bookingsCount: 1,
+            bookingCount: '$bookingsCount'
+          }
         }
-      },
-      { $sort: { totalRevenue: -1 } },
-      { $limit: 10 },
-      {
-        $lookup: {
-          from: 'vendors',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'vendor'
-        }
-      },
-      { $unwind: '$vendor' },
-      {
-        $project: {
-          businessName: '$vendor.businessName',
-          name: '$vendor.name',
-          totalRevenue: 1,
-          bookingsCount: 1
-        }
-      }
+      ]),
+      Vendor.aggregate([{ $group: { _id: '$approvalStatus', count: { $sum: 1 } } }]),
+      Vendor.aggregate([
+        { $group: { _id: { $ifNull: ['$service', 'Uncategorized'] }, count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 12 }
+      ]),
+      Vendor.aggregate([
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: 1 } },
+        { $limit: 12 }
+      ])
     ]);
 
-    // Vendor status distribution
-    const statusDistribution = await Vendor.aggregate([
-      { $group: { _id: '$approvalStatus', count: { $sum: 1 } } }
-    ]);
+    let growth = '0%';
+    if (vendorsLastMonth > 0) {
+      const pct = ((vendorsThisMonth - vendorsLastMonth) / vendorsLastMonth) * 100;
+      growth = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+    } else if (vendorsThisMonth > 0) {
+      growth = '+100%';
+    }
 
-    // Vendors by service category
-    const categoryDistribution = await Vendor.aggregate([
-      { $group: { _id: '$service', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
+    const approvedCount =
+      statusDistribution.find((s) => s._id === 'approved')?.count || 0;
+    const activeRate =
+      totalVendors > 0 ? Math.round((approvedCount / totalVendors) * 100) : 0;
 
     res.status(200).json({
       success: true,
       data: {
+        totalVendors,
+        totalBookings,
+        growth,
+        activeRate,
+        monthlyTrend,
         topVendors,
         statusDistribution,
         categoryDistribution
@@ -182,6 +228,78 @@ exports.getWorkerReport = async (req, res) => {
   } catch (error) {
     console.error('Worker report error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch worker report' });
+  }
+};
+
+/**
+ * Get Engineer Report Data (admin analytics)
+ */
+exports.getEngineerReport = async (req, res) => {
+  try {
+    const VendorOpsJob = require('../../models/VendorOpsJob');
+
+    const topFromProfile = await Engineer.find({})
+      .sort({ completedJobs: -1, rating: -1 })
+      .limit(10)
+      .select('name phone completedJobs rating')
+      .lean();
+
+    const opsCompletedAgg = await VendorOpsJob.aggregate([
+      { $match: { status: 'completed', engineerId: { $ne: null } } },
+      { $group: { _id: '$engineerId', opsCompleted: { $sum: 1 } } },
+      { $sort: { opsCompleted: -1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: 'engineers',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'engineer'
+        }
+      },
+      { $unwind: '$engineer' },
+      {
+        $project: {
+          name: '$engineer.name',
+          phone: '$engineer.phone',
+          completedJobs: { $add: ['$opsCompleted', { $ifNull: ['$engineer.completedJobs', 0] }] },
+          rating: '$engineer.rating'
+        }
+      }
+    ]);
+
+    const topEngineers = (opsCompletedAgg.length ? opsCompletedAgg : topFromProfile).sort(
+      (a, b) => (b.completedJobs || 0) - (a.completedJobs || 0)
+    );
+
+    const availabilityDistribution = await Engineer.aggregate([
+      { $group: { _id: '$isActive', count: { $sum: 1 } } }
+    ]);
+
+    const avgRatingAgg = await Engineer.aggregate([
+      { $match: { rating: { $gt: 0 } } },
+      { $group: { _id: null, avgRating: { $avg: '$rating' } } }
+    ]);
+    const averageRating = avgRatingAgg[0]?.avgRating
+      ? Math.round(avgRatingAgg[0].avgRating * 10) / 10
+      : 0;
+
+    const totalEngineers = await Engineer.countDocuments();
+    const opsJobsCompleted = await VendorOpsJob.countDocuments({ status: 'completed' });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        topEngineers,
+        availabilityDistribution,
+        averageRating,
+        totalEngineers,
+        opsJobsCompleted
+      }
+    });
+  } catch (error) {
+    console.error('Engineer report error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch engineer report' });
   }
 };
 

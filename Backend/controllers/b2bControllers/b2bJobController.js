@@ -229,6 +229,16 @@ const getJobDetails = async (req, res) => {
 const updateJob = async (req, res) => {
   try {
     const companyId = req.companyId || req.user.companyId || req.user.id;
+    const existing = await B2BJob.findOne({ _id: req.params.id, companyId });
+    if (!existing) return res.status(404).json({ success: false, message: 'Job not found' });
+
+    if (existing.requiresNewJob || existing.reopenBlocked) {
+      return res.status(400).json({
+        success: false,
+        message: 'This job is permanently closed (e.g. Spare Parts). Create a fresh job ticket.'
+      });
+    }
+
     const job = await B2BJob.findOneAndUpdate(
       { _id: req.params.id, companyId },
       { $set: req.body },
@@ -303,12 +313,25 @@ const reassignEngineer = async (req, res) => {
     const job = await B2BJob.findOne({ _id: jobId, companyId });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
+    if (job.requiresNewJob || job.reopenBlocked) {
+      return res.status(400).json({
+        success: false,
+        message: 'This job is permanently closed. Create a fresh job ticket instead of reassigning.'
+      });
+    }
+
     const engineer = await Engineer.findById(engineerId);
     if (!engineer) return res.status(404).json({ success: false, message: 'Engineer not found' });
 
     job.assignedTo = engineer._id;
-    job.assignedToName = `${engineer.firstName} ${engineer.lastName}`;
+    job.assignedToName = engineer.name || `${engineer.firstName || ''} ${engineer.lastName || ''}`.trim();
     job.status = 'assigned';
+    // Issue fresh start OTP on reassign
+    const otp = process.env.USE_DEFAULT_OTP === 'true' ? '123456' : Math.floor(100000 + Math.random() * 900000).toString();
+    job.startOtp = otp;
+    job.startOtpSentAt = new Date();
+    job.startOtpVerifiedAt = null;
+    job.startedAt = null;
     await job.save();
 
     await B2BJobStatusLog.create({
@@ -464,10 +487,18 @@ const approveQuote = async (req, res) => {
     // 3. Update the job charge and activate it
     const job = await B2BJob.findById(quote.jobId);
     if (job) {
+      if (job.requiresNewJob || job.reopenBlocked) {
+        return res.status(400).json({
+          success: false,
+          message: 'Associated job is permanently closed. Create a fresh job instead.'
+        });
+      }
+
       const prevCharge = job.charge;
       job.charge = quote.proposedAmount;
       job.status = 'searching_engineer'; // Activate job
       job.quoteApprovalId = quote._id;
+      job.currentWave = 0;
       await job.save();
 
       // 4. Deduct extra if proposed > original, or refund if less
@@ -485,6 +516,13 @@ const approveQuote = async (req, res) => {
           status: 'success',
           remark: `Quote adjustment for Job ${job.jobId} (${amountDiff > 0 ? '+' : ''}${amountDiff})`
         });
+      }
+
+      try {
+        const { queueJobMatching } = require('../../services/b2bMatchingService');
+        await queueJobMatching(job._id, req.app);
+      } catch (matchErr) {
+        console.error('[QuoteApproval] Matching queue failed:', matchErr.message);
       }
     }
 

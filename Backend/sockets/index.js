@@ -4,6 +4,38 @@ const { authenticateSocket } = require('../middleware/authMiddleware');
 
 let io = null;
 
+const attachRedisAdapter = async (ioInstance) => {
+  if (process.env.REDIS_ENABLED !== 'true') {
+    console.log('[Socket] Redis adapter skipped (REDIS_ENABLED != true)');
+    return;
+  }
+
+  try {
+    const { createAdapter } = require('@socket.io/redis-adapter');
+    const Redis = require('ioredis');
+
+    const redisUrl = process.env.REDIS_URL;
+    const baseOpts = {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+      password: process.env.REDIS_PASSWORD || undefined,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: true
+    };
+
+    const pubClient = redisUrl ? new Redis(redisUrl, { maxRetriesPerRequest: null }) : new Redis(baseOpts);
+    const subClient = pubClient.duplicate();
+
+    pubClient.on('error', (err) => console.error('[Socket Redis pub]', err.message));
+    subClient.on('error', (err) => console.error('[Socket Redis sub]', err.message));
+
+    ioInstance.adapter(createAdapter(pubClient, subClient));
+    console.log('[Socket] ✅ Redis adapter attached (PM2 cluster-safe)');
+  } catch (err) {
+    console.warn('[Socket] Redis adapter not attached — single-process mode:', err.message);
+  }
+};
+
 const initializeSocket = (server) => {
   const allowedOrigins = [
     process.env.FRONTEND_URL,
@@ -35,6 +67,11 @@ const initializeSocket = (server) => {
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
     },
     transports: ['polling', 'websocket']
+  });
+
+  // Non-blocking: rooms still work on one process if Redis is down
+  attachRedisAdapter(io).catch((err) => {
+    console.warn('[Socket] Redis adapter setup failed:', err.message);
   });
 
   // Authentication middleware for Socket.io
@@ -748,7 +785,7 @@ const initializeSocket = (server) => {
       // Update online status
       if (socket.userRole === 'VENDOR') {
         updateVendorOnlineStatus(socket.userId, false, null);
-      } else if (socket.userRole === 'WORKER') {
+      } else if (socket.userRole === 'WORKER' || socket.userRole === 'ENGINEER') {
         updateWorkerOnlineStatus(socket.userId, false, null);
       }
     });

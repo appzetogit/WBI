@@ -1,112 +1,42 @@
-/**
- * Earnings Service
- * Handles all earnings-related API calls
- * 
- * Note: This is a structure file for backend integration.
- * Replace localStorage calls with actual API endpoints.
- */
-
-const API_BASE_URL = '/api/vendors';
+import api from '../../../services/api';
+import { fetchEarningsByService } from './financeService';
 
 /**
- * Get earnings overview
- * @param {Object} filters - Filter options (date range, etc.)
- * @returns {Promise<Object>} Earnings overview
+ * Live earnings APIs — per-service breakdown from Vendor Finance ledger.
  */
-export const getEarningsOverview = async (filters = {}) => {
-  try {
-    // TODO: Replace with actual API call
-    // const response = await fetch(`${API_BASE_URL}/earnings/overview?${new URLSearchParams(filters)}`);
-    // return await response.json();
 
-    // Mock implementation
-    const earnings = JSON.parse(localStorage.getItem('vendorEarnings') || '{}');
-    return earnings;
-  } catch (error) {
-    console.error('Error fetching earnings overview:', error);
-    throw error;
-  }
+export const getEarningsOverview = async () => {
+  const res = await fetchEarningsByService();
+  const payload = res.data?.data || {};
+  return {
+    totalEarnings: payload.totals?.totalEarnings || 0,
+    pendingReceivables: payload.totals?.pendingReceivables || 0,
+    escrowHeld: payload.totals?.escrowHeld || 0,
+    serviceCount: payload.serviceCount || 0
+  };
 };
 
-/**
- * Get earnings history
- * @param {Object} filters - Filter options (date range, service type, etc.)
- * @returns {Promise<Array>} Earnings history
- */
 export const getEarningsHistory = async (filters = {}) => {
-  try {
-    // TODO: Replace with actual API call
-    // const response = await fetch(`${API_BASE_URL}/earnings/history?${new URLSearchParams(filters)}`);
-    // return await response.json();
-
-    // Mock implementation
-    const history = JSON.parse(localStorage.getItem('vendorEarningsHistory') || '[]');
-    return history;
-  } catch (error) {
-    console.error('Error fetching earnings history:', error);
-    throw error;
-  }
+  const params = new URLSearchParams();
+  if (filters.category) params.append('category', filters.category);
+  if (filters.limit) params.append('limit', filters.limit);
+  const response = await api.get(`/vendor/finance/wallet?${params.toString()}`);
+  return response.data?.data?.transactions || [];
 };
 
-/**
- * Get earnings breakdown by service type
- * @param {Object} filters - Filter options (date range, etc.)
- * @returns {Promise<Array>} Earnings breakdown
- */
-export const getEarningsByServiceType = async (filters = {}) => {
-  try {
-    // TODO: Replace with actual API call
-    // const response = await fetch(`${API_BASE_URL}/earnings/by-service?${new URLSearchParams(filters)}`);
-    // return await response.json();
-
-    // Mock implementation
-    return [];
-  } catch (error) {
-    console.error('Error fetching earnings by service type:', error);
-    throw error;
-  }
+export const getEarningsByServiceType = async () => {
+  const res = await fetchEarningsByService();
+  return res.data?.data?.byService || [];
 };
 
-/**
- * Get earnings breakdown by worker
- * @param {Object} filters - Filter options (date range, etc.)
- * @returns {Promise<Array>} Earnings breakdown by worker
- */
-export const getEarningsByWorker = async (filters = {}) => {
-  try {
-    // TODO: Replace with actual API call
-    // const response = await fetch(`${API_BASE_URL}/earnings/by-worker?${new URLSearchParams(filters)}`);
-    // return await response.json();
+export const getEarningsByWorker = async () => [];
 
-    // Mock implementation
-    return [];
-  } catch (error) {
-    console.error('Error fetching earnings by worker:', error);
-    throw error;
-  }
+export const getPayoutBreakdown = async () => {
+  const overview = await getEarningsOverview();
+  return {
+    totalEarnings: overview.totalEarnings,
+    pendingReceivables: overview.pendingReceivables,
+    escrowHeld: overview.escrowHeld,
+    netEarnings: overview.totalEarnings
+  };
 };
-
-/**
- * Get payout breakdown
- * @param {Object} filters - Filter options (date range, etc.)
- * @returns {Promise<Object>} Payout details
- */
-export const getPayoutBreakdown = async (filters = {}) => {
-  try {
-    // TODO: Replace with actual API call
-    // const response = await fetch(`${API_BASE_URL}/earnings/payout?${new URLSearchParams(filters)}`);
-    // return await response.json();
-
-    // Mock implementation
-    return {
-      totalEarnings: 0,
-      servicePayoutPercentage: 90,
-      partsPayoutPercentage: 100,
-      netEarnings: 0,
-    };
-  } catch (error) {
-    console.error('Error fetching payout breakdown:', error);
-    throw error;
-  }
-};
-

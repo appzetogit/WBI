@@ -45,6 +45,7 @@ const EditProfile = () => {
     profilePhoto: '', // URL
     aadharDocument: '', // URL
     serviceRange: 10,
+    operatingCities: '',
   });
 
   const [photoPreview, setPhotoPreview] = useState(null);
@@ -149,6 +150,7 @@ const EditProfile = () => {
             profilePhoto: v.profilePhoto || '',
             aadharDocument: v.aadharDocument || (v.aadhar && v.aadhar.document) || '',
             serviceRange: v.settings?.serviceRange || 10,
+            operatingCities: (v.operatingCities || v.operationalCities || []).join(', '),
           });
 
           // Update local storage
@@ -359,7 +361,11 @@ const EditProfile = () => {
         serviceCategory: formData.serviceCategories,
         profilePhoto: photoUrl,
         aadharDocument: aadharUrl,
-        serviceRange: formData.serviceRange
+        serviceRange: formData.serviceRange,
+        operatingCities: String(formData.operatingCities || '')
+          .split(',')
+          .map((c) => c.trim())
+          .filter(Boolean)
       };
 
       try {
@@ -667,6 +673,22 @@ const EditProfile = () => {
               style={{ focusRingColor: themeColors.button }}
             />
             <p className="text-[10px] text-gray-400 mt-1">Distance from your location where you can provide services</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Coverage cities (comma separated)
+            </label>
+            <input
+              type="text"
+              value={formData.operatingCities}
+              onChange={(e) => handleInputChange('operatingCities', e.target.value)}
+              placeholder="Bhopal, Indore, Ujjain, Dewas"
+              className="w-full px-4 py-3 bg-white rounded-xl border border-gray-200 focus:outline-none focus:ring-2"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">
+              Used by the assignment engine to match projects in your service area (in addition to GPS radius).
+            </p>
           </div>
 
           {/* Aadhar Document Upload */}

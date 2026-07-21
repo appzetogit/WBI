@@ -138,6 +138,10 @@ async function registerFCMToken(userType = 'user', forceUpdate = false) {
         endpoint = '/workers/fcm-tokens/save';
         authTokenKey = 'workerAccessToken';
         break;
+      case 'engineer':
+        endpoint = '/engineers/fcm-tokens/save';
+        authTokenKey = 'engineerAccessToken';
+        break;
       case 'user':
         endpoint = '/users/fcm-tokens/save';
         authTokenKey = 'accessToken';
@@ -148,8 +152,9 @@ async function registerFCMToken(userType = 'user', forceUpdate = false) {
         authTokenKey = 'accessToken';
     }
 
-    // Get auth token
-    const authToken = localStorage.getItem(authTokenKey);
+    // Get auth token (session preferred — matches api.js)
+    const authToken =
+      sessionStorage.getItem(authTokenKey) || localStorage.getItem(authTokenKey);
     if (!authToken) {
       // console.log(`[FCM] ❌ No auth token found for ${userType} (${authTokenKey}), skipping registration`);
       return null;

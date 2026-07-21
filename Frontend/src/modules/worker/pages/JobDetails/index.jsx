@@ -12,6 +12,8 @@ import api from '../../../../services/api';
 import { toast } from 'react-hot-toast';
 import { useAppNotifications } from '../../../../hooks/useAppNotifications';
 import { useLocationTracking } from '../../../../hooks/useLocationTracking';
+import { compressImageToBase64 } from '../../../../utils/imageCompression';
+import { getUserFacingError } from '../../../../utils/userFacingError';
 import styles from './JobDetails.module.css';
 
 const JobDetails = () => {
@@ -320,48 +322,49 @@ const JobDetails = () => {
       } else if (actionType === 'START_WORK') {
         setIsVisitModalOpen(true);
       } else if (actionType === 'COMPLETE_WORK') {
-        if (!job.workPhotos || job.workPhotos.length === 0) {
-          toast.error('Please upload at least one progress photo before completing.');
-          return;
-        }
-        await api.post(`/bookings/${id}/worker-completed`);
-        toast.success('Work completed! Awaiting customer online payment.');
-        fetchJobDetails();
+        navigate(`/worker/job/${id}/progress`);
+        return;
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Action failed');
+      toast.error(getUserFacingError(error, 'Action failed. Please try again.'));
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleMediaUpload = async (e, type) => {
-    const files = Array.from(e.target.files);
+    const files = Array.from(e.target.files || []);
     if (!files.length) return;
-    
+
     setIsUploadingMedia(true);
-    // Dummy base64 upload for demo purposes
-    const filePromises = files.map(f => new Promise(resolve => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.readAsDataURL(f);
-    }));
-    
-    const base64Files = await Promise.all(filePromises);
-    
     try {
+      const base64Files = await Promise.all(
+        files.map(async (f) => {
+          if (type === 'photo' && f.type.startsWith('image/')) {
+            return compressImageToBase64(f);
+          }
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(f);
+          });
+        })
+      );
+
       const payload = type === 'photo' ? { workPhotos: base64Files } : { progressVideos: base64Files };
       await workerService.uploadJobMedia(id, payload);
       setMediaFiles(prev => ({
         ...prev,
         [type === 'photo' ? 'photos' : 'videos']: [...prev[type === 'photo' ? 'photos' : 'videos'], ...base64Files]
       }));
-      toast.success('Media uploaded!');
+      toast.success('Media uploaded');
       fetchJobDetails();
-    } catch (e) {
-      toast.error('Upload failed');
+    } catch (err) {
+      toast.error(getUserFacingError(err, 'Upload failed. Please try again.'));
     } finally {
       setIsUploadingMedia(false);
+      if (e.target) e.target.value = '';
     }
   };
 

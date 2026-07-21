@@ -202,7 +202,7 @@ const registerCompany = async (req, res) => {
           relatedId: company._id,
           relatedType: 'b2b_company',
           data: { companyId: company._id, companyName: company.companyName },
-          pushData: { type: 'admin_alert', link: '/admin/b2b-companies' }
+          pushData: { type: 'admin_alert', link: '/admin/b2b/companies' }
         });
       }
     } catch (err) {

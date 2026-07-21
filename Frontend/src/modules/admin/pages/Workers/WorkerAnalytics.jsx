@@ -45,51 +45,62 @@ const WorkerAnalytics = () => {
   return (
     <div className="space-y-4">
       {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <CardShell className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-none p-3.5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-100 text-[10px] font-medium uppercase tracking-wider">Total Active Workers</p>
-              <h3 className="text-xl font-bold mt-0.5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <CardShell
+          noHeader
+          className="bg-gradient-to-br from-blue-600 to-blue-700 text-white border-none p-4 shadow-md"
+          bodyClassName="space-y-0"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white/90 text-xs font-semibold uppercase tracking-wide">Total active workers</p>
+              <h3 className="text-2xl font-bold mt-1 text-white tabular-nums">
                 {data?.availabilityDistribution?.reduce((acc, curr) => acc + curr.count, 0) || 0}
               </h3>
             </div>
-            <div className="bg-white/20 p-2 rounded-lg">
-              <FiUsers size={18} />
+            <div className="bg-white/20 p-2.5 rounded-lg shrink-0 text-white">
+              <FiUsers size={20} />
             </div>
           </div>
         </CardShell>
 
-        <CardShell className="bg-gradient-to-br from-green-500 to-green-600 text-white border-none p-3.5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-green-100 text-[10px] font-medium uppercase tracking-wider">Jobs Completed</p>
-              <h3 className="text-xl font-bold mt-0.5">
+        <CardShell
+          noHeader
+          className="bg-gradient-to-br from-emerald-600 to-emerald-700 text-white border-none p-4 shadow-md"
+          bodyClassName="space-y-0"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white/90 text-xs font-semibold uppercase tracking-wide">Jobs completed</p>
+              <h3 className="text-2xl font-bold mt-1 text-white tabular-nums">
                 {data?.topWorkers?.reduce((acc, curr) => acc + curr.completedJobs, 0) || 0}
               </h3>
             </div>
-            <div className="bg-white/20 p-2 rounded-lg">
-              <FiCheckCircle size={18} />
+            <div className="bg-white/20 p-2.5 rounded-lg shrink-0 text-white">
+              <FiCheckCircle size={20} />
             </div>
           </div>
         </CardShell>
 
-        <CardShell className="bg-gradient-to-br from-amber-500 to-amber-600 text-white border-none p-3.5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-amber-100 text-[10px] font-medium uppercase tracking-wider">Average Rating</p>
-              <h3 className="text-xl font-bold mt-0.5">4.8</h3>
+        <CardShell
+          noHeader
+          className="bg-gradient-to-br from-amber-500 to-orange-600 text-white border-none p-4 shadow-md"
+          bodyClassName="space-y-0"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-white/90 text-xs font-semibold uppercase tracking-wide">Average rating</p>
+              <h3 className="text-2xl font-bold mt-1 text-white tabular-nums">4.8</h3>
             </div>
-            <div className="bg-white/20 p-2 rounded-lg">
-              <FiStar size={18} />
+            <div className="bg-white/20 p-2.5 rounded-lg shrink-0 text-white">
+              <FiStar size={20} />
             </div>
           </div>
         </CardShell>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Top Workers Chart */}
-        <CardShell className="bg-white p-3.5" title="Top Performing Workers" icon={FiActivity}>
+        <CardShell title="Top Performing Workers" icon={FiActivity} className="p-3.5">
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data?.topWorkers} layout="vertical">
@@ -104,7 +115,7 @@ const WorkerAnalytics = () => {
         </CardShell>
 
         {/* Availability Pie Chart */}
-        <CardShell className="bg-white p-3.5" title="Worker Status Distribution" icon={FiUsers}>
+        <CardShell title="Worker Status Distribution" icon={FiUsers} className="p-3.5">
           <div className="h-[250px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>

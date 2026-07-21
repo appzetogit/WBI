@@ -11,7 +11,8 @@ import VisitVerificationModal from '../../components/common/VisitVerificationMod
 import useAppNotifications from '../../../../hooks/useAppNotifications';
 
 const libraries = ['places', 'geometry'];
-const SHOW_SIMULATION_BUTTON = false; // Set to true for debugging
+// GPS simulation must never ship in production builds
+const SHOW_SIMULATION_BUTTON = import.meta.env.DEV === true;
 
 const JobMap = () => {
   const { id } = useParams();

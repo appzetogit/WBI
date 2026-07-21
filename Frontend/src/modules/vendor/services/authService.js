@@ -1,7 +1,41 @@
 import api from '../../../services/api';
 const getPushService = () => import('../../../services/pushNotificationService');
 const registerFCMToken = async (...args) => (await getPushService()).registerFCMToken(...args);
-;
+const removeFCMToken = async (...args) => (await getPushService()).removeFCMToken(...args);
+
+const getPlatformType = () =>
+  (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) ? 'mobile' : 'web';
+
+const VENDOR_STORAGE_KEYS = [
+  'vendorAccessToken',
+  'vendorRefreshToken',
+  'vendorData',
+  'vendorToken',
+  'vendorProfile',
+  'vendorSettings'
+];
+
+/**
+ * Clear all vendor auth/session keys from local + session storage.
+ * Safe to call multiple times; never throws.
+ */
+export const clearVendorSession = () => {
+  try {
+    const role = localStorage.getItem('role') || sessionStorage.getItem('role');
+    VENDOR_STORAGE_KEYS.forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+    if (role === 'vendor') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('role');
+    }
+  } catch (err) {
+    console.error('[VENDOR AUTH] clearVendorSession error:', err);
+  }
+};
 
 /**
  * Notify Flutter WebView about successful login
@@ -107,27 +141,36 @@ export const login = async (credentials) => {
 };
 
 /**
- * Logout vendor
- * @returns {Promise<boolean>} Success status
+ * Production logout — revoke server session/FCM, then always clear client session.
+ * Never throws so UI can always redirect to login.
  */
 export const logout = async () => {
+  const platform = getPlatformType();
+
   try {
-    const response = await api.post('/vendors/auth/logout');
-
-    // Clear tokens
-    localStorage.removeItem('vendorAccessToken');
-    localStorage.removeItem('vendorRefreshToken');
-    localStorage.removeItem('vendorData');
-
-    return response.data;
-  } catch (error) {
-    console.error('Error logging out:', error);
-    // Clear tokens anyway
-    localStorage.removeItem('vendorAccessToken');
-    localStorage.removeItem('vendorRefreshToken');
-    localStorage.removeItem('vendorData');
-    throw error;
+    await removeFCMToken('vendor');
+  } catch (err) {
+    console.warn('[VENDOR AUTH] FCM remove failed (continuing logout):', err?.message || err);
   }
+
+  try {
+    await api.post('/vendors/auth/logout', { platform });
+  } catch (err) {
+    // Still clear local session — token may already be expired
+    console.warn('[VENDOR AUTH] Server logout failed (continuing local clear):', err?.message || err);
+  }
+
+  clearVendorSession();
+
+  try {
+    if (window.flutter_inappwebview?.callHandler) {
+      window.flutter_inappwebview.callHandler('captureLogout', JSON.stringify({ role: 'vendor', platform }));
+    }
+  } catch {
+    /* ignore Flutter bridge errors */
+  }
+
+  return { success: true, message: 'Logged out successfully' };
 };
 
 /**

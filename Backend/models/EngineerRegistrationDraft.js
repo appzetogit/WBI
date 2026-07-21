@@ -15,6 +15,11 @@ const engineerRegistrationDraftSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  vendorCompanyName: {
+    type: String,
+    default: ''
+  },
+
   fullName: {
     type: String,
     trim: true,
@@ -94,5 +99,8 @@ const engineerRegistrationDraftSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+engineerRegistrationDraftSchema.index({ mobile: 1, joiningFeeStatus: 1, updatedAt: -1 });
+engineerRegistrationDraftSchema.index({ razorpayOrderId: 1 }, { sparse: true });
 
 module.exports = mongoose.model('EngineerRegistrationDraft', engineerRegistrationDraftSchema);

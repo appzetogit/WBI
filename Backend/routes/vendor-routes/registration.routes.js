@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const { authenticate } = require('../../middleware/authMiddleware');
+const { isVendor } = require('../../middleware/roleMiddleware');
 const { 
   getConfig, 
   updateBusinessDetails, 
@@ -12,7 +14,8 @@ const {
   verifyKyc,
   verifyBankPennyDrop,
   completeInduction,
-  activateAccount
+  activateAccount,
+  getOnboardingStatus
 } = require('../../controllers/vendorControllers/vendorRegistrationController');
 const { uploadGenericFile, handleMulterError } = require('../../middleware/uploadMiddleware');
 
@@ -40,6 +43,7 @@ router.post('/onboarding/submit', submitApplication);
 router.post('/verify-kyc', verifyKyc);
 router.post('/verify-bank-penny-drop', verifyBankPennyDrop);
 router.post('/complete-induction', completeInduction);
-router.post('/activate-account', activateAccount);
+router.get('/onboarding/status', getOnboardingStatus);
+router.post('/activate-account', authenticate, isVendor, activateAccount);
 
 module.exports = router;

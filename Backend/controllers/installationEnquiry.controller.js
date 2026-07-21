@@ -1,4 +1,5 @@
 const InstallationEnquiry = require('../models/InstallationEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // Submit new enquiry (Public)
 exports.submitEnquiry = async (req, res) => {
@@ -13,6 +14,15 @@ exports.submitEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    // Connect to vendor Business Intake (C01 CCTV when equipment matches)
+    queueOpportunityFromEnquiry({
+      enquiry: newEnquiry,
+      enquiryType: 'installation',
+      enquiryModel: 'InstallationEnquiry',
+      titlePrefix: `Installation request — ${newEnquiry.city || 'Site'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(newEnquiry)
+    });
 
     res.status(201).json({
       success: true,

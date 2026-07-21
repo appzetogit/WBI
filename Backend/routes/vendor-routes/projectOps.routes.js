@@ -5,6 +5,7 @@ const {
   getCounts,
   getProjects,
   getProjectById,
+  createProject,
   updateProject,
   getSites,
   siteCheckIn,
@@ -14,14 +15,22 @@ const {
   getDispatches,
   assignDispatch,
   getLiveOps,
-  getCalendar
+  getCalendar,
+  listAssignableEngineers,
+  assignEngineerToProject,
+  getProjectJobs
 } = require('../../controllers/vendorControllers/projectOpsController');
 
 router.get('/counts', authenticate, getCounts);
 
+router.get('/engineers', authenticate, listAssignableEngineers);
+
 router.get('/projects', authenticate, getProjects);
+router.post('/projects', authenticate, createProject);
 router.get('/projects/:id', authenticate, getProjectById);
 router.patch('/projects/:id', authenticate, updateProject);
+router.get('/projects/:id/jobs', authenticate, getProjectJobs);
+router.post('/projects/:id/assign-engineer', authenticate, assignEngineerToProject);
 
 router.get('/sites', authenticate, getSites);
 router.post('/sites/:id/check-in', authenticate, siteCheckIn);

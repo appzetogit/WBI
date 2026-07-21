@@ -124,7 +124,8 @@ const opportunities = [
     type: 'client_request',
     title: 'CCTV Installation for Residential Bungalow',
     description: 'Need 8 HD cameras with DVR setup for a 4BHK bungalow. Looking for a reliable vendor with good after-sales support.',
-    categoryCode: 'CCTV',
+    categoryCode: 'CCTV', // legacy; matched to C01 via expandCategoryMatchCodes
+    // Prefer canonical C01 going forward — seed keeps CCTV for old demo data compatibility
     categoryName: 'CCTV & Surveillance',
     subServices: ['HD Camera Installation', 'DVR Setup', 'Remote Monitoring'],
     clientInfo: {
@@ -320,7 +321,8 @@ const opportunities = [
     type: 'b2b_opportunity',
     title: 'Enterprise CCTV Rollout — Pan India Retail Chain',
     description: 'Leading retail chain needs CCTV upgrade across 85 stores across 12 cities. Annual maintenance contract included.',
-    categoryCode: 'CCTV',
+    categoryCode: 'CCTV', // legacy; matched to C01 via expandCategoryMatchCodes
+    // Prefer canonical C01 going forward — seed keeps CCTV for old demo data compatibility
     categoryName: 'CCTV & Surveillance',
     subServices: ['IP Camera Installation', 'NVR Setup', 'Video Analytics', 'AMC'],
     clientInfo: {
@@ -462,7 +464,8 @@ const opportunities = [
     type: 'bulk_requirement',
     title: 'CCTV Installation — 500 Petrol Pump Sites Pan India',
     description: 'Major oil company requires CCTV and IP surveillance at 500 fuel stations across 18 states. Standardized design, phased rollout.',
-    categoryCode: 'CCTV',
+    categoryCode: 'CCTV', // legacy; matched to C01 via expandCategoryMatchCodes
+    // Prefer canonical C01 going forward — seed keeps CCTV for old demo data compatibility
     categoryName: 'CCTV & Surveillance',
     subServices: ['IP Cameras', 'NVR', 'Remote Monitoring', 'Central Management'],
     clientInfo: {
@@ -548,7 +551,8 @@ const opportunities = [
     type: 'bid_quote_request',
     title: 'RFQ: CCTV Infrastructure for New Airport Terminal',
     description: 'Airport Authority of India seeks technical and financial bids for comprehensive CCTV infrastructure for T3 terminal expansion.',
-    categoryCode: 'CCTV',
+    categoryCode: 'CCTV', // legacy; matched to C01 via expandCategoryMatchCodes
+    // Prefer canonical C01 going forward — seed keeps CCTV for old demo data compatibility
     categoryName: 'CCTV & Surveillance',
     subServices: ['4K PTZ Cameras', 'Video Analytics AI', 'PSIM Integration', 'LPR Cameras'],
     rfqDocumentUrl: 'https://placehold.co/rfq-document.pdf',
@@ -635,7 +639,8 @@ const opportunities = [
     type: 'direct_invitation',
     title: 'You are Personally Selected: CCTV + Networking for HQ',
     description: 'Based on your past performance rating (4.8/5) and 95% SLA adherence, you have been specifically selected to bid on this project. No competition.',
-    categoryCode: 'CCTV',
+    categoryCode: 'CCTV', // legacy; matched to C01 via expandCategoryMatchCodes
+    // Prefer canonical C01 going forward — seed keeps CCTV for old demo data compatibility
     categoryName: 'CCTV & Surveillance',
     subServices: ['IP Camera', 'NVR', 'Network Infrastructure', 'Access Control'],
     clientInfo: {
@@ -688,7 +693,8 @@ const opportunities = [
     type: 'b2b_opportunity',
     title: 'Completed: ATM CCTV Upgrade — 50 Sites',
     description: 'ATM surveillance upgrade project. 50 sites across NCR region. Already completed and awarded.',
-    categoryCode: 'CCTV',
+    categoryCode: 'CCTV', // legacy; matched to C01 via expandCategoryMatchCodes
+    // Prefer canonical C01 going forward — seed keeps CCTV for old demo data compatibility
     categoryName: 'CCTV & Surveillance',
     subServices: ['ATM Cameras', 'DVR', 'Remote Monitoring'],
     clientInfo: {

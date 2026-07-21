@@ -4,6 +4,8 @@ import { motion } from 'framer-motion';
 import { IoCheckmarkCircle, IoLocationOutline, IoTimeOutline, IoCalendarOutline, IoWalletOutline, IoDocumentTextOutline, IoShareSocialOutline, IoDownloadOutline, IoStarOutline, IoStarHalfOutline, IoStar } from 'react-icons/io5';
 import api from '../../../../services/api';
 import { toast } from 'react-hot-toast';
+import { getUserFacingError } from '../../../../utils/userFacingError';
+import LogoLoader from '../../../../components/common/LogoLoader';
 
 // Simple CSS Confetti Component
 const Confetti = () => {
@@ -58,8 +60,8 @@ const JobSuccess = () => {
     try {
       setLoading(true);
       const [completionRes, walletRes] = await Promise.all([
-        api.get(`/api/workers/jobs/${id}/completion`),
-        api.get(`/api/workers/wallet/summary`)
+        api.get(`/engineers/jobs/${id}/completion`),
+        api.get(`/engineers/wallet/summary`)
       ]);
 
       if (completionRes.data.success) {
@@ -69,8 +71,7 @@ const JobSuccess = () => {
         setWallet(walletRes.data.data);
       }
     } catch (error) {
-      console.error('Error fetching success data:', error);
-      toast.error('Failed to load job details.');
+      toast.error(getUserFacingError(error, 'Failed to load job completion details.'));
     } finally {
       setLoading(false);
     }
@@ -79,7 +80,7 @@ const JobSuccess = () => {
   const handleShare = async () => {
     try {
       setSharing(true);
-      const res = await api.post(`/api/workers/jobs/${id}/share`);
+      const res = await api.post(`/engineers/jobs/${id}/share`);
       const { shareText } = res.data.data;
 
       if (navigator.share) {
@@ -92,8 +93,7 @@ const JobSuccess = () => {
         toast.success('Report text copied to clipboard!');
       }
     } catch (error) {
-      console.error('Share error:', error);
-      toast.error('Failed to share report.');
+      toast.error(getUserFacingError(error, 'Unable to share report right now.'));
     } finally {
       setSharing(false);
     }
@@ -102,7 +102,7 @@ const JobSuccess = () => {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#10AFA5] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent"></div>
+        <LogoLoader />
       </div>
     );
   }
@@ -110,9 +110,16 @@ const JobSuccess = () => {
   if (!data) {
     return (
       <div className="min-h-screen bg-[#F8FCFC] flex flex-col items-center justify-center p-6 text-center">
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">Job Not Found</h2>
-        <p className="text-gray-600 mb-6">Could not load completion details.</p>
-        <button onClick={() => navigate('/engineer/jobs')} className="px-6 py-3 bg-[#10AFA5] text-white rounded-xl font-medium w-full max-w-xs">
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">Details unavailable</h2>
+        <p className="text-gray-600 mb-6">We could not load completion details. Please try again.</p>
+        <button
+          type="button"
+          onClick={fetchData}
+          className="px-6 py-3 mb-3 border border-[#10AFA5] text-[#10AFA5] rounded-xl font-medium w-full max-w-xs"
+        >
+          Retry
+        </button>
+        <button type="button" onClick={() => navigate('/engineer/jobs')} className="px-6 py-3 bg-[#10AFA5] text-white rounded-xl font-medium w-full max-w-xs">
           Back to Jobs
         </button>
       </div>
@@ -271,11 +278,12 @@ const JobSuccess = () => {
         {/* COMPLETION REPORT SECTION */}
         <div className="grid grid-cols-2 gap-3 mt-2">
           <button 
-            onClick={() => navigate(`/engineer/job/${id}/report`)}
+            type="button"
+            onClick={handleShare}
             className="flex flex-col items-center justify-center p-3 bg-white rounded-xl shadow-sm text-gray-700 hover:bg-gray-50 transition"
           >
             <IoDocumentTextOutline className="w-6 h-6 mb-1 text-[#10AFA5]"/>
-            <span className="text-xs font-medium">View Report</span>
+            <span className="text-xs font-medium">Share Report</span>
           </button>
           <button 
             onClick={handleShare}

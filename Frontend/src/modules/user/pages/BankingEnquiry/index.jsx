@@ -22,7 +22,7 @@ const BankingEnquiry = () => {
     phone: '',
     city: '',
     branchCode: '',
-    serviceType: location.state?.serviceType || 'ATM Service',
+    serviceType: location.state?.serviceType || 'ATM Maintenance',
     machineModels: '',
     numberOfUnits: '1-5',
     description: '',
@@ -215,14 +215,12 @@ const BankingEnquiry = () => {
               <div>
                 <label className="text-xs font-semibold text-gray-500 mb-1 block">Service Type *</label>
                 <select name="serviceType" value={formData.serviceType} onChange={handleInputChange} className="w-full px-4 py-3 bg-gray-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#10AFA5]/20 border border-transparent focus:border-[#10AFA5] transition-all text-gray-700">
-                  <option value="ATM Service">ATM Service</option>
-                  <option value="ATM Cassette Service">ATM Cassette Service</option>
+                  <option value="ATM Maintenance">ATM Maintenance</option>
+                  <option value="POS Machine Installation & Repair">POS Machine Installation & Repair</option>
+                  <option value="Biometric Device Setup">Biometric Device Setup</option>
+                  <option value="Cash Recycler / Kiosk Support">Cash Recycler / Kiosk Support</option>
                   <option value="Passbook Printer Service">Passbook Printer Service</option>
-                  <option value="Cash Deposit Machine Service">Cash Deposit Machine Service</option>
-                  <option value="POS Service">POS Service</option>
-                  <option value="VSAT Service">VSAT Service</option>
-                  <option value="Barcode Readers">Barcode Readers</option>
-                  <option value="Other">Other</option>
+                  <option value="Currency Counting Machine Repair">Currency Counting Machine Repair</option>
                 </select>
               </div>
               <div>

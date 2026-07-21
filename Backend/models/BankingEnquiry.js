@@ -34,9 +34,16 @@ const bankingEnquirySchema = new mongoose.Schema({
     type: String,
     required: [true, 'Service type is required'],
     enum: [
+      // Excel master (C05)
+      'ATM Maintenance',
+      'POS Machine Installation & Repair',
+      'Biometric Device Setup',
+      'Cash Recycler / Kiosk Support',
+      'Passbook Printer Service',
+      'Currency Counting Machine Repair',
+      // Legacy aliases (existing forms / DB)
       'ATM Service',
       'ATM Cassette Service',
-      'Passbook Printer Service',
       'Cash Deposit Machine Service',
       'POS Service',
       'VSAT Service',

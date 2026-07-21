@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { workerTheme as themeColors } from '../../../../theme';
 import { playAlertRing, stopAlertRing } from '../../../../utils/notificationSound';
 import engineerService from '../../../../services/engineerService';
+import api from '../../../../services/api';
 
 const WorkerAlertCard = ({ booking, onAccept, onReject, initialTimeLeft = 120 }) => {
   const [timeLeft, setTimeLeft] = useState(initialTimeLeft);
@@ -176,10 +177,18 @@ export default function GlobalWorkerJobAlert() {
   }, []);
 
   const handleAccept = async (id) => {
+    const alert = activeAlerts.find((b) => String(b.id || b._id) === String(id));
     try {
-      await engineerService.respondToJob(id, 'ACCEPTED');
+      if (alert?.isOpsJob) {
+        await api.post(`/engineers/ops-jobs/${id}/accept`);
+        toast.success('Vendor job accepted!');
+        navigate('/engineer/ops-jobs');
+      } else {
+        await engineerService.respondToJob(id, 'ACCEPTED');
+        toast.success('Job Accepted Successfully!');
+        navigate(`/engineer/job/${id}`);
+      }
 
-      // Clear from pending local storage
       const pendingJobs = JSON.parse(localStorage.getItem('workerPendingJobs') || '[]');
       const updated = pendingJobs.filter(b => String(b.id || b._id) !== String(id));
       localStorage.setItem('workerPendingJobs', JSON.stringify(updated));
@@ -191,16 +200,20 @@ export default function GlobalWorkerJobAlert() {
       });
 
       window.dispatchEvent(new Event('workerJobsUpdated'));
-      toast.success('Job Accepted Successfully!');
-      navigate(`/engineer/job/${id}`);
+      window.dispatchEvent(new Event('ops:job_assigned'));
     } catch (e) {
       toast.error(e.response?.data?.message || 'Failed to accept job');
     }
   };
 
   const handleReject = async (id, isAutoReject = false) => {
+    const alert = activeAlerts.find((b) => String(b.id || b._id) === String(id));
     try {
-      await engineerService.respondToJob(id, 'REJECTED');
+      if (alert?.isOpsJob) {
+        await api.post(`/engineers/ops-jobs/${id}/reject`, { reason: isAutoReject ? 'Timed out' : 'Unavailable' });
+      } else {
+        await engineerService.respondToJob(id, 'REJECTED');
+      }
     } catch (error) {
       console.error("Failed to reject on backend", error);
     } finally {
@@ -216,6 +229,7 @@ export default function GlobalWorkerJobAlert() {
 
       if (!isAutoReject) toast.success('Job Rejected');
       window.dispatchEvent(new Event('workerJobsUpdated'));
+      window.dispatchEvent(new Event('ops:job_assigned'));
     }
   };
 

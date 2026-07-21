@@ -1,6 +1,7 @@
 const Booking = require('../../models/Booking');
 const { validationResult } = require('express-validator');
 const { BOOKING_STATUS, PAYMENT_STATUS } = require('../../utils/constants');
+const { fetchOpsJobsForEngineer, countOpsJobsForEngineer } = require('../../utils/engineerUnifiedJobs');
 
 /**
  * Get assigned jobs for worker
@@ -73,22 +74,35 @@ const getAssignedJobs = async (req, res) => {
       Booking.countDocuments({ ...baseQuery, status: { $in: [BOOKING_STATUS.WORK_DONE, BOOKING_STATUS.COMPLETED] } })
     ]);
 
-    console.log(`[ENGINEER_JOBS_SUCCESS] Found ${bookings.length} jobs`);
+    const tab = status && status !== 'all' ? status : 'all';
+    const [opsJobs, opsCounts] = await Promise.all([
+      fetchOpsJobsForEngineer(workerId, tab),
+      countOpsJobsForEngineer(workerId)
+    ]);
+
+    const merged = [...opsJobs, ...(bookings || [])].sort((a, b) => {
+      const da = new Date(a.scheduledDate || a.createdAt || 0).getTime();
+      const db = new Date(b.scheduledDate || b.createdAt || 0).getTime();
+      return db - da;
+    });
+
+    const mergedTotal = (tab === 'all' ? opsCounts.all + allCount : merged.length);
 
     return res.status(200).json({
       success: true,
-      jobs: bookings || [],
+      jobs: merged.slice(0, parseInt(limit)),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit)) || 0
+        total: mergedTotal,
+        pages: Math.ceil(mergedTotal / parseInt(limit)) || 0
       },
       counts: {
-        all: allCount || 0,
-        assigned: assignedCount || 0,
-        inProgress: inProgressCount || 0,
-        completed: completedCount || 0
+        all: (allCount || 0) + (opsCounts.all || 0),
+        assigned: (assignedCount || 0) + (opsCounts.assigned || 0),
+        in_progress: (inProgressCount || 0) + (opsCounts.in_progress || 0),
+        inProgress: (inProgressCount || 0) + (opsCounts.in_progress || 0),
+        completed: (completedCount || 0) + (opsCounts.completed || 0)
       }
     });
 

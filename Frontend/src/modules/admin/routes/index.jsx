@@ -24,19 +24,16 @@ const Users = lazy(() => import('../pages/Users'));
 const Vendors = lazy(() => import('../pages/Vendors'));
 const Workers = lazy(() => import('../pages/Workers'));
 const Engineers = lazy(() => import('../pages/Engineers'));
-const FormBuilder = lazy(() => import('../pages/FormBuilder'));
-const Verifications = lazy(() => import('../pages/Verifications'));
 const Bookings = lazy(() => import('../pages/Bookings'));
 const BookingTracking = lazy(() => import('../pages/Bookings/Tracking'));
 const BookingNotifications = lazy(() => import('../pages/Bookings/BookingNotifications'));
 const Payments = lazy(() => import('../pages/Payments'));
 const Reports = lazy(() => import('../pages/Reports'));
 const Notifications = lazy(() => import('../pages/Notifications'));
-const B2BManagement = lazy(() => import('../pages/B2BManagement'));
+const B2BAdmin = lazy(() => import('../pages/B2B'));
 
 const Plans = lazy(() => import('../pages/Plans/Plans'));
 const Scrap = lazy(() => import('../pages/Scrap'));
-const Settlements = lazy(() => import('../pages/Settlements'));
 const Reviews = lazy(() => import('../pages/Reviews'));
 const TrustVideos = lazy(() => import('../pages/TrustVideos'));
 const HomeContentManagement = lazy(() => import('../pages/HomeContent'));
@@ -58,7 +55,6 @@ const PassbookPrinterServices = lazy(() => import('../pages/PassbookPrinterServi
 const CdmServices = lazy(() => import('../pages/CdmServices'));
 const PosServices = lazy(() => import('../pages/PosServices'));
 const VsatServices = lazy(() => import('../pages/VsatServices'));
-const ProjectTemplates = lazy(() => import('../pages/ProjectTemplates'));
 const BarcodeReaderServices = lazy(() => import('../pages/BarcodeReaderServices'));
 
 // Energy Solutions
@@ -80,6 +76,16 @@ const HcAmcEnquiries = lazy(() => import('../pages/HcAmcEnquiries'));
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F8FCFC]" />
 );
+
+/** Preserve sub-path when moving legacy admin URLs into hub sections */
+const LegacyAdminRedirect = ({ fromPrefix, toPrefix }) => {
+  const { pathname } = useLocation();
+  if (!pathname.startsWith(fromPrefix)) {
+    return <Navigate to={toPrefix} replace />;
+  }
+  const suffix = pathname.slice(fromPrefix.length);
+  return <Navigate to={`${toPrefix}${suffix}`} replace />;
+};
 
 const AdminRoutes = () => {
   const location = useLocation();
@@ -106,12 +112,9 @@ const AdminRoutes = () => {
           <Route path="vendors/*" element={<AnimatedPage><Vendors /></AnimatedPage>} />
           <Route path="workers/*" element={<AnimatedPage><Workers /></AnimatedPage>} />
           <Route path="engineers/*" element={<AnimatedPage><Engineers /></AnimatedPage>} />
-          <Route path="form-builder/*" element={<AnimatedPage><FormBuilder /></AnimatedPage>} />
-          <Route path="verifications/*" element={<AnimatedPage><Verifications /></AnimatedPage>} />
           <Route path="bookings" element={<AnimatedPage><Bookings /></AnimatedPage>} />
           <Route path="bookings/tracking" element={<AnimatedPage><BookingTracking /></AnimatedPage>} />
           <Route path="bookings/notifications" element={<AnimatedPage><BookingNotifications /></AnimatedPage>} />
-          <Route path="project-templates/*" element={<AnimatedPage><ProjectTemplates /></AnimatedPage>} />
           <Route path="user-categories/*" element={<AnimatedPage><UserCategories /></AnimatedPage>} />
           <Route path="service-categories/*" element={<AnimatedPage><ServiceCategories /></AnimatedPage>} />
           <Route path="one-time-services" element={<AnimatedPage><OneTimeServices /></AnimatedPage>} />
@@ -161,8 +164,18 @@ const AdminRoutes = () => {
           <Route path="healthcare-solutions/preventive-maintenance" element={<AnimatedPage><HcPreventiveMaintenanceEnquiries /></AnimatedPage>} />
           <Route path="healthcare-solutions/amc" element={<AnimatedPage><HcAmcEnquiries /></AnimatedPage>} />
 
-          <Route path="settlements/*" element={<AnimatedPage><Settlements /></AnimatedPage>} />
-          <Route path="b2b-companies" element={<AnimatedPage><B2BManagement /></AnimatedPage>} />
+          <Route path="b2b/*" element={<AnimatedPage><B2BAdmin /></AnimatedPage>} />
+          <Route path="b2b-companies" element={<Navigate to="/admin/b2b/companies" replace />} />
+          <Route path="verifications/*" element={<Navigate to="/admin/workers/verifications" replace />} />
+          <Route path="project-templates/*" element={<LegacyAdminRedirect fromPrefix="/admin/project-templates" toPrefix="/admin/vendors/project-templates" />} />
+          <Route path="form-builder" element={<Navigate to="/admin/vendors/form-builder" replace />} />
+          <Route path="form-builder/*" element={<Navigate to="/admin/vendors/form-builder" replace />} />
+          <Route path="assignment-config" element={<Navigate to="/admin/vendors/assignment-engine" replace />} />
+          <Route path="settlements/*" element={<LegacyAdminRedirect fromPrefix="/admin/settlements" toPrefix="/admin/vendors/settlements" />} />
+          <Route path="user-categories/vendor-services" element={<Navigate to="/admin/vendors/services-catalog" replace />} />
+          <Route path="user-categories/vendor-parts" element={<Navigate to="/admin/vendors/parts-catalog" replace />} />
+          <Route path="payments/workers" element={<Navigate to="/admin/workers/payments" replace />} />
+          <Route path="payments/vendors" element={<Navigate to="/admin/vendors/payments" replace />} />
           <Route path="settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
         </Route>
       </Routes>

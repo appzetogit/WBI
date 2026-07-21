@@ -9,8 +9,41 @@ const VendorProjectPortfolio = require('../../models/VendorProjectPortfolio');
 const VendorDocument = require('../../models/VendorDocument');
 const VendorFinance = require('../../models/VendorFinance');
 const VendorModelApproval = require('../../models/VendorModelApproval');
+const { VENDOR_STATUS } = require('../../utils/constants');
+const {
+  generateKitWaybill,
+  buildOnboardingStatus,
+  persistAndEmit,
+  emitOnboardingStatus
+} = require('../../services/vendorOnboarding.service');
 
-// Since we are upgrading the registration, we might use a draft collection,
+async function resolveOnboardingVendor(req, res, { requireAuth = false } = {}) {
+  const authId = req.user?.id || req.user?._id;
+  const bodyId = req.body?.vendorId || req.query?.vendorId;
+
+  if (requireAuth && !authId) {
+    res.status(401).json({ success: false, message: 'Please sign in to continue.' });
+    return null;
+  }
+
+  const vendorId = authId || bodyId;
+  if (!vendorId) {
+    res.status(400).json({ success: false, message: 'Vendor ID is required.' });
+    return null;
+  }
+
+  if (authId && bodyId && String(authId) !== String(bodyId)) {
+    res.status(403).json({ success: false, message: 'Vendor mismatch.' });
+    return null;
+  }
+
+  const vendor = await Vendor.findById(vendorId);
+  if (!vendor) {
+    res.status(404).json({ success: false, message: 'Vendor not found' });
+    return null;
+  }
+  return vendor;
+}
 // but to avoid breaking things, we can just save it into a new Model or save a partial vendor
 
 const getConfig = async (req, res) => {
@@ -183,7 +216,7 @@ const submitApplication = async (req, res) => {
       const {
         ownerName, mobile, email, password, companyName, gstin, panNumber,
         models, incorporationType, officeAddress, city, state, pincode,
-        oneTimeServices, projectServices, dailyCapacity, totalWorkers,
+        oneTimeServices, projectServices, selectedProjectServices, dailyCapacity, totalWorkers,
         serviceRadiusKm, maxProjectValue, totalEngineers, projectCoverageType,
         portfolioTitle, portfolioClient, portfolioValue,
         panUrl, gstUrl, companyRegUrl, chequeUrl, pfDocumentUrl, esiDocumentUrl, workOrderUrl, digitalSLAAccepted,
@@ -194,16 +227,33 @@ const submitApplication = async (req, res) => {
       if (!ownerName || !mobile) {
          return res.status(400).json({ success: false, message: 'Owner name and mobile are required' });
       }
+      if (!password || String(password).length < 6) {
+        return res.status(400).json({ success: false, message: 'Password is required (min 6 characters)' });
+      }
+      if (!email) {
+        return res.status(400).json({ success: false, message: 'Email is required for login' });
+      }
+
+      // Normalize phone to last 10 digits for consistent login matching
+      const normalizedPhone = String(mobile).replace(/\D/g, '').slice(-10);
+      const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
 
       // Check for existing vendor by phone or email to prevent E11000 errors
-      vendor = await Vendor.findOne({ $or: [{ phone: mobile }, { email: email && email !== '' ? email : 'NON_EXISTENT_EMAIL_DUMMY' }] });
+      vendor = await Vendor.findOne({
+        $or: [
+          { phone: normalizedPhone },
+          { phone: mobile },
+          ...(normalizedEmail ? [{ email: normalizedEmail }] : [])
+        ]
+      });
       
       if (!vendor) {
-        vendor = new Vendor({ phone: mobile });
+        vendor = new Vendor({ phone: normalizedPhone || mobile });
       }
 
       vendor.name = ownerName;
-      vendor.email = email || null;
+      vendor.email = normalizedEmail;
+      vendor.phone = normalizedPhone || mobile;
       vendor.businessName = companyName;
       vendor.gstin = gstin;
       vendor.pan = { number: panNumber, document: panUrl };
@@ -220,6 +270,36 @@ const submitApplication = async (req, res) => {
       vendor.digitalSLAAccepted = !!digitalSLAAccepted;
       vendor.otherDocuments = [gstUrl, companyRegUrl, chequeUrl, workOrderUrl].filter(Boolean);
 
+      // Persist selected project services into approvedServices
+      if (Array.isArray(selectedProjectServices) && selectedProjectServices.length) {
+        vendor.approvedServices = selectedProjectServices.map((s) => ({
+          categoryCode: String(s.categoryCode || '').toUpperCase(),
+          categoryName: s.categoryName || s.categoryCode,
+          subServices: Array.isArray(s.subServices) ? s.subServices : [],
+          approvedAt: null,
+          status: 'pending'
+        })).filter((s) => s.categoryCode);
+      } else if (Array.isArray(projectServices) && projectServices.length) {
+        // Backward compat: parse "Name (C01)" strings
+        vendor.approvedServices = projectServices.map((label) => {
+          const match = String(label).match(/\((C\d{2})\)\s*$/i);
+          const code = match ? match[1].toUpperCase() : null;
+          return code ? {
+            categoryCode: code,
+            categoryName: String(label).replace(/\s*\(C\d{2}\)\s*$/i, '').trim(),
+            subServices: [],
+            approvedAt: null,
+            status: 'pending'
+          } : null;
+        }).filter(Boolean);
+      }
+
+      // Keep legacy service/categories arrays in sync for older filters
+      if (vendor.approvedServices?.length) {
+        vendor.service = vendor.approvedServices.map((s) => s.categoryName).filter(Boolean);
+        vendor.categories = vendor.approvedServices.map((s) => s.categoryCode).filter(Boolean);
+      }
+
       if (password) {
         // DO NOT manually hash the password here, as VendorSchema.pre('save') will hash it automatically!
         vendor.password = password;
@@ -228,6 +308,14 @@ const submitApplication = async (req, res) => {
       // Basic init
       vendor.onboarding = { status: 'SUBMITTED', progressPercentage: 100 };
       await vendor.save();
+
+      // Invalidate dynamic config cache so dashboard/profile pick up services immediately
+      try {
+        const { invalidateVendorConfigCache } = require('./vendorConfigController');
+        await invalidateVendorConfigCache(vendor._id);
+      } catch (cacheErr) {
+        console.warn('[submitApplication] config cache invalidate failed:', cacheErr.message);
+      }
       
       // Upsert Bank Details
       if (accountNumber && ifscCode) {
@@ -257,7 +345,7 @@ const submitApplication = async (req, res) => {
         );
       }
 
-      if (models?.includes('PROJECT') && projectServices?.length) {
+      if (models?.includes('PROJECT') && (selectedProjectServices?.length || projectServices?.length)) {
         const parseValue = (val) => {
           if (!val) return 0;
           const str = String(val).toUpperCase();
@@ -345,16 +433,17 @@ const getFuzzyMatchScore = (str1, str2) => {
 
 const verifyKyc = async (req, res) => {
   try {
-    const { vendorId, gstin, panNumber } = req.body;
-    const vendor = await Vendor.findById(vendorId);
-    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    const vendor = await resolveOnboardingVendor(req, res);
+    if (!vendor) return;
+
+    const { gstin, panNumber } = req.body;
 
     vendor.kycStatus = 'verified';
     if (gstin) vendor.gstin = gstin.toUpperCase();
     if (panNumber) vendor.pan = { ...vendor.pan, number: panNumber.toUpperCase() };
-    await vendor.save();
+    const data = await persistAndEmit(vendor);
 
-    res.status(200).json({ success: true, message: 'KYC documents verified successfully!' });
+    res.status(200).json({ success: true, message: 'KYC documents verified successfully!', data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -394,7 +483,7 @@ const verifyBankPennyDrop = async (req, res) => {
 
     if (vendor) {
       vendor.bankStatus = 'verified';
-      await vendor.save();
+      await persistAndEmit(vendor);
 
       // Create Bank record
       await VendorBank.findOneAndUpdate(
@@ -421,15 +510,33 @@ const verifyBankPennyDrop = async (req, res) => {
 
 const completeInduction = async (req, res) => {
   try {
-    const { vendorId } = req.body;
-    const vendor = await Vendor.findById(vendorId);
-    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    const vendor = await resolveOnboardingVendor(req, res);
+    if (!vendor) return;
 
     vendor.inductionStatus = 'completed';
     vendor.kitDispatchStatus = 'dispatched';
-    await vendor.save();
+    if (!vendor.kitWaybill) {
+      vendor.kitWaybill = generateKitWaybill(vendor._id);
+    }
+    const data = await persistAndEmit(vendor);
 
-    res.status(200).json({ success: true, message: 'Onboarding training modules successfully completed!' });
+    res.status(200).json({ success: true, message: 'Onboarding training modules successfully completed!', data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getOnboardingStatus = async (req, res) => {
+  try {
+    const vendor = await resolveOnboardingVendor(req, res);
+    if (!vendor) return;
+
+    const { syncOperationalAudit } = require('../../services/vendorOnboarding.service');
+    syncOperationalAudit(vendor);
+    if (vendor.isModified()) await vendor.save();
+
+    const data = buildOnboardingStatus(vendor);
+    res.status(200).json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -437,17 +544,130 @@ const completeInduction = async (req, res) => {
 
 const activateAccount = async (req, res) => {
   try {
-    const { vendorId } = req.body;
-    const vendor = await Vendor.findById(vendorId);
-    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
+    const vendor = await resolveOnboardingVendor(req, res, { requireAuth: true });
+    if (!vendor) return;
 
-    vendor.approvalStatus = 'approved';
-    vendor.kitDispatchStatus = 'delivered';
+    if (vendor.approvalStatus === VENDOR_STATUS.APPROVED) {
+      const data = buildOnboardingStatus(vendor);
+      return res.status(200).json({
+        success: true,
+        message: 'Your partner workspace is already active.',
+        data
+      });
+    }
+
+    if (vendor.kycStatus !== 'verified' || vendor.bankStatus !== 'verified' || vendor.inductionStatus !== 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'Complete compliance, financial audit, and partner induction before activation.'
+      });
+    }
+
+    if (vendor.operationalAuditStatus !== 'approved') {
+      return res.status(403).json({
+        success: false,
+        message: 'Operational audit is pending administrator review. You will be notified when you can go live.'
+      });
+    }
+
+    if (vendor.workspaceProvisioning?.status === 'in_progress') {
+      return res.status(409).json({
+        success: false,
+        message: 'Workspace provisioning is already in progress. Please wait a moment.'
+      });
+    }
+
+    vendor.workspaceProvisioning = {
+      status: 'in_progress',
+      startedAt: new Date(),
+      completedAt: null,
+      error: null
+    };
     await vendor.save();
+    emitOnboardingStatus(vendor._id, buildOnboardingStatus(vendor));
 
-    res.status(200).json({ success: true, message: 'Vendor account activated successfully! Welcome to Active & Go-Live.' });
+    try {
+      const { ensureVendorCompanyCode } = require('../../utils/vendorCompanyCode');
+      await ensureVendorCompanyCode(vendor);
+    } catch (codeErr) {
+      console.warn('Vendor company code generation failed:', codeErr.message);
+    }
+
+    try {
+      const { invalidateVendorConfigCache } = require('./vendorConfigController');
+      await invalidateVendorConfigCache(vendor._id);
+    } catch (cacheErr) {
+      console.warn('[activateAccount] config cache invalidate failed:', cacheErr.message);
+    }
+
+    vendor.approvalStatus = VENDOR_STATUS.APPROVED;
+    vendor.isActive = true;
+    vendor.approvalDate = new Date();
+    vendor.kitDispatchStatus = 'delivered';
+    if (!vendor.kitWaybill) {
+      vendor.kitWaybill = generateKitWaybill(vendor._id);
+    }
+    if (vendor.onboarding) {
+      vendor.onboarding.status = 'APPROVED';
+      vendor.onboarding.currentStep = 5;
+      if (!vendor.onboarding.completedSteps.includes(5)) {
+        vendor.onboarding.completedSteps.push(5);
+      }
+    }
+    vendor.workspaceProvisioning = {
+      status: 'completed',
+      startedAt: vendor.workspaceProvisioning?.startedAt || new Date(),
+      completedAt: new Date(),
+      error: null
+    };
+
+    const data = await persistAndEmit(vendor);
+
+    try {
+      const { notifyVendor } = require('../../services/vendorNotify.service');
+      await notifyVendor(vendor._id, {
+        type: 'general',
+        category: 'account',
+        title: 'Partner workspace active',
+        message: 'Your WBI partner dashboard is live. You can now accept leads and manage operations.',
+        relatedId: vendor._id,
+        relatedType: 'vendor',
+        data: { type: 'vendor_workspace_active' }
+      });
+    } catch (notifyErr) {
+      console.warn('[activateAccount] notify failed:', notifyErr.message);
+    }
+
+    try {
+      const { sendVendorPartnerActivationEmail } = require('../../services/emailService');
+      await sendVendorPartnerActivationEmail(vendor, data);
+    } catch (mailErr) {
+      console.warn('[activateAccount] email failed:', mailErr.message);
+    }
+
+    emitOnboardingStatus(vendor._id, { ...data, provisioningPhase: 'completed' });
+
+    res.status(200).json({
+      success: true,
+      message: 'Vendor account activated successfully! Welcome to Active & Go-Live.',
+      data
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    try {
+      const vendorId = req.user?.id || req.body?.vendorId;
+      if (vendorId) {
+        await Vendor.findByIdAndUpdate(vendorId, {
+          $set: {
+            'workspaceProvisioning.status': 'failed',
+            'workspaceProvisioning.error': error.message,
+            'workspaceProvisioning.completedAt': new Date()
+          }
+        });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    res.status(500).json({ success: false, message: error.message || 'Activation failed. Please try again.' });
   }
 };
 
@@ -463,5 +683,6 @@ module.exports = {
   verifyKyc,
   verifyBankPennyDrop,
   completeInduction,
-  activateAccount
+  activateAccount,
+  getOnboardingStatus
 };

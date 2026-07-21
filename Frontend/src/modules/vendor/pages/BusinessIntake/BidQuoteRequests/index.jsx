@@ -4,6 +4,7 @@ import { fetchOpportunities, fetchOpportunityById, formatBudget, deadlineCountdo
 import OpportunityDrawer from '../components/OpportunityDrawer';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import EmptyState from '../components/EmptyState';
+import { useBusinessIntake } from '../context/BusinessIntakeContext';
 
 const RFQCard = ({ opp, onView }) => {
   const countdown = deadlineCountdown(opp.deadline);
@@ -61,6 +62,7 @@ const RFQCard = ({ opp, onView }) => {
 };
 
 const BidQuoteRequests = () => {
+  const { search, filters, refreshKey } = useBusinessIntake();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedOpp, setSelectedOpp] = useState(null);
@@ -68,13 +70,25 @@ const BidQuoteRequests = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchOpportunities({ type: 'bid_quote_request', status: 'open', limit: 20 });
+      const params = {
+        type: 'bid_quote_request',
+        status: filters.status || 'open',
+        sort: filters.sort,
+        limit: 20,
+      };
+      if (search) params.search = search;
+      if (filters.category) params.category = filters.category;
+      if (filters.city) params.city = filters.city;
+      if (filters.minBudget) params.minBudget = filters.minBudget;
+      if (filters.maxBudget) params.maxBudget = filters.maxBudget;
+      if (filters.priority) params.priority = filters.priority;
+      const res = await fetchOpportunities(params);
       setData(res.data.data || []);
     } catch {}
     finally { setLoading(false); }
-  }, []);
+  }, [search, filters]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load, refreshKey]);
 
   const handleView = async (id, opp) => {
     setSelectedOpp(opp);
@@ -95,7 +109,8 @@ const BidQuoteRequests = () => {
 
       {selectedOpp && (
         <OpportunityDrawer opportunity={selectedOpp} onClose={() => setSelectedOpp(null)}
-          onBidSubmitted={() => { setSelectedOpp(null); load(); }} />
+          onBidSubmitted={() => { setSelectedOpp(null); load(); }}
+          onAccepted={() => { setSelectedOpp(null); load(); }} />
       )}
     </>
   );

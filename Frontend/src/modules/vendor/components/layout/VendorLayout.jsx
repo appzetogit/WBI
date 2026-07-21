@@ -9,7 +9,6 @@ import {
 } from 'react-icons/fi';
 import Logo from '../../../../components/common/Logo';
 import { logout } from '../../services/authService';
-import toast from 'react-hot-toast';
 
 const navItems = [
   { name: 'Dashboard', path: '/vendor/dashboard', icon: FiHome },
@@ -52,10 +51,10 @@ const VendorLayout = () => {
   const handleLogout = async () => {
     try {
       await logout();
-      navigate('/vendor/login');
-    } catch (error) {
-      toast.error('Logout failed');
+    } catch {
+      /* local session still cleared by authService */
     }
+    navigate('/vendor/login', { replace: true });
   };
 
   return (

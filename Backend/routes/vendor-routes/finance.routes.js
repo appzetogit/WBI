@@ -4,6 +4,7 @@ const { authenticate } = require('../../middleware/authMiddleware');
 const {
   getCounts,
   getWallet,
+  getEarningsByService,
   requestWithdrawal,
   getClientReceivables,
   getB2BReceivables,
@@ -16,6 +17,7 @@ const {
 } = require('../../controllers/vendorControllers/financeController');
 
 router.get('/counts', authenticate, getCounts);
+router.get('/earnings-by-service', authenticate, getEarningsByService);
 router.get('/wallet', authenticate, getWallet);
 router.post('/wallet/withdraw', authenticate, requestWithdrawal);
 

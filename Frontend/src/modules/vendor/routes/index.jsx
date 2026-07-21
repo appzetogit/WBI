@@ -11,30 +11,42 @@ import CashLimitModal from '../components/common/CashLimitModal'; // Import
 import GlobalBookingAlert from '../components/common/GlobalBookingAlert';
 // import useAppNotifications from '../../../hooks/useAppNotifications.jsx'; // Handled globally
 
-// Lazy load wrapper with error handling (same as user app)
+// Lazy load wrapper with retry for Vite chunk/HMR failures
 const lazyLoad = (importFunc) => {
   return lazy(() => {
-    return Promise.resolve(importFunc()).catch((error) => {
-      console.error('Failed to load vendor page:', error);
-      // Return a fallback component wrapped in a Promise
-      return Promise.resolve({
-        default: () => (
-          <div className="flex items-center justify-center min-h-screen bg-white">
-            <div className="text-center p-6">
-              <h2 className="text-xl font-bold text-gray-800 mb-2">Failed to load page</h2>
-              <p className="text-gray-600 mb-4">Please refresh the page or try again later.</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-6 py-3 rounded-xl text-white font-semibold transition-all duration-300 hover:opacity-90"
-                  style={{ backgroundColor: '#347989' }}
-                >
-                Refresh Page
-              </button>
-            </div>
-          </div>
-        ),
+    return Promise.resolve(importFunc())
+      .catch(async (error) => {
+        console.error('Failed to load vendor page (retrying once):', error);
+        // One retry helps after HMR / renamed modules
+        try {
+          await new Promise((r) => setTimeout(r, 300));
+          return await importFunc();
+        } catch (retryError) {
+          console.error('Failed to load vendor page:', retryError);
+          const message = retryError?.message || error?.message || 'Unknown load error';
+          return {
+            default: () => (
+              <div className="flex items-center justify-center min-h-screen bg-white">
+                <div className="text-center p-6 max-w-md">
+                  <h2 className="text-xl font-bold text-gray-800 mb-2">Failed to load page</h2>
+                  <p className="text-gray-600 mb-2">Please refresh the page or try again later.</p>
+                  <p className="text-xs text-gray-400 mb-4 break-all">{message}</p>
+                  <button
+                    onClick={() => {
+                      sessionStorage.removeItem('chunk_load_reloaded');
+                      window.location.reload();
+                    }}
+                    className="px-6 py-3 rounded-xl text-white font-semibold transition-all duration-300 hover:opacity-90"
+                    style={{ backgroundColor: '#347989' }}
+                  >
+                    Refresh Page
+                  </button>
+                </div>
+              </div>
+            ),
+          };
+        }
       });
-    });
   });
 };
 
@@ -80,6 +92,8 @@ const ProjectOSDashboard = lazyLoad(() => import('../../project-os/pages/Project
 
 // ── NEW DYNAMIC PANEL ENGINE COMPONENTS ───────────────
 const DynamicVendorLayout = lazyLoad(() => import('../components/layout/DynamicVendorLayout'));
+const VendorHomeRedirect = lazyLoad(() => import('../components/VendorHomeRedirect'));
+const LegacyDynamicRedirect = lazyLoad(() => import('../components/LegacyDynamicRedirect'));
 const DynamicDashboard = lazyLoad(() => import('../pages/Dashboard/DynamicDashboard'));
 const BusinessIntake = lazyLoad(() => import('../pages/BusinessIntake/BusinessIntake'));
 const ClientsContracts = lazyLoad(() => import('../pages/ClientsContracts/ClientsContracts'));
@@ -111,12 +125,12 @@ const VendorRoutes = () => {
             <Route path="forgot-password" element={<AnimatedPage><PublicRoute userType="vendor"><ForgotPassword /></PublicRoute></AnimatedPage>} />
             <Route path="pending-approval" element={<AnimatedPage><PendingApproval /></AnimatedPage>} />
 
-            {/* Base Redirect */}
-            <Route path="/" element={<Navigate to="dynamic/dashboard" replace />} />
+            {/* Base Redirect — resolve registered service slug from API */}
+            <Route path="/" element={<VendorHomeRedirect suffix="dashboard" />} />
 
             {/* Digital Solution specific routes (Main Vendor Layout now) */}
             <Route element={<ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute>}>
-              <Route path="digital-solution/dashboard" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+              <Route path="digital-solution/dashboard" element={<VendorHomeRedirect suffix="dashboard" />} />
               <Route path="digital-solution/my-profile" element={<AnimatedPage><DigitalProfile /></AnimatedPage>} />
               <Route path="digital-solution/booking-alerts" element={<AnimatedPage><BookingAlerts /></AnimatedPage>} />
               <Route path="digital-solution/booking-alert/:id" element={<AnimatedPage><BookingAlert /></AnimatedPage>} />
@@ -149,41 +163,45 @@ const VendorRoutes = () => {
               <Route path="digital-solution/reviews" element={<AnimatedPage><MyRatings /></AnimatedPage>} />
               <Route path="digital-solution/support" element={<AnimatedPage><AboutWBI /></AnimatedPage>} />
               <Route path="digital-solution/about-wbi" element={<AnimatedPage><AboutWBI /></AnimatedPage>} />
-              <Route path="digital-solution/*" element={<Navigate to="/vendor/digital-solution/dashboard" replace />} />
+              <Route path="digital-solution/*" element={<VendorHomeRedirect suffix="dashboard" />} />
             </Route>
 
             {/* ── Project OS — standalone (no VendorLayout wrapper) ─────── */}
             <Route path="project-os" element={<ProtectedRoute userType="vendor"><ProjectOSList /></ProtectedRoute>} />
             <Route path="project-os/:id/*" element={<ProtectedRoute userType="vendor"><ProjectOSDashboard /></ProtectedRoute>} />
 
-            {/* ── NEW DYNAMIC PANEL ENGINE ─────── */}
-            <Route element={<ProtectedRoute userType="vendor"><DynamicVendorLayout /></ProtectedRoute>}>
-              <Route path="dynamic/dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
-              <Route path="dynamic/business-intake/*" element={<AnimatedPage><BusinessIntake /></AnimatedPage>} />
-              <Route path="dynamic/clients/*" element={<AnimatedPage><ClientsContracts /></AnimatedPage>} />
-              <Route path="dynamic/projects/*" element={<AnimatedPage><ProjectOperations /></AnimatedPage>} />
-              <Route path="dynamic/workforce/*" element={<AnimatedPage><Workforce /></AnimatedPage>} />
-              <Route path="dynamic/resources/*" element={<AnimatedPage><Resources /></AnimatedPage>} />
-              <Route path="dynamic/quality/*" element={<AnimatedPage><QualityControl /></AnimatedPage>} />
-              <Route path="dynamic/finance/*" element={<AnimatedPage><Finance /></AnimatedPage>} />
-              <Route path="dynamic/performance/*" element={<AnimatedPage><Performance /></AnimatedPage>} />
-              <Route path="dynamic/compliance/*" element={<AnimatedPage><Compliance /></AnimatedPage>} />
-              <Route path="dynamic/notifications/*" element={<AnimatedPage><Notifications /></AnimatedPage>} />
-              <Route path="dynamic/support/*" element={<AnimatedPage><Support /></AnimatedPage>} />
-              <Route path="dynamic/settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
+            {/* Legacy /vendor/dynamic/* → service-slug portal */}
+            <Route path="dynamic/*" element={<ProtectedRoute userType="vendor"><LegacyDynamicRedirect /></ProtectedRoute>} />
+
+            {/* ── Service-specific portal: /vendor/:serviceSlug/... ─────── */}
+            <Route path=":serviceSlug" element={<ProtectedRoute userType="vendor"><DynamicVendorLayout /></ProtectedRoute>}>
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
+              <Route path="business-intake/*" element={<AnimatedPage><BusinessIntake /></AnimatedPage>} />
+              <Route path="clients/*" element={<AnimatedPage><ClientsContracts /></AnimatedPage>} />
+              <Route path="projects/*" element={<AnimatedPage><ProjectOperations /></AnimatedPage>} />
+              <Route path="workforce/*" element={<AnimatedPage><Workforce /></AnimatedPage>} />
+              <Route path="resources/*" element={<AnimatedPage><Resources /></AnimatedPage>} />
+              <Route path="quality/*" element={<AnimatedPage><QualityControl /></AnimatedPage>} />
+              <Route path="finance/*" element={<AnimatedPage><Finance /></AnimatedPage>} />
+              <Route path="performance/*" element={<AnimatedPage><Performance /></AnimatedPage>} />
+              <Route path="compliance/*" element={<AnimatedPage><Compliance /></AnimatedPage>} />
+              <Route path="notifications/*" element={<AnimatedPage><Notifications /></AnimatedPage>} />
+              <Route path="support/*" element={<AnimatedPage><Support /></AnimatedPage>} />
+              <Route path="settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
             </Route>
 
-            {/* Fallbacks for old routes to redirect to new structure */}
-            <Route path="dashboard" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
-            <Route path="projects" element={<Navigate to="/vendor/dynamic/projects" replace />} />
-            <Route path="engineers" element={<Navigate to="/vendor/dynamic/workforce" replace />} />
-            <Route path="work-orders" element={<Navigate to="/vendor/dynamic/projects" replace />} />
-            <Route path="earnings" element={<Navigate to="/vendor/dynamic/finance" replace />} />
-            <Route path="settings" element={<Navigate to="/vendor/dynamic/settings" replace />} />
-            <Route path="notifications" element={<Navigate to="/vendor/dynamic/notifications" replace />} />
-            <Route path="reviews" element={<Navigate to="/vendor/dynamic/performance" replace />} />
-            <Route path="support" element={<Navigate to="/vendor/dynamic/support" replace />} />
-            <Route path="*" element={<Navigate to="/vendor/dynamic/dashboard" replace />} />
+            {/* Fallbacks for old flat routes */}
+            <Route path="dashboard" element={<VendorHomeRedirect suffix="dashboard" />} />
+            <Route path="projects" element={<VendorHomeRedirect suffix="projects" />} />
+            <Route path="engineers" element={<VendorHomeRedirect suffix="workforce" />} />
+            <Route path="work-orders" element={<VendorHomeRedirect suffix="projects" />} />
+            <Route path="earnings" element={<VendorHomeRedirect suffix="finance" />} />
+            <Route path="settings" element={<VendorHomeRedirect suffix="settings" />} />
+            <Route path="notifications" element={<VendorHomeRedirect suffix="notifications" />} />
+            <Route path="reviews" element={<VendorHomeRedirect suffix="performance" />} />
+            <Route path="support" element={<VendorHomeRedirect suffix="support" />} />
+            <Route path="*" element={<VendorHomeRedirect suffix="dashboard" />} />
           </Routes>
             </AnimatePresence>
       </Suspense>

@@ -50,6 +50,13 @@ const verifyBankForWithdrawal = async (req, res, next) => {
       return next();
     }
 
+    if (req.body?.method === 'upi' && req.body?.upiId) {
+      const upi = String(req.body.upiId).trim();
+      if (/^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9._-]{2,64}$/i.test(upi)) {
+        return next();
+      }
+    }
+
     const ownerId = req.user.id || (req.user && req.user._id);
 
     const bankAccount = await BankAccount.findOne({ ownerId, verificationStatus: 'verified' });

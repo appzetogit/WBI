@@ -72,13 +72,39 @@ const ProtectedRoute = ({ children, userType = 'user', redirectTo = null }) => {
             }
 
             if (isValid) {
+              // Enforce role match when claim/payload is present
+              const payloadRole = String(payload.role || payload.userType || '').toLowerCase();
+              let storedRole = '';
+              try {
+                const parsed = JSON.parse(userData);
+                storedRole = String(parsed.role || parsed.userType || '').toLowerCase();
+              } catch {
+                storedRole = '';
+              }
+              const expected = String(userType).toLowerCase();
+              const effectiveRole = payloadRole || storedRole;
+              if (effectiveRole && effectiveRole !== expected && !(expected === 'b2b' && effectiveRole === 'b2b_client')) {
+                const roleHomes = {
+                  user: '/user/dashboard',
+                  vendor: '/vendor/dashboard',
+                  worker: '/worker/dashboard',
+                  engineer: '/engineer/dashboard',
+                  admin: '/admin/dashboard',
+                  b2b: '/b2b/dashboard',
+                };
+                setWrongRoleRedirect(roleHomes[effectiveRole] || (redirectTo || `/${expected}/login`));
+                setIsAuthenticated(false);
+                setIsLoading(false);
+                return;
+              }
+
               setIsAuthenticated(true);
               setIsLoading(false);
               
               // Only initialize push notifications when user is truly authenticated
               import('../../services/pushNotificationService').then((module) => {
                 module.initializePushNotifications(userType);
-              }).catch(err => console.warn('Failed to load push notifications', err));
+              }).catch(() => {});
               
             } else {
               // Truly expired and no way to refresh

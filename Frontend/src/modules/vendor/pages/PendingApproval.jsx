@@ -43,62 +43,123 @@ const PendingApproval = () => {
   // Phase 5 State: Go-Live
   const [activating, setActivating] = useState(false);
 
+  const getStoredVendorId = () => {
+    try {
+      const dataStr = localStorage.getItem('vendorData');
+      if (!dataStr) return null;
+      const v = JSON.parse(dataStr);
+      return v._id || v.id || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const persistVendorSnapshot = (data) => {
+    if (!data) return;
+    try {
+      const prev = JSON.parse(localStorage.getItem('vendorData') || '{}');
+      const merged = {
+        ...prev,
+        ...data,
+        _id: data._id || data.id || prev._id || prev.id
+      };
+      localStorage.setItem('vendorData', JSON.stringify(merged));
+    } catch (_) {
+      /* ignore */
+    }
+  };
+
+  const applyOnboardingPayload = (data) => {
+    if (!data) return;
+    setVendor((prev) => ({ ...(prev || {}), ...data }));
+    if (data.activeStep) setActiveStep(data.activeStep);
+    persistVendorSnapshot(data);
+  };
+
+  const deriveStepFromVendor = (v) => {
+    if (!v) return 2;
+    if (v.approvalStatus === 'approved') return 5;
+    if (v.kycStatus !== 'verified') return 2;
+    if (v.bankStatus !== 'verified') return 3;
+    if (v.inductionStatus !== 'completed') return 4;
+    return 5;
+  };
+
   const fetchStatus = async () => {
     try {
       setLoading(true);
+      const vendorId = getStoredVendorId();
       const token = localStorage.getItem('vendorAccessToken') || sessionStorage.getItem('vendorAccessToken');
-      
+
+      if (vendorId || token) {
+        try {
+          const res = await api.get('/vendor/onboarding/status', {
+            params: vendorId ? { vendorId } : undefined
+          });
+          if (res.data?.success && res.data.data) {
+            applyOnboardingPayload(res.data.data);
+            if (res.data.data.isActivated) {
+              navigate('/vendor/digital-solution/dashboard', { replace: true });
+            }
+            return;
+          }
+        } catch (apiErr) {
+          if (apiErr.response?.status === 401 && !vendorId) {
+            toast.error('Please sign in to continue onboarding.');
+            navigate('/vendor/login');
+            return;
+          }
+        }
+      }
+
       if (token) {
         const res = await api.get('/vendors/profile');
-        if (res.data?.success) {
-          setVendor(res.data.data);
-          const v = res.data.data;
-          if (v.kycStatus !== 'verified') setActiveStep(2);
-          else if (v.bankStatus !== 'verified') setActiveStep(3);
-          else if (v.inductionStatus !== 'completed') setActiveStep(4);
-          else setActiveStep(5);
+        if (res.data?.success && res.data.vendor) {
+          const v = res.data.vendor;
+          const merged = {
+            ...v,
+            _id: v._id || v.id,
+            activeStep: deriveStepFromVendor(v)
+          };
+          applyOnboardingPayload(merged);
+          setActiveStep(merged.activeStep);
+          if (v.approvalStatus === 'approved') {
+            navigate('/vendor/digital-solution/dashboard', { replace: true });
+          }
           return;
         }
       }
       
-      // Fallback to local storage if no token or api fails
       const dataStr = localStorage.getItem('vendorData');
       if (dataStr) {
         try {
           const v = JSON.parse(dataStr);
-          if (!v._id) {
+          if (!v._id && !v.id) {
             toast.error('Session expired. Please sign in again.');
             localStorage.clear();
             navigate('/vendor/login');
             return;
           }
           setVendor(v);
-          if (v.kycStatus !== 'verified') setActiveStep(2);
-          else if (v.bankStatus !== 'verified') setActiveStep(3);
-          else if (v.inductionStatus !== 'completed') setActiveStep(4);
-          else setActiveStep(5);
+          setActiveStep(deriveStepFromVendor(v));
         } catch (_) {}
       } else {
         toast.error('No active onboarding session found.');
         navigate('/vendor/login');
       }
     } catch (err) {
-      // API error occurred, fallback to local storage
       const dataStr = localStorage.getItem('vendorData');
       if (dataStr) {
         try {
           const v = JSON.parse(dataStr);
-          if (!v._id) {
+          if (!v._id && !v.id) {
             toast.error('Session expired. Please sign in again.');
             localStorage.clear();
             navigate('/vendor/login');
             return;
           }
           setVendor(v);
-          if (v.kycStatus !== 'verified') setActiveStep(2);
-          else if (v.bankStatus !== 'verified') setActiveStep(3);
-          else if (v.inductionStatus !== 'completed') setActiveStep(4);
-          else setActiveStep(5);
+          setActiveStep(deriveStepFromVendor(v));
         } catch (_) {}
       } else {
         toast.error('No active onboarding session found.');
@@ -111,6 +172,12 @@ const PendingApproval = () => {
 
   useEffect(() => {
     fetchStatus();
+  }, []);
+
+  useEffect(() => {
+    const onRealtime = (event) => applyOnboardingPayload(event.detail);
+    window.addEventListener('vendorOnboardingUpdated', onRealtime);
+    return () => window.removeEventListener('vendorOnboardingUpdated', onRealtime);
   }, []);
 
   // Initialize WebCam when Step 2 is active
@@ -167,32 +234,24 @@ const PendingApproval = () => {
     }
 
     setKycVerifying(true);
-    setTimeout(async () => {
-      try {
-        const res = await api.post('/vendor/verify-kyc', {
-          vendorId: vendor?._id,
-          gstin: gstNum,
-          panNumber: panNum,
-          biometricImage: imageData // Sending image to backend
-        });
-        if (res.data.success) {
-          toast.success('Aadhaar and Biometrics verified securely via DigiLocker.');
-          // Update local storage so fetchStatus sees the new state
-          const dataStr = localStorage.getItem('vendorData');
-          if (dataStr) {
-            const v = JSON.parse(dataStr);
-            v.kycStatus = 'verified';
-            localStorage.setItem('vendorData', JSON.stringify(v));
-          }
-          fetchStatus();
-        }
-      } catch (err) {
-        setCapturedImage(null); // Unfreeze on error
-        toast.error(err.response?.data?.message || 'KYC verification failed');
-      } finally {
-        setKycVerifying(false);
+    try {
+      const res = await api.post('/vendor/verify-kyc', {
+        vendorId: vendor?._id || vendor?.id,
+        gstin: gstNum,
+        panNumber: panNum,
+        biometricImage: imageData
+      });
+      if (res.data.success) {
+        toast.success('Aadhaar and biometrics verified securely.');
+        if (res.data.data) applyOnboardingPayload(res.data.data);
+        else fetchStatus();
       }
-    }, 2000);
+    } catch (err) {
+      setCapturedImage(null);
+      toast.error(err.response?.data?.message || 'KYC verification failed');
+    } finally {
+      setKycVerifying(false);
+    }
   };
 
   const handleVerifyBank = async () => {
@@ -203,7 +262,7 @@ const PendingApproval = () => {
     setBankVerifying(true);
     try {
       const res = await api.post('/vendor/verify-bank-penny-drop', {
-        vendorId: vendor?._id,
+        vendorId: vendor?._id || vendor?.id,
         bankName,
         accountNumber: accountNum,
         ifsc: ifscCode,
@@ -211,13 +270,6 @@ const PendingApproval = () => {
       });
       if (res.data.success) {
         toast.success(res.data.message);
-        // Update local storage so fetchStatus sees the new state
-        const dataStr = localStorage.getItem('vendorData');
-        if (dataStr) {
-          const v = JSON.parse(dataStr);
-          v.bankStatus = 'verified';
-          localStorage.setItem('vendorData', JSON.stringify(v));
-        }
         fetchStatus();
       }
     } catch (err) {
@@ -234,17 +286,11 @@ const PendingApproval = () => {
     }
     setTrainingVerifying(true);
     try {
-      const res = await api.post('/vendor/complete-induction', { vendorId: vendor?._id });
+      const res = await api.post('/vendor/complete-induction', { vendorId: vendor?._id || vendor?.id });
       if (res.data.success) {
         toast.success('Induction compliance verified.');
-        // Update local storage so fetchStatus sees the new state
-        const dataStr = localStorage.getItem('vendorData');
-        if (dataStr) {
-          const v = JSON.parse(dataStr);
-          v.inductionStatus = 'completed';
-          localStorage.setItem('vendorData', JSON.stringify(v));
-        }
-        fetchStatus();
+        if (res.data.data) applyOnboardingPayload(res.data.data);
+        else fetchStatus();
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to submit training state');
@@ -254,21 +300,31 @@ const PendingApproval = () => {
   };
 
   const handleGoLive = async () => {
+    const token = localStorage.getItem('vendorAccessToken') || sessionStorage.getItem('vendorAccessToken');
+    if (!token) {
+      toast.error('Sign in to provision your partner workspace.');
+      navigate('/vendor/login');
+      return;
+    }
+
     setActivating(true);
     try {
-      const res = await api.post('/vendor/activate-account', { vendorId: vendor?._id });
+      const res = await api.post(
+        '/vendor/activate-account',
+        { vendorId: vendor?._id || vendor?.id },
+        { timeout: 60000 }
+      );
       if (res.data.success) {
-        toast.success('Account Activated. Redirecting to Dashboard...');
-        
-        const updatedProfile = await api.get('/vendors/profile');
-        if (updatedProfile.data?.success) {
-          localStorage.setItem('vendorData', JSON.stringify(updatedProfile.data.data));
-        }
-        
-        navigate('/vendor/digital-solution/dashboard');
+        toast.success('Account activated. Redirecting to dashboard…');
+        if (res.data.data) applyOnboardingPayload(res.data.data);
+        else await fetchStatus();
+        navigate('/vendor/digital-solution/dashboard', { replace: true });
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to activate account');
+      if (err.response?.status === 401) {
+        navigate('/vendor/login');
+      }
     } finally {
       setActivating(false);
     }
@@ -288,6 +344,13 @@ const PendingApproval = () => {
   const kycDone = vendor?.kycStatus === 'verified';
   const bankDone = vendor?.bankStatus === 'verified';
   const inductionDone = vendor?.inductionStatus === 'completed';
+  const allAuditsPassed = vendor?.allAuditsPassed ?? (vendor?.operationalAuditStatus === 'approved');
+  const canActivate = vendor?.canActivate ?? (allAuditsPassed && vendor?.approvalStatus !== 'approved');
+  const provisioningInProgress =
+    activating || vendor?.workspaceProvisioning?.status === 'in_progress';
+  const logistics = vendor?.logistics || {};
+  const logisticsLabel = logistics.label || (vendor?.kitDispatchStatus === 'delivered' ? 'Delivered' : vendor?.kitDispatchStatus === 'dispatched' ? 'In transit' : 'Awaiting dispatch');
+  const waybill = logistics.waybill || vendor?.kitWaybill;
 
   const steps = [
     { id: 1, title: 'Identity Registration', subtitle: 'Mobile & Basic Info', done: true },
@@ -657,8 +720,14 @@ const PendingApproval = () => {
                       <FiShield className="w-8 h-8" />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-bold text-slate-800">All Audits Passed</h2>
-                      <p className="text-sm text-slate-500 mt-2">Your compliance, financial, and operational audits have been successfully verified by the system administrator.</p>
+                      <h2 className="text-2xl font-bold text-slate-800">
+                        {allAuditsPassed ? 'All Audits Passed' : 'Final Review In Progress'}
+                      </h2>
+                      <p className="text-sm text-slate-500 mt-2">
+                        {allAuditsPassed
+                          ? 'Your compliance, financial, and operational audits have been successfully verified.'
+                          : 'Complete the prior steps. Operational sign-off updates here in real time when ready.'}
+                      </p>
                     </div>
                   </div>
 
@@ -672,13 +741,15 @@ const PendingApproval = () => {
                         QR
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-semibold text-slate-800">Standardized Uniform & Toolkit</p>
-                        <p className="text-xs text-slate-500 font-mono mt-1">WAYBILL: WBI-LOG-77382</p>
+                        <p className="text-sm font-semibold text-slate-800">{logistics.title || 'Standardized Uniform & Toolkit'}</p>
+                        <p className="text-xs text-slate-500 font-mono mt-1">
+                          {waybill ? `WAYBILL: ${waybill}` : 'Waybill assigned when kit is dispatched'}
+                        </p>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <div className={`w-2 h-2 rounded-full ${vendor?.kitDispatchStatus === 'pending' ? 'bg-amber-400' : 'bg-emerald-500'}`}></div>
                         <span className="text-xs font-medium text-slate-600 uppercase tracking-wide">
-                          In Transit
+                          {logisticsLabel}
                         </span>
                       </div>
                     </div>
@@ -686,13 +757,17 @@ const PendingApproval = () => {
 
                   <div className="bg-slate-800 rounded-lg p-6 text-white text-center">
                     <h3 className="text-base font-semibold mb-2">Ready for Go-Live</h3>
-                    <p className="text-sm text-slate-400 mb-6">Click below to provision your workspace and activate your partner dashboard.</p>
+                    <p className="text-sm text-slate-400 mb-6">
+                      {canActivate
+                        ? 'Click below to provision your workspace and activate your partner dashboard.'
+                        : 'Activation unlocks when all onboarding audits are complete.'}
+                    </p>
                     <button
                       onClick={handleGoLive}
-                      disabled={activating}
+                      disabled={provisioningInProgress || !canActivate}
                       className="w-full py-3 bg-emerald-600 text-white font-medium rounded-md text-sm hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
                     >
-                      {activating ? (
+                      {provisioningInProgress ? (
                         <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> Provisioning Workspace...</>
                       ) : (
                         <>Initialize Workspace <FiArrowRight /></>

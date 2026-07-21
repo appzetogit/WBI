@@ -53,6 +53,7 @@ const useBusinessIntakeCounts = () => {
     const refresh = () => loadCounts();
     socket.on('new_opportunity', refresh);
     socket.on('new-opportunity', refresh);
+    socket.on('opportunity:new', refresh);
     socket.on('bid_status_changed', refresh);
     socket.on('bid-status-changed', refresh);
     socket.on('bid_accepted', refresh);
@@ -62,6 +63,7 @@ const useBusinessIntakeCounts = () => {
     return () => {
       socket.off('new_opportunity', refresh);
       socket.off('new-opportunity', refresh);
+      socket.off('opportunity:new', refresh);
       socket.off('bid_status_changed', refresh);
       socket.off('bid-status-changed', refresh);
       socket.off('bid_accepted', refresh);

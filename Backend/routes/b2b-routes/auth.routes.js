@@ -72,7 +72,9 @@ const {
   getDeductionRule,
   getPaymentMethods,
   addPaymentMethod,
-  deletePaymentMethod
+  deletePaymentMethod,
+  getWalletActivationGate,
+  activatePendingJobs
 } = require('../../controllers/b2bControllers/b2bWalletController');
 
 // Authenticated routes
@@ -104,6 +106,8 @@ router.get('/wallet/deduction-rule', authenticate, isApprovedB2B, getDeductionRu
 router.get('/wallet/payment-methods', authenticate, isApprovedB2B, getPaymentMethods);
 router.post('/wallet/payment-methods', authenticate, isApprovedB2B, addPaymentMethod);
 router.delete('/wallet/payment-methods/:id', authenticate, isApprovedB2B, deletePaymentMethod);
+router.get('/wallet/activation-gate', authenticate, isApprovedB2B, getWalletActivationGate);
+router.post('/wallet/activate-pending', authenticate, isApprovedB2B, activatePendingJobs);
 
 // Engineers & Users list
 router.get('/engineers', authenticate, isApprovedB2B, getEngineers);

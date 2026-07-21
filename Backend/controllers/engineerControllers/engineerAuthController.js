@@ -240,10 +240,16 @@ const register = async (req, res) => {
 
     // Process Draft
     const EngineerRegistrationDraft = require('../../models/EngineerRegistrationDraft');
+    const EngineerRegistrationConfig = require('../../models/EngineerRegistrationConfig');
     const Vendor = require('../../models/Vendor');
     
     let draft = null;
     let vendorId = null;
+    let linkedViaCode = null;
+    let vendorApprovalStatus = 'not_required';
+    const regConfig = await EngineerRegistrationConfig.findOne().lean();
+    const joiningFeeEnabled = regConfig?.joiningFeeEnabled !== false;
+    const { findVendorByActiveCode, normalizeVendorCode } = require('../../utils/vendorCompanyCode');
     
     if (registrationDraftId) {
       draft = await EngineerRegistrationDraft.findById(registrationDraftId);
@@ -254,12 +260,51 @@ const register = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Joining fee payment is not completed' });
       }
 
-      if (draft.engineerType === 'vendor_engineer' && draft.vendorCode) {
-        const vendor = await Vendor.findOne({ $or: [{ vendorCode: draft.vendorCode }, { email: draft.vendorCode }, { phone: draft.vendorCode }] });
-        if (vendor) {
-           vendorId = vendor._id;
+      if (draft.engineerType === 'vendor_engineer') {
+        const codeToCheck = normalizeVendorCode(draft.vendorCode || req.body.vendorCode);
+        if (!codeToCheck) {
+          return res.status(400).json({
+            success: false,
+            message: 'Vendor company code is required for company engineers'
+          });
         }
+        // Re-validate server-side (code may have been regenerated/revoked since Step 1)
+        const vendor = await findVendorByActiveCode(codeToCheck);
+        if (!vendor) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid or revoked vendor company code. Ask your vendor for the latest code.'
+          });
+        }
+        vendorId = vendor._id;
+        linkedViaCode = vendor.uniqueCompanyCode;
+        vendorApprovalStatus = 'pending_approval';
       }
+    } else if (joiningFeeEnabled) {
+      // Fee enabled but no paid draft → block free registration bypass
+      return res.status(400).json({
+        success: false,
+        message: 'Joining fee payment is required before registration'
+      });
+    } else if ((req.body.engineerType || 'freelancer') === 'vendor_engineer') {
+      // Fee disabled path — still require live code validation
+      const codeToCheck = normalizeVendorCode(req.body.vendorCode);
+      if (!codeToCheck) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vendor company code is required for company engineers'
+        });
+      }
+      const vendor = await findVendorByActiveCode(codeToCheck);
+      if (!vendor) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or revoked vendor company code. Ask your vendor for the latest code.'
+        });
+      }
+      vendorId = vendor._id;
+      linkedViaCode = vendor.uniqueCompanyCode;
+      vendorApprovalStatus = 'pending_approval';
     }
 
     // Process Documents to Cloudinary
@@ -347,8 +392,10 @@ const register = async (req, res) => {
       drivingLicenseUrl: drivingLicenseUrlProcessed, rcUrl: rcUrlProcessed, 
       selfieUrl: selfieUrlProcessed, introVideoUrl: introVideoUrlProcessed,
       customFields: customFields || {},
-      engineerType: draft ? draft.engineerType : 'freelancer',
+      engineerType: draft ? draft.engineerType : (req.body.engineerType || 'freelancer'),
       vendorId: vendorId,
+      linkedViaCode: linkedViaCode,
+      vendorApprovalStatus: vendorApprovalStatus,
       joiningFeePaid: draft ? (draft.joiningFeeStatus === 'paid' || draft.joiningFeeStatus === 'skipped') : false,
       joiningFeeAmount: draft ? draft.joiningFeeAmount : 0,
       joiningFeeDiscount: draft ? draft.joiningFeeDiscount : 0,
@@ -357,8 +404,25 @@ const register = async (req, res) => {
       razorpayOrderId: draft ? draft.razorpayOrderId : '',
       razorpayPaymentId: draft ? draft.razorpayPaymentId : '',
       status: ENGINEER_STATUS.OFFLINE,
-      approvalStatus: 'pending' // Admin needs to approve
+      // Vendor-linked engineers stay pending until vendor approves; freelancers need platform/KYC path
+      approvalStatus: 'pending'
     }], { session });
+
+    if (vendorId && vendorApprovalStatus === 'pending_approval') {
+      try {
+        const { createNotification } = require('../notificationControllers/notificationController');
+        await createNotification({
+          vendorId,
+          type: 'worker_assigned',
+          title: 'New Engineer Join Request',
+          message: `${name} wants to join via your company code ${linkedViaCode || ''}. Approve them in Workforce.`,
+          relatedId: engineer._id,
+          relatedType: 'worker'
+        });
+      } catch (nErr) {
+        console.warn('Vendor join notification failed:', nErr.message);
+      }
+    }
 
     // Generate JWT tokens with initial session
     const loginSessionId = Date.now().toString();

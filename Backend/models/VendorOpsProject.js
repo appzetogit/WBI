@@ -29,7 +29,13 @@ const vendorOpsProjectSchema = new mongoose.Schema({
     index: true
   },
   assignedManager: { type: String, default: '' },
-  assignedEngineers: [{ name: String, role: String, status: { type: String, default: 'available' } }],
+  assignedEngineers: [{
+    name: String,
+    role: String,
+    status: { type: String, default: 'available' },
+    engineerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Engineer', default: null }
+  }],
+  opportunityId: { type: mongoose.Schema.Types.ObjectId, ref: 'Opportunity', default: null },
   startDate: Date,
   endDate: Date,
   city: { type: String, default: '' },

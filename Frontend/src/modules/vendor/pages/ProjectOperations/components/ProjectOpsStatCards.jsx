@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { FolderKanban, MapPin, ListChecks, Truck, Radio, Calendar, ArrowUpRight } from 'lucide-react';
 import useProjectOpsCounts from '../../../hooks/useProjectOpsCounts';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
   <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
@@ -26,7 +27,8 @@ const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
 
 const ProjectOpsStatCards = () => {
   const { counts, loading } = useProjectOpsCounts();
-  const b = '/vendor/dynamic/projects';
+  const { basePath } = useVendorBasePath();
+  const b = `${basePath}/projects`;
   const cards = [
     { icon: FolderKanban, label: 'Active Projects', value: counts.activeProjects, color: 'bg-blue-600', href: `${b}/os` },
     { icon: MapPin, label: 'Active Sites', value: counts.activeSites, color: 'bg-emerald-600', href: `${b}/sites` },

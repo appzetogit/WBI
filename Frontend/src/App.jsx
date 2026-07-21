@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react'; // Updated index to .jsx
 import { BrowserRouter } from 'react-router-dom';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast } from 'react-hot-toast';
 import { Toaster as SonnerToaster } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from './routes';
@@ -45,12 +45,33 @@ function App() {
       // Lazy load service to keep startup bundle tiny
       import('./services/pushNotificationService').then((module) => {
         module.setupForegroundNotificationHandler((payload) => {
-          // Dispatch update events for listening components to refresh UI
+          const data = payload?.data || {};
+          const title = payload?.notification?.title || data.title || 'Notification';
+          const body = payload?.notification?.body || data.body || '';
+          const type = data.type || '';
+          const isEngineer =
+            localStorage.getItem('engineerAccessToken') ||
+            sessionStorage.getItem('engineerAccessToken');
+
           window.dispatchEvent(new Event('vendorJobsUpdated'));
           window.dispatchEvent(new Event('vendorStatsUpdated'));
           window.dispatchEvent(new Event('workerJobsUpdated'));
           window.dispatchEvent(new Event('userBookingsUpdated'));
           window.dispatchEvent(new Event('appNotificationReceived'));
+
+          if (isEngineer) {
+            window.dispatchEvent(new Event('workerNotificationsUpdated'));
+            window.dispatchEvent(new Event('engineerJobsUpdated'));
+            if (type === 'ops_job_assigned' || type === 'freelancer_pool') {
+              window.dispatchEvent(new Event('ops:job_assigned'));
+            }
+            if (type === 'payment_received' || type === 'payout_requested' || type === 'payout_processed') {
+              window.dispatchEvent(new Event('engineerWalletUpdated'));
+            }
+            if (title || body) {
+              toast(`${title}${body ? `: ${body}` : ''}`, { duration: 4500 });
+            }
+          }
         });
       }).catch(err => console.warn('Deferred push notifications setup failed:', err));
     }

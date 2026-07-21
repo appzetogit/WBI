@@ -1,4 +1,5 @@
 const SiteTestingEnquiry = require('../models/SiteTestingEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // CREATE an enquiry (Public App)
 exports.createEnquiry = async (req, res) => {
@@ -12,6 +13,14 @@ exports.createEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    queueOpportunityFromEnquiry({
+      enquiry: newEnquiry,
+      enquiryType: 'sitetesting',
+      enquiryModel: 'SiteTestingEnquiry',
+      titlePrefix: `Site testing — ${newEnquiry.city || 'Site'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(newEnquiry)
+    });
 
     res.status(201).json({
       success: true,

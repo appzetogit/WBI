@@ -6,26 +6,17 @@ import {
 } from 'lucide-react';
 import { useVendorConfig } from '../../context/VendorConfigContext';
 import useFinanceCounts from '../../hooks/useFinanceCounts';
+import useVendorBasePath from '../../hooks/useVendorBasePath';
 import {
   fetchWallet, requestWithdrawal, fetchClientReceivables, fetchB2BReceivables,
   updateReceivable, fetchQuotations, fetchInvoices, updateFinanceDocument,
-  fetchPaymentMilestones, updatePaymentMilestone, formatINR, statusColors
+  fetchPaymentMilestones, updatePaymentMilestone, fetchEarningsByService, formatINR, statusColors
 } from '../../services/financeService';
 import Pagination from '../BusinessIntake/components/Pagination';
 import EmptyState from '../BusinessIntake/components/EmptyState';
 
 const FinanceContext = createContext(null);
 const PAGE_SIZE = 8;
-const BASE = '/vendor/dynamic/finance';
-
-const tabs = [
-  { label: 'Master Wallet', path: `${BASE}/wallet`, count: null },
-  { label: 'Client Receivables', path: `${BASE}/client-receivables`, count: 'clientPending' },
-  { label: 'B2B Receivables', path: `${BASE}/b2b-receivables`, count: 'b2bPending' },
-  { label: 'Quotations', path: `${BASE}/quotations`, count: 'quotations' },
-  { label: 'Invoices', path: `${BASE}/invoices`, count: 'invoicesDue' },
-  { label: 'Payment Milestones', path: `${BASE}/milestones`, count: 'milestonesDue' }
-];
 
 const useFinanceWorkspace = () => useContext(FinanceContext);
 
@@ -84,6 +75,17 @@ const FinanceStats = () => {
 
 const FinanceTabs = () => {
   const { counts } = useFinanceCounts();
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/finance`;
+  const tabs = useMemo(() => [
+    { label: 'Master Wallet', path: `${base}/wallet`, count: null },
+    { label: 'Client Receivables', path: `${base}/client-receivables`, count: 'clientPending' },
+    { label: 'B2B Receivables', path: `${base}/b2b-receivables`, count: 'b2bPending' },
+    { label: 'Quotations', path: `${base}/quotations`, count: 'quotations' },
+    { label: 'Invoices', path: `${base}/invoices`, count: 'invoicesDue' },
+    { label: 'Payment Milestones', path: `${base}/milestones`, count: 'milestonesDue' }
+  ], [base]);
+
   return (
     <div className="overflow-x-auto border-b border-gray-200">
       <nav className="flex min-w-max">
@@ -156,23 +158,45 @@ const useList = (fetcher) => {
 const ListLoading = () => <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{[1, 2, 3, 4].map((item) => <div key={item} className="h-44 bg-gray-100 rounded-xl animate-pulse" />)}</div>;
 
 const WalletPage = () => {
-  const { search, filters, refreshKey, refresh } = useFinanceWorkspace();
+  const { search, filters, refreshKey, refresh, setFilter } = useFinanceWorkspace();
   const [wallet, setWallet] = useState(null);
   const [transactions, setTransactions] = useState([]);
+  const [byService, setByService] = useState([]);
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetchWallet({ search: search || undefined, status: filters.status || undefined, limit: 20 });
-      setWallet(response.data.data?.wallet || null);
-      setTransactions(response.data.data?.transactions || []);
-    } finally { setLoading(false); }
-  }, [search, filters.status]);
+      const [walletRes, earningsRes] = await Promise.all([
+        fetchWallet({
+          search: search || undefined,
+          status: filters.status || undefined,
+          category: filters.category || undefined,
+          limit: 30
+        }),
+        fetchEarningsByService()
+      ]);
+      setWallet(walletRes.data.data?.wallet || null);
+      setTransactions(walletRes.data.data?.transactions || []);
+      setByService(earningsRes.data?.data?.byService || []);
+    } catch {
+      setWallet(null);
+      setTransactions([]);
+      setByService([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [search, filters.status, filters.category]);
   useEffect(() => { load(); }, [load, refreshKey]);
   const withdraw = async () => {
     const raw = window.prompt('Withdrawal amount');
     if (!raw) return;
-    try { await requestWithdrawal(Number(raw)); load(); refresh(); } catch (error) { alert(error.response?.data?.message || 'Withdrawal failed'); }
+    try {
+      await requestWithdrawal(Number(raw));
+      load();
+      refresh();
+    } catch (error) {
+      alert(error.response?.data?.message || 'Withdrawal failed');
+    }
   };
   return (
     <div className="space-y-4">
@@ -199,10 +223,108 @@ const WalletPage = () => {
               ].map(([label, amount]) => <div key={label} className="p-3 bg-gray-50 rounded-xl"><p className="text-sm font-bold">{formatINR(amount)}</p><p className="text-[11px] text-gray-500">{label}</p></div>)}
             </div>
           </div>
+
+          {/* Per registered service — earnings / pending / escrow */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-gray-900">Payments by Service</h3>
+              <p className="text-xs text-gray-500">Based on your registered services</p>
+            </div>
+            {byService.length === 0 ? (
+              <EmptyState
+                icon={IndianRupee}
+                title="No services linked yet"
+                description="After you register and admin approves a service, earnings for that service appear here."
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {byService.map((svc) => (
+                  <button
+                    key={svc.categoryCode}
+                    type="button"
+                    onClick={() => {
+                      setFilter('category', filters.category === svc.categoryCode ? '' : svc.categoryCode);
+                    }}
+                    className={`text-left p-4 border rounded-xl shadow-sm transition ${
+                      filters.category === svc.categoryCode
+                        ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-200'
+                        : 'border-gray-200 bg-white hover:border-blue-200'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-blue-600">{svc.categoryCode}</p>
+                        <h4 className="text-sm font-bold text-gray-900 mt-0.5">{svc.categoryName}</h4>
+                      </div>
+                      <Status value={svc.status === 'active' ? 'paid' : svc.status === 'pending' ? 'pending' : 'draft'} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                      <div>
+                        <p className="text-gray-400">Earned</p>
+                        <p className="font-bold text-emerald-700">{formatINR(svc.totalEarnings)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">Pending</p>
+                        <p className="font-bold text-amber-700">{formatINR(svc.pendingReceivables)}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400">In escrow</p>
+                        <p className="font-bold text-violet-700">{formatINR(svc.escrowHeld)}</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-gray-400">
+                      {svc.creditCount || 0} payouts
+                      {svc.lastPaidAt ? ` · last ${new Date(svc.lastPaidAt).toLocaleDateString('en-IN')}` : ''}
+                      {svc.heldJobs ? ` · ${svc.heldJobs} held` : ''}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="overflow-x-auto border border-gray-200 rounded-xl">
             <table className="min-w-full text-sm">
-              <thead className="text-xs text-left text-gray-500 uppercase bg-gray-50"><tr><th className="px-4 py-3">Transaction</th><th className="px-4 py-3">Description</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Status</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">{transactions.map((transaction) => <tr key={transaction._id}><td className="px-4 py-3 font-mono text-xs">{transaction.transactionCode}</td><td className="px-4 py-3">{transaction.description}<p className="text-[11px] text-gray-400">{transaction.projectCode}</p></td><td className="px-4 py-3 capitalize">{transaction.type.replace(/_/g, ' ')}</td><td className={`px-4 py-3 font-bold ${['credit', 'escrow_release', 'refund'].includes(transaction.type) ? 'text-emerald-600' : 'text-gray-900'}`}>{formatINR(transaction.amount)}</td><td className="px-4 py-3"><Status value={transaction.status} /></td></tr>)}</tbody>
+              <thead className="text-xs text-left text-gray-500 uppercase bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3">Transaction</th>
+                  <th className="px-4 py-3">Service</th>
+                  <th className="px-4 py-3">Description</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {transactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">No transactions yet</td>
+                  </tr>
+                ) : transactions.map((transaction) => (
+                  <tr key={transaction._id}>
+                    <td className="px-4 py-3 font-mono text-xs">{transaction.transactionCode}</td>
+                    <td className="px-4 py-3">
+                      {transaction.serviceCategoryCode ? (
+                        <>
+                          <span className="text-[10px] font-bold text-blue-600">{transaction.serviceCategoryCode}</span>
+                          <p className="text-[11px] text-gray-500">{transaction.serviceCategoryName || transaction.subCategoryName}</p>
+                        </>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {transaction.description}
+                      <p className="text-[11px] text-gray-400">{transaction.projectCode}</p>
+                    </td>
+                    <td className="px-4 py-3 capitalize">{transaction.type.replace(/_/g, ' ')}</td>
+                    <td className={`px-4 py-3 font-bold ${['credit', 'escrow_release', 'refund'].includes(transaction.type) ? 'text-emerald-600' : 'text-gray-900'}`}>
+                      {formatINR(transaction.amount)}
+                    </td>
+                    <td className="px-4 py-3"><Status value={transaction.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </>

@@ -10,12 +10,18 @@ import Availability from './Availability';
 import Attendance from './Attendance';
 import LeaveCalendar from './LeaveCalendar';
 import Certifications from './Certifications';
+import CompanyCode from './CompanyCode';
+import PendingApprovals from './PendingApprovals';
+import LinkedEngineers from './LinkedEngineers';
 
 const Workforce = () => (
   <Routes>
     <Route element={<WorkforceLayout />}>
       <Route path="/" element={<Navigate to="engineers" replace />} />
       <Route path="engineers" element={<Engineers />} />
+      <Route path="company-code" element={<CompanyCode />} />
+      <Route path="pending-approvals" element={<PendingApprovals />} />
+      <Route path="linked-engineers" element={<LinkedEngineers />} />
       <Route path="teams" element={<ProjectTeams />} />
       <Route path="structure" element={<TeamStructure />} />
       <Route path="skills" element={<SkillMatrix />} />

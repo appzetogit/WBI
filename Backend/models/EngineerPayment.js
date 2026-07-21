@@ -70,4 +70,12 @@ const engineerPaymentSchema = new mongoose.Schema({
   timestamps: true
 });
 
+engineerPaymentSchema.index({ razorpayOrderId: 1 });
+engineerPaymentSchema.index({ engineerDraftId: 1, status: 1 });
+// Unique when present — blocks duplicate joining-fee capture for same Razorpay payment id
+engineerPaymentSchema.index(
+  { razorpayPaymentId: 1 },
+  { unique: true, sparse: true, partialFilterExpression: { razorpayPaymentId: { $type: 'string' } } }
+);
+
 module.exports = mongoose.model('EngineerPayment', engineerPaymentSchema);

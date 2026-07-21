@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { FiUser, FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowRight, FiArrowLeft, FiChevronLeft, FiMapPin, FiBriefcase, FiUploadCloud, FiVideo, FiCamera, FiCheck, FiX, FiTag, FiLoader } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { useDebouncedCallback } from 'use-debounce';
@@ -11,6 +11,7 @@ import ValidatedInput from '../../../components/common/ValidatedInput';
 import { validators } from '../../../utils/validationUtils';
 import { uploadSelfieToCloudinary, uploadToCloudinary } from '../../../utils/cloudinaryUpload';
 import optimizeCloudinaryUrl from '../../../utils/cloudinaryOptimize';
+import { loadRazorpay } from '../../../utils/loadRazorpay';
 
 /** Handle 429 Too Many Requests gracefully */
 const handleApiError = (err, fallbackMsg) => {
@@ -27,19 +28,19 @@ const generateObjectId = () => {
   return (timestamp + randomHex).toLowerCase();
 };
 
-// Helper to load Razorpay Script
-const loadRazorpay = () => {
-  return new Promise((resolve) => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
+const getSignupSessionId = () => {
+  const key = 'engineerSignupSessionId';
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = generateObjectId();
+    sessionStorage.setItem(key, id);
+  }
+  return id;
 };
 
 export default function EngineerSignup() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
   const [config, setConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,6 +67,8 @@ export default function EngineerSignup() {
     tempEntityId: generateObjectId(),
     engineerType: 'freelancer',
     vendorCode: '',
+    vendorCompanyId: '',
+    vendorCompanyName: '',
     serviceCategories: [],
     subServices: [],
     skills: [],
@@ -75,6 +78,11 @@ export default function EngineerSignup() {
     selfieUrl: null, introVideoUrl: null,
     aadhaarNumber: '', panNumber: '', panFullName: '', panDob: ''
   });
+
+  const [vendorCodeValid, setVendorCodeValid] = useState(false);
+  const [vendorCodeChecking, setVendorCodeChecking] = useState(false);
+  const [vendorCodeError, setVendorCodeError] = useState('');
+  const [inviteLocked, setInviteLocked] = useState(false);
 
   const [validationState, setValidationState] = useState({});
 
@@ -418,15 +426,88 @@ export default function EngineerSignup() {
     }
   };
 
+  const validateVendorCompanyCode = async (rawCode) => {
+    const code = String(rawCode || '').trim().toUpperCase();
+    if (!code) {
+      setVendorCodeValid(false);
+      setVendorCodeError('Vendor company code is required');
+      return false;
+    }
+    setVendorCodeChecking(true);
+    setVendorCodeError('');
+    try {
+      const res = await engineerAuthService.validateVendorCode(code, getSignupSessionId());
+      if (res.valid) {
+        setFormData((p) => ({
+          ...p,
+          vendorCode: res.code || code,
+          vendorCompanyId: res.vendorCompanyId || '',
+          vendorCompanyName: res.companyName || '',
+        }));
+        setVendorCodeValid(true);
+        setVendorCodeError('');
+        return true;
+      }
+      setVendorCodeValid(false);
+      setVendorCodeError(res.message || 'Invalid code');
+      return false;
+    } catch (err) {
+      setVendorCodeValid(false);
+      const msg = err?.response?.data?.message || 'Invalid code. Please check with your vendor.';
+      setVendorCodeError(msg);
+      if (err?.response?.status === 429) {
+        toast.error(msg, { icon: '🛑' });
+      }
+      return false;
+    } finally {
+      setVendorCodeChecking(false);
+    }
+  };
+
+  // Invite link: /engineer/signup?invite=TOKEN
+  useEffect(() => {
+    const token = searchParams.get('invite');
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await engineerAuthService.resolveInviteToken(token);
+        if (cancelled || !res.success) return;
+        setFormData((p) => ({
+          ...p,
+          engineerType: 'vendor_engineer',
+          vendorCode: res.data.code,
+          vendorCompanyId: res.data.vendorCompanyId,
+          vendorCompanyName: res.data.companyName,
+        }));
+        setVendorCodeValid(true);
+        setInviteLocked(true);
+        setVendorCodeError('');
+        toast.success(`Linked to ${res.data.companyName}`);
+      } catch (err) {
+        if (!cancelled) {
+          toast.error(err?.response?.data?.message || 'Invite link invalid or expired');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [searchParams]);
+
   const validateStep = (stepIndex) => {
     if (stepIndex === typeStep) {
       if (!formData.engineerType) {
         toast.error('Please select an engineer type');
         return false;
       }
-      if (formData.engineerType === 'vendor_engineer' && !formData.vendorCode) {
-        toast.error('Vendor code is required');
-        return false;
+      if (formData.engineerType === 'vendor_engineer') {
+        if (!formData.vendorCode) {
+          toast.error('Vendor company code is required');
+          return false;
+        }
+        if (!vendorCodeValid) {
+          toast.error('Please validate your vendor company code first');
+          return false;
+        }
       }
       return true;
     }
@@ -504,15 +585,13 @@ export default function EngineerSignup() {
       if (res.success) {
         setPaymentData(res.data);
         toast.success(`Coupon applied! You saved ₹${res.data.discountAmount}`);
-        if (res.data.finalAmount === 0) {
-          setIsPaymentSuccess(true);
-        }
+        // Do NOT mark payment success here — create-order must create/skip draft server-side
       } else {
         toast.error(res.message);
         setPaymentData(null);
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Invalid coupon code');
+      handleApiError(error, 'Invalid coupon code');
       setPaymentData(null);
     } finally {
       setIsVerifyingCoupon(false);
@@ -520,90 +599,152 @@ export default function EngineerSignup() {
   };
 
   const initPayment = async () => {
+    if (isSubmitting || isBusy.current || isPaymentSuccess) return;
+    isBusy.current = true;
     setIsSubmitting(true);
+    let checkoutOpened = false;
+
     try {
-      const phoneVal = formData.phone || formData.mobile || '9999999999';
-      const nameVal = formData.name || formData.fullName || 'Engineer';
-      const emailVal = formData.email || 'engineer@example.com';
-      
+      const phoneVal = formData.phone || formData.mobile;
+      const nameVal = formData.name || formData.fullName;
+      const emailVal = formData.email;
+
+      if (!phoneVal || String(phoneVal).replace(/\D/g, '').length < 10) {
+        toast.error('Please enter a valid mobile number before payment');
+        return;
+      }
+      if (!nameVal) {
+        toast.error('Please enter your full name before payment');
+        return;
+      }
+
       const res = await engineerAuthService.createJoiningFeeOrder({
         couponCode: paymentData?.couponCode || null,
         name: nameVal,
         phone: phoneVal,
-        email: emailVal,
+        email: emailVal || undefined,
         engineerType: formData.engineerType,
-        vendorCode: formData.vendorCode
+        vendorCode: formData.vendorCode,
+        registrationDraftId: formData.registrationDraftId || undefined
       });
 
-      if (res.success) {
-        setFormData(p => ({ ...p, registrationDraftId: res.data.registrationDraftId }));
-        if (res.isFree) {
-          setIsPaymentSuccess(true);
-          toast.success('Registration fee waived!');
-          setCurrentStep(prev => prev + 1);
-          return;
-        }
-
-        const isRazorpayLoaded = await loadRazorpay();
-        if (!isRazorpayLoaded) {
-          toast.error('Razorpay failed to load. Are you offline?');
-          setIsSubmitting(false);
-          return;
-        }
-
-        const options = {
-          key: res.data.key,
-          amount: res.data.amount,
-          currency: res.data.currency,
-          name: 'WBI Engineer',
-          description: 'Engineer Joining Fee',
-          order_id: res.data.orderId,
-          handler: async function (response) {
-            try {
-              const verifyRes = await engineerAuthService.verifyJoiningFeePayment({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                registrationDraftId: res.data.registrationDraftId
-              });
-              if (verifyRes.success) {
-                setFormData(p => ({
-                  ...p,
-                  joiningFeePaid: true,
-                  joiningFeeAmount: res.data.originalAmount,
-                  joiningFeeDiscount: res.data.discountAmount,
-                  joiningFeeFinalAmount: res.data.finalAmount,
-                  couponCode: res.data.couponCode,
-                  razorpayOrderId: response.razorpay_order_id,
-                  razorpayPaymentId: response.razorpay_payment_id,
-                  registrationDraftId: res.data.registrationDraftId
-                }));
-                setIsPaymentSuccess(true);
-                toast.success('Payment Successful!');
-                setCurrentStep(submitStep); 
-              }
-            } catch (err) {
-              toast.error('Payment verification failed');
-            }
-          },
-          prefill: {
-            name: nameVal,
-            contact: phoneVal,
-            email: emailVal
-          },
-          theme: { color: '#4F46E5' }
-        };
-
-        const rzp1 = new window.Razorpay(options);
-        rzp1.on('payment.failed', function (response) {
-          toast.error(response.error.description);
-        });
-        rzp1.open();
+      if (!res?.success) {
+        toast.error(res?.message || 'Failed to initiate payment');
+        return;
       }
+
+      const draftId = res.data?.registrationDraftId;
+      if (draftId) {
+        setFormData((p) => ({ ...p, registrationDraftId: draftId }));
+      }
+
+      if (res.isFree || res.alreadyPaid || res.paymentRequired === false) {
+        setFormData((p) => ({
+          ...p,
+          joiningFeePaid: true,
+          joiningFeeAmount: res.data?.originalAmount ?? p.joiningFeeAmount,
+          joiningFeeDiscount: res.data?.discountAmount ?? p.joiningFeeDiscount,
+          joiningFeeFinalAmount: res.data?.finalAmount ?? 0,
+          couponCode: res.data?.couponCode || p.couponCode,
+          registrationDraftId: draftId || p.registrationDraftId
+        }));
+        setIsPaymentSuccess(true);
+        toast.success(res.alreadyPaid ? 'Joining fee already paid' : 'Registration fee waived!');
+        setCurrentStep((prev) => prev + 1);
+        return;
+      }
+
+      if (!res.data?.orderId || !res.data?.key || !res.data?.amount) {
+        toast.error('Invalid payment order from server');
+        return;
+      }
+
+      try {
+        await loadRazorpay();
+      } catch {
+        toast.error('Razorpay failed to load. Check your connection and try again.');
+        return;
+      }
+
+      if (!window.Razorpay) {
+        toast.error('Razorpay SDK not available');
+        return;
+      }
+
+      const options = {
+        key: res.data.key,
+        amount: res.data.amount,
+        currency: res.data.currency || 'INR',
+        name: 'WBI Engineer',
+        description: 'Engineer Joining Fee',
+        order_id: res.data.orderId,
+        retry: { enabled: true, max_count: 3 },
+        timeout: 900,
+        prefill: {
+          name: nameVal,
+          contact: phoneVal,
+          email: emailVal || undefined
+        },
+        theme: { color: '#4F46E5' },
+        modal: {
+          ondismiss: function () {
+            toast('Payment window closed. You can retry anytime.', { icon: 'ℹ️' });
+            setIsSubmitting(false);
+            isBusy.current = false;
+          }
+        },
+        handler: async function (response) {
+          try {
+            const verifyRes = await engineerAuthService.verifyJoiningFeePayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              registrationDraftId: draftId
+            });
+
+            if (verifyRes.success) {
+              setFormData((p) => ({
+                ...p,
+                joiningFeePaid: true,
+                joiningFeeAmount: res.data.originalAmount,
+                joiningFeeDiscount: res.data.discountAmount,
+                joiningFeeFinalAmount: res.data.finalAmount,
+                couponCode: res.data.couponCode,
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                registrationDraftId: draftId
+              }));
+              setIsPaymentSuccess(true);
+              toast.success('Payment Successful!');
+              setCurrentStep(submitStep);
+            } else {
+              toast.error(verifyRes.message || 'Payment verification failed');
+            }
+          } catch (err) {
+            handleApiError(err, 'Payment verification failed. If amount was deducted, contact support with payment ID.');
+          } finally {
+            setIsSubmitting(false);
+            isBusy.current = false;
+          }
+        }
+      };
+
+      const rzp1 = new window.Razorpay(options);
+      rzp1.on('payment.failed', function (response) {
+        const description = response?.error?.description || 'Payment failed';
+        toast.error(description);
+        setIsSubmitting(false);
+        isBusy.current = false;
+      });
+      rzp1.open();
+      checkoutOpened = true;
     } catch (error) {
-      toast.error('Failed to initiate payment');
+      handleApiError(error, 'Failed to initiate payment');
     } finally {
-      setIsSubmitting(false);
+      if (!checkoutOpened) {
+        setIsSubmitting(false);
+        isBusy.current = false;
+      }
     }
   };
 
@@ -702,7 +843,18 @@ export default function EngineerSignup() {
                 <h2 className="text-2xl font-bold text-gray-900">Choose Your Role</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div
-                    onClick={() => setFormData(p => ({ ...p, engineerType: 'freelancer', vendorCode: '' }))}
+                    onClick={() => {
+                      if (inviteLocked) return;
+                      setFormData((p) => ({
+                        ...p,
+                        engineerType: 'freelancer',
+                        vendorCode: '',
+                        vendorCompanyId: '',
+                        vendorCompanyName: '',
+                      }));
+                      setVendorCodeValid(false);
+                      setVendorCodeError('');
+                    }}
                     className={`p-6 border-2 rounded-2xl cursor-pointer transition-all flex flex-col items-center justify-center text-center ${formData.engineerType === 'freelancer' ? 'border-[#4F46E5] bg-[#4F46E5]/5 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                   >
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${formData.engineerType === 'freelancer' ? 'bg-[#4F46E5] text-white' : 'bg-gray-100 text-gray-500'}`}>
@@ -712,7 +864,7 @@ export default function EngineerSignup() {
                     <p className="text-sm text-gray-500">I want to work independently and manage my own tasks.</p>
                   </div>
                   <div
-                    onClick={() => setFormData(p => ({ ...p, engineerType: 'vendor_engineer' }))}
+                    onClick={() => setFormData((p) => ({ ...p, engineerType: 'vendor_engineer' }))}
                     className={`p-6 border-2 rounded-2xl cursor-pointer transition-all flex flex-col items-center justify-center text-center ${formData.engineerType === 'vendor_engineer' ? 'border-[#4F46E5] bg-[#4F46E5]/5 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                   >
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${formData.engineerType === 'vendor_engineer' ? 'bg-[#4F46E5] text-white' : 'bg-gray-100 text-gray-500'}`}>
@@ -725,18 +877,63 @@ export default function EngineerSignup() {
 
                 {formData.engineerType === 'vendor_engineer' && (
                   <div className="mt-6 animate-fadeIn">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Vendor/Company Code *</label>
-                    <div className="relative">
-                      <FiBriefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="text"
-                        value={formData.vendorCode}
-                        onChange={(e) => setFormData(p => ({ ...p, vendorCode: e.target.value }))}
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all uppercase"
-                        placeholder="Enter vendor code, email, or mobile"
-                      />
-                    </div>
-                    <p className="text-xs text-gray-500 mt-2">Ask your vendor for their code if you do not have it.</p>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Vendor Company Code *</label>
+                    {inviteLocked && formData.vendorCompanyName ? (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <p className="text-sm font-semibold text-emerald-800 flex items-center gap-2">
+                          <FiCheckCircle className="w-4 h-4" />
+                          Linked to {formData.vendorCompanyName}
+                        </p>
+                        <p className="text-xs font-mono text-emerald-700 mt-1">{formData.vendorCode}</p>
+                        <p className="text-[11px] text-emerald-600 mt-1">Invite link confirmed — code is locked</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <FiBriefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input
+                            type="text"
+                            value={formData.vendorCode}
+                            onChange={(e) => {
+                              const next = e.target.value.toUpperCase().replace(/\s/g, '');
+                              setFormData((p) => ({
+                                ...p,
+                                vendorCode: next,
+                                vendorCompanyId: '',
+                                vendorCompanyName: '',
+                              }));
+                              setVendorCodeValid(false);
+                              setVendorCodeError('');
+                            }}
+                            onBlur={() => {
+                              if (formData.vendorCode) validateVendorCompanyCode(formData.vendorCode);
+                            }}
+                            className={`w-full bg-gray-50 border rounded-xl py-3 pl-12 pr-4 focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5] transition-all uppercase font-mono tracking-wide ${
+                              vendorCodeError ? 'border-red-300' : vendorCodeValid ? 'border-emerald-400' : 'border-gray-200'
+                            }`}
+                            placeholder="e.g. WBI-2026-X7K9M2"
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        </div>
+                        {vendorCodeChecking && (
+                          <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                            <FiLoader className="w-3 h-3 animate-spin" /> Validating code...
+                          </p>
+                        )}
+                        {!vendorCodeChecking && vendorCodeValid && formData.vendorCompanyName && (
+                          <p className="text-sm text-emerald-700 font-semibold mt-2 flex items-center gap-1.5">
+                            <FiCheckCircle className="w-4 h-4" /> Linked to {formData.vendorCompanyName}
+                          </p>
+                        )}
+                        {!vendorCodeChecking && vendorCodeError && (
+                          <p className="text-sm text-red-600 mt-2">{vendorCodeError}</p>
+                        )}
+                        {!vendorCodeChecking && !vendorCodeValid && !vendorCodeError && (
+                          <p className="text-xs text-gray-500 mt-2">Ask your vendor for their company code (format WBI-YEAR-XXXXXX).</p>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1089,13 +1286,26 @@ export default function EngineerSignup() {
             {currentStep < totalSteps ? (
               <button
                 type="button"
-                onClick={() => {
-                  if (validateStep(currentStep)) setCurrentStep(prev => prev + 1);
+                onClick={async () => {
+                  if (currentStep === typeStep && formData.engineerType === 'vendor_engineer' && !vendorCodeValid) {
+                    const ok = await validateVendorCompanyCode(formData.vendorCode);
+                    if (!ok) return;
+                  }
+                  if (validateStep(currentStep)) setCurrentStep((prev) => prev + 1);
                 }}
-                disabled={isSubmitting || verifyingOtp || sendingOtp || verifyingPan || verifyingAadhaar || !!uploadingField}
+                disabled={
+                  isSubmitting
+                  || verifyingOtp
+                  || sendingOtp
+                  || verifyingPan
+                  || verifyingAadhaar
+                  || !!uploadingField
+                  || vendorCodeChecking
+                  || (currentStep === typeStep && formData.engineerType === 'vendor_engineer' && !vendorCodeValid && !formData.vendorCode)
+                }
                 className="flex items-center px-8 py-2.5 bg-[#4F46E5] text-white rounded-xl font-semibold hover:bg-[#4338ca] shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {(verifyingOtp || sendingOtp || verifyingPan || verifyingAadhaar || !!uploadingField)
+                {(verifyingOtp || sendingOtp || verifyingPan || verifyingAadhaar || !!uploadingField || vendorCodeChecking)
                   ? <><FiLoader className="animate-spin mr-2 w-4 h-4" /> Please wait...</>
                   : <>Next <FiArrowRight className="ml-2" /></>
                 }

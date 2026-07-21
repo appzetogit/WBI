@@ -3,6 +3,8 @@ import { FiX, FiTrash, FiCamera, FiDollarSign, FiCheckCircle } from 'react-icons
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import flutterBridge from '../../../../utils/flutterBridge';
+import { compressImageToBase64 } from '../../../../utils/imageCompression';
+import { getUserFacingError } from '../../../../utils/userFacingError';
 
 const WorkCompletionModal = ({ isOpen, onClose, job, onComplete, loading }) => {
   const [workPhotos, setWorkPhotos] = useState([]);
@@ -14,39 +16,31 @@ const WorkCompletionModal = ({ isOpen, onClose, job, onComplete, loading }) => {
       setIsUploading(true);
       const file = await flutterBridge.openCamera();
       if (file) {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setWorkPhotos(prev => [...prev, reader.result]);
-          setIsUploading(false);
-          flutterBridge.hapticFeedback('success');
-        };
-        reader.readAsDataURL(file);
-      } else {
-        setIsUploading(false);
+        const dataUrl = await compressImageToBase64(file);
+        setWorkPhotos(prev => [...prev, dataUrl]);
+        flutterBridge.hapticFeedback('success');
       }
     } catch (error) {
-      console.error('Native camera failed:', error);
+      toast.error(getUserFacingError(error, 'Camera is unavailable. Try again.'));
+    } finally {
       setIsUploading(false);
     }
   };
 
-  const handlePhotoUpload = (e) => {
-    const files = Array.from(e.target.files);
+  const handlePhotoUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
     setIsUploading(true);
-    const uploadPromises = files.map(file => {
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.readAsDataURL(file);
-      });
-    });
-
-    Promise.all(uploadPromises).then(urls => {
+    try {
+      const urls = await Promise.all(files.map((file) => compressImageToBase64(file)));
       setWorkPhotos(prev => [...prev, ...urls]);
+    } catch (error) {
+      toast.error(getUserFacingError(error, 'Could not process photo. Please try again.'));
+    } finally {
       setIsUploading(false);
-    });
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleRemovePhoto = (index) => {
@@ -130,7 +124,7 @@ const WorkCompletionModal = ({ isOpen, onClose, job, onComplete, loading }) => {
                       <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
                       <button
                         onClick={() => handleRemovePhoto(index)}
-                        className="absolute top-1 right-1 w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white shadow-md active:scale-90 transition-transform opacity-0 group-hover:opacity-100"
+                        className="absolute top-1 right-1 w-7 h-7 bg-red-500 rounded-full flex items-center justify-center text-white shadow-md active:scale-90 transition-transform"
                       >
                         <FiTrash className="w-3 h-3" />
                       </button>

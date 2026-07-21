@@ -106,6 +106,7 @@ const AssignedJobs = () => {
       case 'worker_paid':
         return { label: 'Completed', bg: 'bg-[#64748B]', text: 'text-white' };
       case 'pending':
+      case 'pending_acceptance':
         return { label: 'New', bg: 'bg-[#0D9488]', text: 'text-white' };
       case 'cancelled':
       case 'rejected':
@@ -137,7 +138,9 @@ const AssignedJobs = () => {
     return (
       <div
         key={job._id}
-        onClick={() => navigate(`/engineer/job/${job._id}`)}
+        onClick={() =>
+          navigate(job.isOpsJob ? `/engineer/ops-jobs/${job._id}` : `/engineer/job/${job._id}`)
+        }
         className="bg-white rounded-[1.25rem] p-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-slate-100 cursor-pointer active:scale-[0.98] transition-transform"
       >
         <div className="flex gap-4">
@@ -162,7 +165,7 @@ const AssignedJobs = () => {
           <div className="flex-1 min-w-0 flex flex-col justify-between ml-1">
             <div className="flex justify-between items-start gap-2 mb-0.5">
               <h3 className="font-bold text-[#0F172A] text-[15px] leading-tight line-clamp-1">
-                {job.serviceName || job.serviceId?.title || 'Service Task'}
+                {job.serviceName || job.serviceId?.title || (job.isOpsJob ? 'Vendor project job' : 'Service Task')}
               </h3>
               <span className={`${statusConfig.bg} ${statusConfig.text} text-[10px] font-bold px-2 py-0.5 rounded tracking-wide shrink-0`}>
                 {statusConfig.label}
@@ -171,7 +174,9 @@ const AssignedJobs = () => {
 
             <div className="flex justify-between items-center mb-2">
               <p className="text-[#64748B] text-xs font-medium truncate">
-                {job.address?.city ? `${job.address.addressLine1 ? `${job.address.addressLine1}, ` : ''}${job.address.city}` : 'Location unavailable'}
+                {job.address?.city
+                  ? `${job.address.addressLine1 ? `${job.address.addressLine1}, ` : ''}${job.address.city}`
+                  : job.city || 'Location unavailable'}
               </p>
               <FiChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
             </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import useBusinessIntakeCounts from '../hooks/useBusinessIntakeCounts';
 import useClientsContractsCounts from '../hooks/useClientsContractsCounts';
 import useProjectOpsCounts from '../hooks/useProjectOpsCounts';
@@ -7,6 +7,9 @@ import useResourcesCounts from '../hooks/useResourcesCounts';
 import useQualityCounts from '../hooks/useQualityCounts';
 import useFinanceCounts from '../hooks/useFinanceCounts';
 import useGlobalCounts from '../hooks/useGlobalCounts';
+import useVendorLogout from '../hooks/useVendorLogout';
+import useVendorBasePath from '../hooks/useVendorBasePath';
+import VendorLogoutConfirm from './VendorLogoutConfirm';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useVendorConfig } from '../context/VendorConfigContext';
 import {
@@ -24,13 +27,17 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
-  Handshake
+  Handshake,
+  LogOut,
+  X
 } from 'lucide-react';
 
-const DynamicSidebar = () => {
-  const { sidebarSections, vendorProfile } = useVendorConfig();
+const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
+  const { sidebarSections, vendorProfile, primaryService } = useVendorConfig();
+  const { basePath } = useVendorBasePath();
   const [expandedSections, setExpandedSections] = useState({});
   const location = useLocation();
+  const { loggingOut, confirmOpen, openConfirm, closeConfirm, confirmLogout } = useVendorLogout();
   const { counts } = useBusinessIntakeCounts();
   const { counts: ccCounts } = useClientsContractsCounts();
   const { counts: poCounts } = useProjectOpsCounts();
@@ -41,8 +48,16 @@ const DynamicSidebar = () => {
   const { counts: globalCounts } = useGlobalCounts();
 
   const vendorName = vendorProfile?.businessName || vendorProfile?.companyName || 'Vendor Portal';
-  const vendorEmail = vendorProfile?.email || 'Dynamic Panel Active';
+  const vendorEmail = vendorProfile?.email || vendorProfile?.phone || 'Partner account';
   const initials = vendorName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'V';
+  const serviceTag = primaryService?.categoryCode
+    ? `${primaryService.categoryCode} · ${primaryService.categoryName}`
+    : null;
+
+  useEffect(() => {
+    if (onCloseMobile) onCloseMobile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   const toggleSection = (sectionName) => {
     setExpandedSections(prev => ({
@@ -51,103 +66,106 @@ const DynamicSidebar = () => {
     }));
   };
 
-  const NAV_ITEMS = {
-    'Dashboard': { path: '/vendor/dynamic/dashboard', icon: LayoutDashboard },
+  const NAV_ITEMS = useMemo(() => {
+    const b = basePath;
+    return {
+    'Dashboard': { path: `${b}/dashboard`, icon: LayoutDashboard },
     'Business Intake': { 
-      path: '/vendor/dynamic/business-intake', 
+      path: `${b}/business-intake`, 
       icon: Briefcase,
       subItems: [
-        { name: 'All Opportunities', path: '/vendor/dynamic/business-intake/all', badge: counts.allOpportunities },
-        { name: 'Client Requests', path: '/vendor/dynamic/business-intake/requests', badge: counts.clientRequests },
-        { name: 'B2B Opportunities', path: '/vendor/dynamic/business-intake/b2b', badge: counts.b2bOpportunities },
-        { name: 'Bulk Requirements', path: '/vendor/dynamic/business-intake/bulk', badge: counts.bulkRequirements },
-        { name: 'Bid / Quote Requests', path: '/vendor/dynamic/business-intake/rfq', badge: counts.bidQuoteRequests },
-        { name: 'Direct Invitations', path: '/vendor/dynamic/business-intake/invitations', badge: counts.directInvitations, badgeRed: true },
-        { name: 'Proposals & Quotations', path: '/vendor/dynamic/business-intake/proposals', badge: counts.proposalsPending },
-        { name: 'Accepted Work', path: '/vendor/dynamic/business-intake/accepted', badge: counts.acceptedThisWeek }
+        { name: 'All Opportunities', path: `${b}/business-intake/all`, badge: counts.allOpportunities },
+        { name: 'Client Requests', path: `${b}/business-intake/requests`, badge: counts.clientRequests },
+        { name: 'B2B Opportunities', path: `${b}/business-intake/b2b`, badge: counts.b2bOpportunities },
+        { name: 'Bulk Requirements', path: `${b}/business-intake/bulk`, badge: counts.bulkRequirements },
+        { name: 'Bid / Quote Requests', path: `${b}/business-intake/rfq`, badge: counts.bidQuoteRequests },
+        { name: 'Direct Invitations', path: `${b}/business-intake/invitations`, badge: counts.directInvitations, badgeRed: true },
+        { name: 'Proposals & Quotations', path: `${b}/business-intake/proposals`, badge: counts.proposalsPending },
+        { name: 'Accepted Work', path: `${b}/business-intake/accepted`, badge: counts.acceptedThisWeek }
       ]
     },
     'Clients & Contracts': {
-      path: '/vendor/dynamic/clients',
+      path: `${b}/clients`,
       icon: Handshake,
       subItems: [
-        { name: 'Individual Clients', path: '/vendor/dynamic/clients/individual', badge: ccCounts.individualClients },
-        { name: 'B2B Clients', path: '/vendor/dynamic/clients/b2b', badge: ccCounts.b2bClients },
-        { name: 'Conversations', path: '/vendor/dynamic/clients/conversations', badge: ccCounts.conversationsUnread, badgeRed: true },
-        { name: 'Proposals', path: '/vendor/dynamic/clients/proposals', badge: ccCounts.proposalsPending },
-        { name: 'Contracts', path: '/vendor/dynamic/clients/contracts', badge: ccCounts.activeContracts },
-        { name: 'Scope Changes', path: '/vendor/dynamic/clients/scope-changes', badge: ccCounts.scopeChangesPending, badgeRed: true }
+        { name: 'Individual Clients', path: `${b}/clients/individual`, badge: ccCounts.individualClients },
+        { name: 'B2B Clients', path: `${b}/clients/b2b`, badge: ccCounts.b2bClients },
+        { name: 'Conversations', path: `${b}/clients/conversations`, badge: ccCounts.conversationsUnread, badgeRed: true },
+        { name: 'Proposals', path: `${b}/clients/proposals`, badge: ccCounts.proposalsPending },
+        { name: 'Contracts', path: `${b}/clients/contracts`, badge: ccCounts.activeContracts },
+        { name: 'Scope Changes', path: `${b}/clients/scope-changes`, badge: ccCounts.scopeChangesPending, badgeRed: true }
       ]
     },
     'Project Operations': { 
-      path: '/vendor/dynamic/projects', 
+      path: `${b}/projects`, 
       icon: FolderKanban,
       subItems: [
-        { name: 'Project OS', path: '/vendor/dynamic/projects/os', badge: poCounts.activeProjects },
-        { name: 'Sites & Locations', path: '/vendor/dynamic/projects/sites', badge: poCounts.activeSites },
-        { name: 'Milestones & Tasks', path: '/vendor/dynamic/projects/milestones', badge: poCounts.openMilestones },
-        { name: 'Dispatch Center', path: '/vendor/dynamic/projects/dispatch', badge: poCounts.availableEngineers },
-        { name: 'Live Operations', path: '/vendor/dynamic/projects/live', badge: poCounts.liveJobs, badgeRed: true },
-        { name: 'Calendar & Schedule', path: '/vendor/dynamic/projects/calendar', badge: poCounts.eventsToday }
+        { name: 'Project OS', path: `${b}/projects/os`, badge: poCounts.activeProjects },
+        { name: 'Sites & Locations', path: `${b}/projects/sites`, badge: poCounts.activeSites },
+        { name: 'Milestones & Tasks', path: `${b}/projects/milestones`, badge: poCounts.openMilestones },
+        { name: 'Dispatch Center', path: `${b}/projects/dispatch`, badge: poCounts.availableEngineers },
+        { name: 'Live Operations', path: `${b}/projects/live`, badge: poCounts.liveJobs, badgeRed: true },
+        { name: 'Calendar & Schedule', path: `${b}/projects/calendar`, badge: poCounts.eventsToday }
       ]
     },
     'Workforce': { 
-      path: '/vendor/dynamic/workforce', 
+      path: `${b}/workforce`, 
       icon: Users,
       subItems: [
-        { name: 'Engineers', path: '/vendor/dynamic/workforce/engineers', badge: wfCounts.totalEngineers },
-        { name: 'Project Teams', path: '/vendor/dynamic/workforce/teams', badge: wfCounts.activeTeams },
-        { name: 'Team Structure', path: '/vendor/dynamic/workforce/structure' },
-        { name: 'Skill Matrix', path: '/vendor/dynamic/workforce/skills' },
-        { name: 'Assignments', path: '/vendor/dynamic/workforce/assignments', badge: wfCounts.openAssignments },
-        { name: 'Availability', path: '/vendor/dynamic/workforce/availability', badge: wfCounts.available },
-        { name: 'Attendance', path: '/vendor/dynamic/workforce/attendance', badge: wfCounts.presentToday },
-        { name: 'Leave & Calendar', path: '/vendor/dynamic/workforce/leave', badge: wfCounts.pendingLeave },
-        { name: 'Certifications', path: '/vendor/dynamic/workforce/certifications', badge: wfCounts.expiringCerts, badgeRed: true }
+        { name: 'Engineers', path: `${b}/workforce/engineers`, badge: wfCounts.totalEngineers },
+        { name: 'Project Teams', path: `${b}/workforce/teams`, badge: wfCounts.activeTeams },
+        { name: 'Team Structure', path: `${b}/workforce/structure` },
+        { name: 'Skill Matrix', path: `${b}/workforce/skills` },
+        { name: 'Assignments', path: `${b}/workforce/assignments`, badge: wfCounts.openAssignments },
+        { name: 'Availability', path: `${b}/workforce/availability`, badge: wfCounts.available },
+        { name: 'Attendance', path: `${b}/workforce/attendance`, badge: wfCounts.presentToday },
+        { name: 'Leave & Calendar', path: `${b}/workforce/leave`, badge: wfCounts.pendingLeave },
+        { name: 'Certifications', path: `${b}/workforce/certifications`, badge: wfCounts.expiringCerts, badgeRed: true }
       ]
     },
     'Resources': { 
-      path: '/vendor/dynamic/resources', 
+      path: `${b}/resources`, 
       icon: Box,
       subItems: [
-        { name: 'Capacity Center', path: '/vendor/dynamic/resources/capacity' },
-        { name: 'Inventory', path: '/vendor/dynamic/resources/inventory', badge: resCounts.inventoryItems },
-        { name: 'Tools & Equipment', path: '/vendor/dynamic/resources/tools', badge: resCounts.toolsAvailable },
-        { name: 'Warehouses', path: '/vendor/dynamic/resources/warehouses', badge: resCounts.warehouses },
-        { name: 'Installed Assets', path: '/vendor/dynamic/resources/assets', badge: resCounts.installedAssets }
+        { name: 'Capacity Center', path: `${b}/resources/capacity` },
+        { name: 'Inventory', path: `${b}/resources/inventory`, badge: resCounts.inventoryItems },
+        { name: 'Tools & Equipment', path: `${b}/resources/tools`, badge: resCounts.toolsAvailable },
+        { name: 'Warehouses', path: `${b}/resources/warehouses`, badge: resCounts.warehouses },
+        { name: 'Installed Assets', path: `${b}/resources/assets`, badge: resCounts.installedAssets }
       ]
     },
     'Quality & Control': { 
-      path: '/vendor/dynamic/quality', 
+      path: `${b}/quality`, 
       icon: ShieldCheck,
       subItems: [
-        { name: 'Proof Review', path: '/vendor/dynamic/quality/proof', badge: qcCounts.proofPending },
-        { name: 'QA & Rework', path: '/vendor/dynamic/quality/qa', badge: qcCounts.qaPending },
-        { name: 'Client Approvals', path: '/vendor/dynamic/quality/client-approvals', badge: qcCounts.clientPending },
-        { name: 'B2B Approvals', path: '/vendor/dynamic/quality/b2b-approvals', badge: qcCounts.b2bPending },
-        { name: 'Issues & Risks', path: '/vendor/dynamic/quality/issues', badge: qcCounts.openIssues, badgeRed: true },
-        { name: 'Change Requests', path: '/vendor/dynamic/quality/change-requests', badge: qcCounts.changePending },
-        { name: 'Damage Incidents', path: '/vendor/dynamic/quality/damage', badge: qcCounts.openDamage, badgeRed: true }
+        { name: 'Proof Review', path: `${b}/quality/proof`, badge: qcCounts.proofPending },
+        { name: 'QA & Rework', path: `${b}/quality/qa`, badge: qcCounts.qaPending },
+        { name: 'Client Approvals', path: `${b}/quality/client-approvals`, badge: qcCounts.clientPending },
+        { name: 'B2B Approvals', path: `${b}/quality/b2b-approvals`, badge: qcCounts.b2bPending },
+        { name: 'Issues & Risks', path: `${b}/quality/issues`, badge: qcCounts.openIssues, badgeRed: true },
+        { name: 'Change Requests', path: `${b}/quality/change-requests`, badge: qcCounts.changePending },
+        { name: 'Damage Incidents', path: `${b}/quality/damage`, badge: qcCounts.openDamage, badgeRed: true }
       ]
     },
     'Finance': { 
-      path: '/vendor/dynamic/finance', 
+      path: `${b}/finance`, 
       icon: Wallet,
       subItems: [
-        { name: 'Master Wallet', path: '/vendor/dynamic/finance/wallet' },
-        { name: 'Client Receivables', path: '/vendor/dynamic/finance/client-receivables', badge: finCounts.clientPending },
-        { name: 'B2B Receivables', path: '/vendor/dynamic/finance/b2b-receivables', badge: finCounts.b2bPending },
-        { name: 'Quotations', path: '/vendor/dynamic/finance/quotations', badge: finCounts.quotations },
-        { name: 'Invoices', path: '/vendor/dynamic/finance/invoices', badge: finCounts.invoicesDue, badgeRed: true },
-        { name: 'Payment Milestones', path: '/vendor/dynamic/finance/milestones', badge: finCounts.milestonesDue }
+        { name: 'Master Wallet', path: `${b}/finance/wallet` },
+        { name: 'Client Receivables', path: `${b}/finance/client-receivables`, badge: finCounts.clientPending },
+        { name: 'B2B Receivables', path: `${b}/finance/b2b-receivables`, badge: finCounts.b2bPending },
+        { name: 'Quotations', path: `${b}/finance/quotations`, badge: finCounts.quotations },
+        { name: 'Invoices', path: `${b}/finance/invoices`, badge: finCounts.invoicesDue, badgeRed: true },
+        { name: 'Payment Milestones', path: `${b}/finance/milestones`, badge: finCounts.milestonesDue }
       ]
     },
-    'Performance': { path: '/vendor/dynamic/performance', icon: Activity },
-    'Compliance': { path: '/vendor/dynamic/compliance', icon: FileCheck, badge: globalCounts.complianceAlerts },
-    'Notifications': { path: '/vendor/dynamic/notifications', icon: Bell, badge: globalCounts.unreadNotifications, badgeRed: true },
-    'Support': { path: '/vendor/dynamic/support', icon: HelpCircle, badge: globalCounts.openTickets },
-    'Settings': { path: '/vendor/dynamic/settings', icon: Settings },
+    'Performance': { path: `${b}/performance`, icon: Activity },
+    'Compliance': { path: `${b}/compliance`, icon: FileCheck, badge: globalCounts.complianceAlerts },
+    'Notifications': { path: `${b}/notifications`, icon: Bell, badge: globalCounts.unreadNotifications, badgeRed: true },
+    'Support': { path: `${b}/support`, icon: HelpCircle, badge: globalCounts.openTickets },
+    'Settings': { path: `${b}/settings`, icon: Settings },
   };
+  }, [basePath, counts, ccCounts, poCounts, wfCounts, resCounts, qcCounts, finCounts, globalCounts]);
 
   // Auto-expand active section
   useEffect(() => {
@@ -160,11 +178,37 @@ const DynamicSidebar = () => {
   }, [location.pathname, sidebarSections]);
 
   return (
-    <aside className="w-64 bg-gray-900 text-white min-h-screen flex flex-col transition-all duration-300">
-      <div className="p-4 flex items-center justify-center border-b border-gray-800">
-        <h2 className="text-lg font-bold tracking-wide text-white">
-          WBI <span className="text-blue-400 font-normal text-sm">Vendor Portal</span>
-        </h2>
+    <>
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-gray-900 text-white flex flex-col transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:z-auto ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+      <div className="p-4 flex items-center justify-between border-b border-gray-800">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold tracking-wide text-white">
+            WBI <span className="text-blue-400 font-normal text-sm">Vendor Portal</span>
+          </h2>
+          {serviceTag && (
+            <p className="text-[10px] text-blue-300/90 truncate mt-0.5 font-medium">{serviceTag}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onCloseMobile}
+          className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 lg:hidden"
+          aria-label="Close menu"
+        >
+          <X className="h-5 w-5" />
+        </button>
       </div>
       
       <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
@@ -242,8 +286,8 @@ const DynamicSidebar = () => {
         </nav>
       </div>
 
-      <div className="p-4 border-t border-gray-800">
-        <div className="flex items-center gap-3">
+      <div className="p-4 border-t border-gray-800 space-y-3">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="h-9 w-9 rounded-full bg-blue-600 flex items-center justify-center font-bold text-white text-sm shrink-0">
             {initials}
           </div>
@@ -252,6 +296,15 @@ const DynamicSidebar = () => {
             <p className="text-xs text-gray-400 truncate">{vendorEmail}</p>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={openConfirm}
+          disabled={loggingOut}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg hover:bg-red-500/20 hover:text-red-200 transition-colors disabled:opacity-60"
+        >
+          <LogOut className="h-4 w-4" />
+          {loggingOut ? 'Signing out…' : 'Sign out'}
+        </button>
       </div>
       
       <style>{`
@@ -270,6 +323,14 @@ const DynamicSidebar = () => {
         }
       `}</style>
     </aside>
+
+      <VendorLogoutConfirm
+        open={confirmOpen}
+        loggingOut={loggingOut}
+        onCancel={closeConfirm}
+        onConfirm={confirmLogout}
+      />
+    </>
   );
 };
 

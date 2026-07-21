@@ -6,6 +6,7 @@ const {
   getBookingReport,
   getVendorReport,
   getWorkerReport,
+  getEngineerReport,
   getRevenueReport,
   getCustomerReport
 } = require('../../controllers/adminControllers/adminReportController');
@@ -17,6 +18,7 @@ router.use(authenticate, isAdmin);
 router.get('/reports/bookings', getBookingReport);
 router.get('/reports/vendors', getVendorReport);
 router.get('/reports/workers', getWorkerReport);
+router.get('/reports/engineers', getEngineerReport);
 router.get('/reports/revenue', getRevenueReport);
 router.get('/reports/customers', getCustomerReport);
 

@@ -144,6 +144,14 @@ const b2bJobSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  startOtpSentAt: {
+    type: Date,
+    default: null
+  },
+  startOtpVerifiedAt: {
+    type: Date,
+    default: null
+  },
   endOtp: {
     type: String,
     default: null
@@ -154,6 +162,19 @@ const b2bJobSchema = new mongoose.Schema({
   afterPhotos: [{
     type: String
   }],
+  // Progressive matching wave state (km radii: 5→10→20→50→100)
+  currentWave: {
+    type: Number,
+    default: 0
+  },
+  waveStartedAt: {
+    type: Date,
+    default: null
+  },
+  notifiedEngineers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Engineer'
+  }],
   quoteApprovalId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'QuoteApproval',
@@ -163,9 +184,26 @@ const b2bJobSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  incompleteRemarks: {
+    type: String,
+    default: null
+  },
+  // Spare Parts / closed-incomplete: block reopen; client must create a fresh job
+  requiresNewJob: {
+    type: Boolean,
+    default: false
+  },
+  reopenBlocked: {
+    type: Boolean,
+    default: false
+  },
+  quoteAdjustmentAmount: {
+    type: Number,
+    default: 0
+  },
   paymentStatus: {
     type: String,
-    enum: ['unpaid', 'deducted', 'pending_deduction'],
+    enum: ['unpaid', 'deducted', 'pending_deduction', 'adjusted'],
     default: 'unpaid'
   },
   invoiceId: {
@@ -184,6 +222,8 @@ const b2bJobSchema = new mongoose.Schema({
 
 
 b2bJobSchema.index({ companyId: 1, date: 1 });
+b2bJobSchema.index({ assignedTo: 1, preferredDate: 1 });
+b2bJobSchema.index({ assignedTo: 1, status: 1 });
 
 b2bJobSchema.index({ 'coordinates.coordinates': '2d' }); // 2d index for standard coordinates querying if 2dsphere is too strict
 b2bJobSchema.index({ status: 1 });

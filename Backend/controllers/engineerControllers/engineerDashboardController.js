@@ -3,6 +3,8 @@ const Engineer = require('../../models/Engineer');
 const WorkerProject = require('../../models/WorkerProject');
 const DigitalJob = require('../../models/DigitalJob');
 const DigitalAssignment = require('../../models/DigitalAssignment');
+const VendorOpsJob = require('../../models/VendorOpsJob');
+const Transaction = require('../../models/Transaction');
 const { BOOKING_STATUS } = require('../../utils/constants');
 
 /**
@@ -13,7 +15,7 @@ const getDashboardStats = async (req, res) => {
   console.log('[API_START] GET /api/engineers/dashboard/stats');
   try {
     const engineerId = req.user.id;
-    const engineer = await Engineer.findById(engineerId).lean();
+    const engineer = await Engineer.findById(engineerId).select('_id rating status wallet').lean();
 
     if (!engineer) {
       return res.status(404).json({ success: false, message: 'Engineer not found' });
@@ -30,7 +32,11 @@ const getDashboardStats = async (req, res) => {
       completedDigitalCount,
       ratingStats,
       recentHardwareJobs,
-      recentDigitalJobs
+      recentDigitalJobs,
+      opsEarningStats,
+      opsActiveCount,
+      opsCompletedCount,
+      recentOpsJobs
     ] = await Promise.all([
       Booking.aggregate([
         { $match: { workerId: engineer._id, status: { $in: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.WORK_DONE] } } },
@@ -78,28 +84,75 @@ const getDashboardStats = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(5)
         .populate('vendorId', 'companyName')
+        .lean(),
+      VendorOpsJob.aggregate([
+        { $match: { engineerId: engineer._id, payoutStatus: 'credited' } },
+        { $group: { _id: null, total: { $sum: '$engineerPayout' } } }
+      ]),
+      VendorOpsJob.countDocuments({
+        engineerId: engineer._id,
+        status: { $in: ['pending_acceptance', 'accepted', 'en_route', 'on_site', 'in_progress'] }
+      }),
+      VendorOpsJob.countDocuments({
+        engineerId: engineer._id,
+        status: 'completed'
+      }),
+      VendorOpsJob.find({ engineerId: engineer._id })
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .select('title clientName city budget status jobCode updatedAt createdAt projectId')
         .lean()
     ]);
 
     const hardwareEarnings = hardwareEarningStats.length > 0 ? hardwareEarningStats[0].total : 0;
     const digitalEarnings = digitalEarningStats.length > 0 ? digitalEarningStats[0].total : 0;
-    const totalEarnings = hardwareEarnings + digitalEarnings;
-    const activeJobsCount = hardwareActiveJobsCount + digitalActiveJobsCount;
+    const opsEarnings = opsEarningStats.length > 0 ? opsEarningStats[0].total : 0;
+    const walletOpsCredits = await Transaction.aggregate([
+      {
+        $match: {
+          engineerId: engineer._id,
+          status: 'completed',
+          type: 'earnings_credit',
+          'metadata.source': 'vendor_ops'
+        }
+      },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const opsTxnEarnings = walletOpsCredits.length ? walletOpsCredits[0].total : 0;
+    const totalEarnings = hardwareEarnings + digitalEarnings + Math.max(opsEarnings, opsTxnEarnings);
+    const activeJobsCount = hardwareActiveJobsCount + digitalActiveJobsCount + opsActiveCount;
     const activeProjectsCount = hardwareActiveProjectsCount + digitalActiveProjectsCount;
-    const completedJobsCount = completedHardwareCount + completedDigitalCount;
+    const completedJobsCount = completedHardwareCount + completedDigitalCount + opsCompletedCount;
     const averageRating = ratingStats.length > 0 ? parseFloat(ratingStats[0].avgRating.toFixed(1)) : (engineer.rating || 0);
 
-    const allRecentJobs = [...recentHardwareJobs, ...recentDigitalJobs.map(job => ({
-      _id: job._id,
-      serviceCategory: job.serviceType,
-      serviceId: { name: job.title },
-      address: { city: job.clientName },
-      basePrice: job.budget?.min || 0,
-      finalAmount: job.budget?.max || 0,
-      scheduledDate: job.createdAt,
-      status: job.status === 'Assigned' && job.assignmentStatus === 'Pending' ? 'NEW' : job.status,
-      isDigital: true
-    }))].sort((a, b) => new Date(b.createdAt || b.scheduledDate) - new Date(a.createdAt || a.scheduledDate)).slice(0, 5);
+    const allRecentJobs = [
+      ...recentHardwareJobs,
+      ...recentDigitalJobs.map(job => ({
+        _id: job._id,
+        serviceCategory: job.serviceType,
+        serviceId: { name: job.title },
+        address: { city: job.clientName },
+        basePrice: job.budget?.min || 0,
+        finalAmount: job.budget?.max || 0,
+        scheduledDate: job.createdAt,
+        status: job.status === 'Assigned' && job.assignmentStatus === 'Pending' ? 'NEW' : job.status,
+        isDigital: true,
+        createdAt: job.createdAt
+      })),
+      ...recentOpsJobs.map((job) => ({
+        _id: job._id,
+        serviceId: { name: job.title, title: job.title },
+        userId: { name: job.clientName || 'Vendor client' },
+        address: { city: job.city },
+        finalAmount: job.budget || 0,
+        basePrice: job.budget || 0,
+        scheduledDate: job.updatedAt || job.createdAt,
+        createdAt: job.createdAt,
+        status: job.status,
+        isOpsJob: true,
+        jobCode: job.jobCode
+      }))
+    ].sort((a, b) => new Date(b.createdAt || b.scheduledDate) - new Date(a.createdAt || a.scheduledDate)).slice(0, 8);
 
     const timeTaken = Date.now() - startTime;
     console.log(`[API_SUCCESS] GET /api/engineers/dashboard/stats - ${timeTaken}ms`);
@@ -108,6 +161,7 @@ const getDashboardStats = async (req, res) => {
       success: true,
       data: {
         totalEarnings,
+        walletBalance: engineer.wallet?.balance || 0,
         activeJobs: activeJobsCount,
         activeProjects: activeProjectsCount,
         completedJobs: completedJobsCount,

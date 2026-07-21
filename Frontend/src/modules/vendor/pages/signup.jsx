@@ -109,7 +109,7 @@ const VendorSignup = () => {
       }
     }
 
-    if (stepId === 'pr_services' && (!formData.projectServices || formData.projectServices.length === 0)) {
+    if (stepId === 'pr_services' && (!(formData.selectedProjectServices?.length) && (!formData.projectServices || formData.projectServices.length === 0))) {
       return toast.error('Please select at least one project service');
     }
 

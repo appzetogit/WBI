@@ -59,13 +59,18 @@ const WorkerLogin = () => {
       };
       const response = await sharedAuthService.unifiedLogin(loginPayload);
       if (response.success) {
-        toast.success(`Welcome Back! Logged in as ${response.user.role}`);
-        navigate(response.redirectTo, { replace: true });
+        const role = String(response.user?.role || '').toLowerCase();
+        if (role && role !== 'worker') {
+          toast.error(`This account is registered as ${role}. Please use the ${role} login.`);
+          return;
+        }
+        toast.success('Welcome back!');
+        navigate(response.redirectTo || '/worker/dashboard', { replace: true });
       } else {
         toast.error(response.message || 'Login failed');
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Login failed');
+      toast.error(error.response?.data?.message || 'Login failed. Please try again.');
     } finally {
       setIsLoading(false);
     }

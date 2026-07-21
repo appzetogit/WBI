@@ -1,4 +1,5 @@
 const MaintenanceEnquiry = require('../models/MaintenanceEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // Submit new enquiry (Public)
 exports.submitEnquiry = async (req, res) => {
@@ -13,6 +14,14 @@ exports.submitEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    queueOpportunityFromEnquiry({
+      enquiry: newEnquiry,
+      enquiryType: 'maintenance',
+      enquiryModel: 'MaintenanceEnquiry',
+      titlePrefix: `Maintenance request — ${newEnquiry.city || 'Site'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(newEnquiry)
+    });
 
     res.status(201).json({
       success: true,

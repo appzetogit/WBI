@@ -19,6 +19,14 @@ const subServiceSchema = new mongoose.Schema({
     lowercase: true,
     index: true
   },
+  /** Links to FormSchema / ServiceConfig.subCategories (e.g. C05-01) */
+  subCatCode: {
+    type: String,
+    trim: true,
+    uppercase: true,
+    index: true,
+    default: null
+  },
   description: {
     type: String,
     trim: true,

@@ -1,4 +1,5 @@
 const BarcodeReaderService = require('../models/BarcodeReaderService');
+const { queueBankingMarketplaceFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // CREATE an enquiry (Public App)
 exports.createEnquiry = async (req, res) => {
@@ -12,6 +13,11 @@ exports.createEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    queueBankingMarketplaceFromEnquiry(newEnquiry, {
+      enquiryModel: 'BarcodeReaderService',
+      titleHint: 'Barcode Reader Service'
+    });
 
     res.status(201).json({
       success: true,

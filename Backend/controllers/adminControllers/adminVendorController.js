@@ -1,5 +1,6 @@
 const Vendor = require('../../models/Vendor');
 const Booking = require('../../models/Booking');
+const Withdrawal = require('../../models/Withdrawal');
 const VendorBill = require('../../models/VendorBill');
 const { validationResult } = require('express-validator');
 const { VENDOR_STATUS, BOOKING_STATUS, PAYMENT_STATUS } = require('../../utils/constants');
@@ -151,7 +152,25 @@ const approveVendor = async (req, res) => {
 
     vendor.approvalStatus = VENDOR_STATUS.APPROVED;
     vendor.approvalDate = new Date();
+    vendor.isActive = true;
+    vendor.operationalAuditStatus = 'approved';
+    vendor.operationalAuditAt = new Date();
+    if (vendor.onboarding) vendor.onboarding.status = 'APPROVED';
     await vendor.save();
+
+    try {
+      const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');
+      emitOnboardingStatus(vendor._id, buildOnboardingStatus(vendor));
+    } catch (_) {
+      /* non-blocking */
+    }
+
+    try {
+      const { ensureVendorCompanyCode } = require('../../utils/vendorCompanyCode');
+      await ensureVendorCompanyCode(vendor);
+    } catch (codeErr) {
+      console.warn('Vendor company code generation failed:', codeErr.message);
+    }
 
     // Send notification to vendor
     await createNotification({
@@ -371,14 +390,54 @@ const getAllVendorBookings = async (req, res) => {
     const { status, page = 1, limit = 20, search } = req.query;
 
     const query = { vendorId: { $exists: true, $ne: null } };
-    if (status) {
-      query.status = status;
+
+    const statusGroups = {
+      in_progress: [
+        BOOKING_STATUS.IN_PROGRESS,
+        BOOKING_STATUS.SERVICE_STARTED,
+        BOOKING_STATUS.JOURNEY_STARTED,
+        BOOKING_STATUS.ARRIVED,
+        BOOKING_STATUS.WORKER_ASSIGNED,
+        BOOKING_STATUS.ASSIGNED,
+        BOOKING_STATUS.VISITED,
+        BOOKING_STATUS.WORK_DONE
+      ],
+      completed: [
+        BOOKING_STATUS.COMPLETED,
+        BOOKING_STATUS.CLOSED,
+        BOOKING_STATUS.PAID,
+        BOOKING_STATUS.COMPLETED_PENDING_PAYMENT
+      ],
+      cancelled: [
+        BOOKING_STATUS.CANCELLED,
+        BOOKING_STATUS.REJECTED,
+        BOOKING_STATUS.REFUNDED,
+        BOOKING_STATUS.DISPUTED
+      ],
+      pending: [
+        BOOKING_STATUS.PENDING,
+        BOOKING_STATUS.REQUESTED,
+        BOOKING_STATUS.SEARCHING,
+        BOOKING_STATUS.SEARCHING_WORKER,
+        BOOKING_STATUS.REQUEST_SENT,
+        BOOKING_STATUS.AWAITING_PAYMENT,
+        BOOKING_STATUS.CONFIRMED,
+        BOOKING_STATUS.ACCEPTED,
+        BOOKING_STATUS.SCHEDULED,
+        BOOKING_STATUS.ADMIN_ACTION_REQUIRED
+      ]
+    };
+
+    if (status && status !== 'all') {
+      if (statusGroups[status]) {
+        query.status = { $in: statusGroups[status] };
+      } else {
+        query.status = status;
+      }
     }
 
-    // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
-    // If search is provided, we need to find vendors by business name or name first
     if (search) {
       const vendors = await Vendor.find({
         $or: [
@@ -388,29 +447,39 @@ const getAllVendorBookings = async (req, res) => {
         ]
       }).select('_id');
 
-      const vendorIds = vendors.map(v => v._id);
+      const vendorIds = vendors.map((v) => v._id);
       query.vendorId = { $in: vendorIds };
     }
 
-    const bookings = await Booking.find(query)
-      .populate('vendorId', 'name businessName phone profileImage')
-      .populate('userId', 'name phone')
-      .populate('serviceId', 'title iconUrl')
-      .populate('workerId', 'name phone')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    const lim = parseInt(limit, 10);
 
-    const total = await Booking.countDocuments(query);
+    const [bookings, total] = await Promise.all([
+      Booking.find(query)
+        .populate('vendorId', 'name businessName phone profileImage')
+        .populate('userId', 'name phone')
+        .populate('serviceId', 'title iconUrl')
+        .populate('workerId', 'name phone')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(lim)
+        .lean(),
+      Booking.countDocuments(query)
+    ]);
+
+    const data = bookings.map((b) => ({
+      ...b,
+      displayDate: b.scheduledDate || b.createdAt,
+      serviceTitle: b.serviceId?.title || b.serviceName || 'Service'
+    }));
 
     res.status(200).json({
       success: true,
-      data: bookings,
+      data,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: parseInt(page, 10),
+        limit: lim,
         total,
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / lim) || 1
       }
     });
   } catch (error) {
@@ -427,16 +496,71 @@ const getAllVendorBookings = async (req, res) => {
  */
 const getVendorPaymentsSummary = async (req, res) => {
   try {
-    // Return vendors with their wallet balances and earnings
-    const vendors = await Vendor.find({
-      'wallet.balance': { $exists: true }
-    })
-      .select('name businessName phone wallet email approvalStatus')
-      .sort({ 'wallet.balance': -1 });
+    const { search } = req.query;
+    const query = {};
+    if (search && String(search).trim()) {
+      const term = String(search).trim();
+      query.$or = [
+        { businessName: { $regex: term, $options: 'i' } },
+        { name: { $regex: term, $options: 'i' } },
+        { phone: { $regex: term, $options: 'i' } }
+      ];
+    }
+
+    const vendors = await Vendor.find(query)
+      .select('name businessName phone wallet email approvalStatus isActive')
+      .sort({ 'wallet.dues': -1, 'wallet.earnings': -1, businessName: 1 })
+      .lean();
+
+    const vendorIds = vendors.map((v) => v._id);
+    const pendingWithdrawals = vendorIds.length
+      ? await Withdrawal.aggregate([
+          { $match: { vendorId: { $in: vendorIds }, status: 'pending' } },
+          { $group: { _id: '$vendorId', total: { $sum: '$amount' } } }
+        ])
+      : [];
+
+    const pendingMap = new Map(
+      pendingWithdrawals.map((r) => [String(r._id), r.total || 0])
+    );
+
+    let meta = {
+      totalDuesToAdmin: 0,
+      totalEarningsOwed: 0,
+      totalPendingWithdrawals: 0,
+      vendorCount: vendors.length
+    };
+
+    const data = vendors.map((v) => {
+      const dues = Number(v.wallet?.dues) || 0;
+      const earnings = Number(v.wallet?.earnings) || 0;
+      const pendingWithdrawal = pendingMap.get(String(v._id)) || 0;
+      const netBalance = earnings - dues;
+
+      meta.totalDuesToAdmin += dues;
+      meta.totalEarningsOwed += earnings;
+      meta.totalPendingWithdrawals += pendingWithdrawal;
+
+      return {
+        ...v,
+        paymentSummary: {
+          dues,
+          earnings,
+          netBalance,
+          pendingWithdrawal,
+          totalWithdrawn: Number(v.wallet?.totalWithdrawn) || 0,
+          totalSettled: Number(v.wallet?.totalSettled) || 0,
+          totalCashCollected: Number(v.wallet?.totalCashCollected) || 0,
+          cashLimit: Number(v.wallet?.cashLimit) || 10000,
+          isBlocked: Boolean(v.wallet?.isBlocked)
+        }
+      };
+    });
 
     res.status(200).json({
       success: true,
-      data: vendors
+      data,
+      meta
     });
   } catch (error) {
     console.error('Get vendor payments summary error:', error);
@@ -529,6 +653,13 @@ const updateVendorKycStatus = async (req, res) => {
       // You can store reason in Vendor or VendorKYC
     }
     await vendor.save();
+
+    try {
+      const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');
+      emitOnboardingStatus(vendor._id, buildOnboardingStatus(vendor));
+    } catch (_) {
+      /* non-blocking */
+    }
     
     res.status(200).json({ success: true, message: `KYC status updated to ${status}` });
   } catch (error) {
@@ -549,6 +680,13 @@ const updateVendorBankStatus = async (req, res) => {
     
     vendor.bankStatus = status;
     await vendor.save();
+
+    try {
+      const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');
+      emitOnboardingStatus(vendor._id, buildOnboardingStatus(vendor));
+    } catch (_) {
+      /* non-blocking */
+    }
     
     res.status(200).json({ success: true, message: `Bank status updated to ${status}` });
   } catch (error) {

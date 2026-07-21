@@ -8,6 +8,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const compression = require('compression');
 const path = require('path');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
@@ -29,7 +30,7 @@ require('./queues/registrationQueue');
 
 // Initialize Express app
 const app = express();
-app.set('trust proxy', 1); // Trust first proxy (Nginx) for express-rate-limit
+app.set('trust proxy', 1); // Trust first proxy (Nginx/ALB) for express-rate-limit
 
 // Security middleware
 app.use(helmet({
@@ -43,6 +44,15 @@ app.use(helmet({
   noSniff: true, // Prevent MIME type sniffing
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   xssFilter: true // Basic XSS protection
+}));
+
+// Gzip responses (skip already-compressed payloads)
+app.use(compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
 }));
 
 // CORS configuration
@@ -88,7 +98,14 @@ app.use(cors({
 
 // CORS configuration finished above
 
-// CORS configuration finished above
+// Razorpay webhooks MUST use raw body for HMAC signature verification.
+// Mount BEFORE express.json() so req.body remains a Buffer.
+const { joiningFeeWebhook } = require('./controllers/engineerControllers/engineerJoiningFeeController');
+app.post(
+  '/api/engineer/joining-fee/webhook',
+  express.raw({ type: 'application/json' }),
+  joiningFeeWebhook
+);
 
 // Body parser middleware
 app.use(express.json({ limit: '50mb' }));
@@ -141,65 +158,71 @@ if (process.env.NODE_ENV === 'development') {
 // Rate limiting
 app.use('/api', rateLimiter);
 
-// Health check route
+// Health check route (ALB / ops — always 200 for liveness; checks are informational)
 app.get('/health', (req, res) => {
-  res.json({
+  const mongoose = require('mongoose');
+  const { isRedisConnected } = require('./services/redisService');
+  const dbOk = mongoose.connection.readyState === 1;
+  res.status(200).json({
     success: true,
     message: 'WBI API is running',
     uptime: process.uptime(),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    checks: {
+      mongo: dbOk ? 'ok' : 'degraded',
+      redis: process.env.REDIS_ENABLED === 'true'
+        ? (isRedisConnected() ? 'ok' : 'degraded')
+        : 'disabled'
+    }
   });
 });
 
-// Quick Redis Test Route
-app.get('/api/test/redis', async (req, res) => {
-  try {
-    const { getRedis, isRedisConnected } = require('./services/redisService');
-    const redis = getRedis();
+// Quick Redis Test Route — disabled in production (no public probe surface)
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/api/test/redis', async (req, res) => {
+    try {
+      const { getRedis, isRedisConnected } = require('./services/redisService');
+      const redis = getRedis();
 
-    if (!isRedisConnected()) {
-      return res.status(503).json({
+      if (!isRedisConnected()) {
+        return res.status(503).json({
+          success: false,
+          message: 'Redis is not connected or disabled',
+          redisEnabled: process.env.REDIS_ENABLED === 'true',
+          status: redis ? redis.status : 'no_instance'
+        });
+      }
+
+      const testKey = `test:time:${Date.now()}`;
+      const testValue = 'Hello from Redis!';
+
+      await redis.set(testKey, testValue, 'EX', 60);
+      const retrievedValue = await redis.get(testKey);
+      const deleted = await redis.del(testKey);
+
+      res.json({
+        success: true,
+        message: 'Redis is working correctly',
+        testResults: {
+          set: 'Retrieved value: ' + retrievedValue,
+          match: retrievedValue === testValue,
+          delete: deleted === 1 ? 'Success' : 'Failed'
+        },
+        connectionInfo: {
+          status: redis.status,
+          host: redis.options.host
+        }
+      });
+    } catch (error) {
+      console.error('[Redis Test Route] Error:', error);
+      res.status(500).json({
         success: false,
-        message: 'Redis is not connected or disabled',
-        redisEnabled: process.env.REDIS_ENABLED === 'true',
-        status: redis ? redis.status : 'no_instance'
+        message: 'Redis test failed',
+        error: error.message
       });
     }
-
-    const testKey = `test:time:${Date.now()}`;
-    const testValue = 'Hello from Redis!';
-
-    // Test Set
-    await redis.set(testKey, testValue, 'EX', 60);
-
-    // Test Get
-    const retrievedValue = await redis.get(testKey);
-
-    // Test Delete
-    const deleted = await redis.del(testKey);
-
-    res.json({
-      success: true,
-      message: 'Redis is working correctly',
-      testResults: {
-        set: 'Retrieved value: ' + retrievedValue,
-        match: retrievedValue === testValue,
-        delete: deleted === 1 ? 'Success' : 'Failed'
-      },
-      connectionInfo: {
-        status: redis.status,
-        host: redis.options.host
-      }
-    });
-  } catch (error) {
-    console.error('[Redis Test Route] Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Redis test failed',
-      error: error.message
-    });
-  }
-});
+  });
+}
 
 // API Routes
 
@@ -207,6 +230,7 @@ app.get('/api/test/redis', async (req, res) => {
 app.use('/api/kyc', require('./routes/kyc.routes'));
 app.use('/api', require('./routes/public-routes/categoriesQuery.routes'));
 app.use('/api/service-categories', require('./routes/public-routes/serviceCategory.routes'));
+app.use('/api/public', require('./routes/public-routes/serviceConfigPublic.routes'));
 app.use('/api/sub-services', require('./routes/public-routes/subServicesPublic.routes'));
 app.use('/api/skills', require('./routes/public-routes/skillsPublic.routes'));
 app.use('/api/public/cities', require('./routes/public-routes/city.routes.js'));
@@ -275,6 +299,7 @@ app.use('/api/vendor/business-intake', require('./routes/vendor-routes/businessI
 app.use('/api/vendor/clients-contracts', require('./routes/vendor-routes/clientsContracts.routes'));
 app.use('/api/vendor/project-ops', require('./routes/vendor-routes/projectOps.routes'));
 app.use('/api/vendor/workforce', require('./routes/vendor-routes/workforceOps.routes'));
+app.use('/api/vendor', require('./routes/vendor-routes/companyCode.routes'));
 app.use('/api/vendor/resources', require('./routes/vendor-routes/resourcesOps.routes'));
 app.use('/api/vendor/quality', require('./routes/vendor-routes/qualityControl.routes'));
 app.use('/api/vendor/finance', require('./routes/vendor-routes/finance.routes'));
@@ -293,6 +318,7 @@ app.use('/api/workers/projects', require('./routes/worker-routes/project.routes'
 // Engineer routes
 app.use('/api/engineers/auth', require('./routes/engineer-routes/auth.routes'));
 app.use('/api/engineer', require('./routes/engineer-routes/joiningFee.routes'));
+app.use('/api/engineer', require('./routes/engineer-routes/vendorCode.routes'));
 app.use('/api/engineers', require('./routes/engineer-routes/profile.routes'));
 app.use('/api/engineers', require('./routes/engineer-routes/job.routes'));
 app.use('/api/engineers', require('./routes/engineer-routes/dashboard.routes'));
@@ -302,6 +328,8 @@ app.use('/api/engineers/projects', require('./routes/engineer-routes/project.rou
 app.use('/api/engineers/execution', require('./routes/engineer-routes/engineerJobExecution.routes'));
 app.use('/api/engineers/digital', require('./routes/engineer-routes/digital.routes'));
 app.use('/api/engineers/b2b-jobs', require('./routes/engineer-routes/b2bJob.routes'));
+app.use('/api/engineers/ops-jobs', require('./routes/engineer-routes/opsJob.routes'));
+app.use('/api/engineers/freelancer-pool', require('./routes/engineer-routes/freelancerPool.routes'));
 
 // B2B routes
 app.use('/api/b2b', require('./routes/b2b-routes/auth.routes'));
@@ -333,6 +361,7 @@ app.use('/api/admin', require('./routes/admin-routes/adminEngineerConfig.routes'
 app.use('/api/admin', require('./routes/admin-routes/engineerManagement.routes'));
 app.use('/api/admin/service-categories', require('./routes/admin-routes/serviceCategoryManagement.routes'));
 app.use('/api/admin/category', require('./routes/admin-routes/serviceCategoryManagement.routes'));
+app.use('/api/admin', require('./routes/admin-routes/serviceConfig.routes'));
 app.use('/api/admin/sub-services', require('./routes/admin-routes/subServiceManagement.routes'));
 app.use('/api/admin/sub-service', require('./routes/admin-routes/subServiceManagement.routes'));
 app.use('/api/admin/custom-skills', require('./routes/admin-routes/customSkillManagement.routes'));
@@ -435,6 +464,7 @@ app.use('/api/public/web-enquiries', require('./routes/public-routes/webEnquiry.
 app.use('/api/public/app-enquiries', require('./routes/public-routes/appEnquiry.routes'));
 app.use('/api/public', require('./routes/public-routes/config.routes'));
 app.use('/api/public/dynamic-enquiries', require('./routes/public-routes/dynamicEnquiry.routes'));
+app.use('/api/public', require('./routes/public-routes/formSchema.routes'));
 app.use('/api/public/dynamic-payments', require('./routes/public-routes/dynamicPayment.routes'));
 app.use('/api/public', require('./routes/public-routes/trustVideo.routes'));
 app.use('/api/public/reviews', require('./routes/public-routes/review.routes'));
@@ -518,6 +548,11 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
   const startServer = (port) => {
     server = app.listen(port)
       .on('listening', () => {
+        // Keep-alive / idle timeouts for ALB + Node (defaults can drop long polls early)
+        server.keepAliveTimeout = parseInt(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS, 10) || 65000;
+        server.headersTimeout = parseInt(process.env.HTTP_HEADERS_TIMEOUT_MS, 10) || 66000;
+        server.requestTimeout = parseInt(process.env.HTTP_REQUEST_TIMEOUT_MS, 10) || 120000;
+
         console.log(`Server running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
         
         // Initialize Socket.io
@@ -557,6 +592,7 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
 
         // Initialize BullMQ Workers for Security Solutions Flow
         require('./jobs/vendorMatchingJob');
+        require('./jobs/projectAssignmentJob');
         require('./jobs/engineerAssignmentJob');
         require('./jobs/slaMonitorJob');
         console.log('[Server] BullMQ Workers initialized');

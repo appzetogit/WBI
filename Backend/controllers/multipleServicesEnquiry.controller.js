@@ -1,4 +1,5 @@
 const MultipleServicesEnquiry = require('../models/MultipleServicesEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // CREATE an enquiry (Public App)
 exports.createEnquiry = async (req, res) => {
@@ -12,6 +13,14 @@ exports.createEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    queueOpportunityFromEnquiry({
+      enquiry: newEnquiry,
+      enquiryType: 'multipleservices',
+      enquiryModel: 'MultipleServicesEnquiry',
+      titlePrefix: `Multi-service security — ${newEnquiry.city || 'Site'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(newEnquiry)
+    });
 
     res.status(201).json({
       success: true,

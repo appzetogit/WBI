@@ -200,6 +200,32 @@ const engineerService = {
   deleteAllNotifications: async () => {
     const response = await api.delete('/notifications/delete-all');
     return response.data;
+  },
+
+  // --- B2B Jobs ---
+  getB2BJobs: async () => {
+    const response = await api.get('/engineers/b2b-jobs');
+    return response.data;
+  },
+
+  getB2BJobById: async (jobId) => {
+    const response = await api.get(`/engineers/b2b-jobs/${jobId}`);
+    return response.data;
+  },
+
+  resendB2BStartOtp: async (jobId) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/resend-otp`);
+    return response.data;
+  },
+
+  startB2BJob: async (jobId, payload) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/start`, payload);
+    return response.data;
+  },
+
+  completeB2BJob: async (jobId, payload) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/complete`, payload);
+    return response.data;
   }
 };
 

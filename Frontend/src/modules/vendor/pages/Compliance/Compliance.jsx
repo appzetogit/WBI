@@ -8,7 +8,7 @@ import Pagination from '../BusinessIntake/components/Pagination';
 const PAGE = 12;
 
 const Compliance = () => {
-  const { approvedServices = [] } = useVendorConfig() || {};
+  const { approvedServices = [], complianceDocs = [] } = useVendorConfig() || {};
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ category: '', status: '' });
   const [data, setData] = useState([]);
@@ -69,6 +69,18 @@ const Compliance = () => {
           <span className="text-2xl font-bold text-gray-900">{progress}%</span>
         </div>
         <div className="h-2 overflow-hidden bg-gray-100 rounded-full"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${progress}%` }} /></div>
+        {complianceDocs.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Required for your services</p>
+            <div className="flex flex-wrap gap-2">
+              {complianceDocs.map((doc) => (
+                <span key={doc.name} className={`text-xs px-2.5 py-1 rounded-full border ${doc.required ? 'bg-red-50 text-red-700 border-red-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                  {doc.name}{doc.expiryTracked ? ' · expiry tracked' : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3 p-4 mb-5 bg-white border border-gray-200 rounded-xl shadow-sm">

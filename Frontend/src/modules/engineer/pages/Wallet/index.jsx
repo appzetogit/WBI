@@ -48,7 +48,7 @@ const Wallet = () => {
   } = useInfiniteQuery({
     queryKey: ['engineerTransactions'],
     queryFn: async ({ pageParam = 1 }) => {
-      const res = await api.get(`/wallet/transactions?page=${pageParam}&limit=20`);
+      const res = await api.get(`/engineers/wallet/transactions?page=${pageParam}&limit=20`);
       return {
         transactions: res.data?.data || [],
         pagination: res.data?.pagination || { page: 1, pages: 1 }
@@ -94,7 +94,12 @@ const Wallet = () => {
 
   useEffect(() => {
     if (socket) {
-      const handleSocketUpdate = () => refetch();
+      const handleSocketUpdate = (payload) => {
+        refetch();
+        if (payload?.message || payload?.amount) {
+          toast.success(payload.message || `₹${payload.amount} credited to wallet`, { duration: 5000 });
+        }
+      };
       
       socket.on('wallet:credited', handleSocketUpdate);
       socket.on('wallet:updated', handleSocketUpdate);
@@ -135,7 +140,7 @@ const Wallet = () => {
         refetch();
       }
     } catch (error) {
-      toast.error(error.message || 'Failed to request withdrawal');
+      toast.error(error.response?.data?.message || error.message || 'Failed to request withdrawal');
     } finally {
       setSubmittingWithdrawal(false);
     }
@@ -312,12 +317,12 @@ const Wallet = () => {
 
           <div className="grid grid-cols-2 gap-4 mb-6 pt-4 border-t border-gray-700/50">
             <div>
-              <p className="text-xs text-gray-400 mb-1">Pending Release</p>
-              <p className="font-bold text-orange-400">₹{wallet.pendingBalance?.toLocaleString() || 0}</p>
+              <p className="text-xs text-gray-400 mb-1">Withdrawal processing</p>
+              <p className="font-bold text-orange-400">₹{wallet.pendingWithdrawal?.toLocaleString?.() ?? wallet.pendingBalance?.toLocaleString?.() ?? 0}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-1">Under Review</p>
-              <p className="font-bold text-blue-400">₹{wallet.underReviewBalance?.toLocaleString() || 0}</p>
+              <p className="text-xs text-gray-400 mb-1">Total earned (lifetime)</p>
+              <p className="font-bold text-teal-300">₹{wallet.totalEarned?.toLocaleString() || 0}</p>
             </div>
           </div>
 
@@ -453,15 +458,15 @@ const Wallet = () => {
                   ref={isLast ? lastTxElementRef : null}
                   className="flex items-center gap-3 p-3 bg-white rounded-xl border border-gray-100"
                 >
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${txn.transactionType === 'withdrawal' || txn.transactionType === 'debit' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>
-                    {txn.transactionType === 'withdrawal' || txn.transactionType === 'debit' ? <FiArrowUp className="w-4 h-4" /> : <FiArrowDown className="w-4 h-4" />}
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center ${txn.type === 'withdrawal' || (txn.amount < 0) ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500'}`}>
+                    {txn.type === 'withdrawal' || txn.amount < 0 ? <FiArrowUp className="w-4 h-4" /> : <FiArrowDown className="w-4 h-4" />}
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-medium text-gray-800 truncate">{txn.description}</p>
-                    <p className="text-xs text-gray-400">{new Date(txn.createdAt).toLocaleDateString('en-GB')}</p>
+                    <p className="text-xs text-gray-400">{new Date(txn.createdAt).toLocaleDateString('en-GB')}{txn.balanceAfter != null ? ` · Bal ₹${Number(txn.balanceAfter).toLocaleString('en-IN')}` : ''}</p>
                   </div>
-                  <p className={`font-bold ${txn.transactionType === 'withdrawal' || txn.transactionType === 'debit' ? 'text-gray-800' : 'text-green-600'}`}>
-                    {txn.transactionType === 'withdrawal' || txn.transactionType === 'debit' ? '-' : '+'}₹{txn.amount?.toLocaleString() || 0}
+                  <p className={`font-bold ${txn.type === 'withdrawal' || txn.amount < 0 ? 'text-gray-800' : 'text-green-600'}`}>
+                    {txn.type === 'withdrawal' || txn.amount < 0 ? '-' : '+'}₹{Math.abs(txn.amount)?.toLocaleString() || 0}
                   </p>
                 </div>
                 );

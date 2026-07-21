@@ -98,6 +98,11 @@ const opportunitySchema = new mongoose.Schema({
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
     viewedAt: { type: Date, default: Date.now }
   }],
+  // Per-vendor bookmarks
+  bookmarkedBy: [{
+    vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
+    bookmarkedAt: { type: Date, default: Date.now }
+  }],
 
   // Bids
   bids: [bidSchema],
@@ -115,6 +120,70 @@ const opportunitySchema = new mongoose.Schema({
     enum: ['open', 'closed', 'awarded', 'cancelled'],
     default: 'open',
     index: true
+  },
+
+  /** Enterprise assignment engine (vendor queue → timeout → freelancer pool) */
+  assignment: {
+    phase: {
+      type: String,
+      enum: [
+        'project_created',
+        'vendor_notified',
+        'vendor_reviewing',
+        'waiting_vendor_acceptance',
+        'vendor_accepted',
+        'awaiting_engineer',
+        'freelancer_pool',
+        'awarded',
+        'expired',
+        'cancelled'
+      ],
+      default: 'project_created',
+      index: true
+    },
+    requiredEngineers: { type: Number, default: 1, min: 1 },
+    subCatCode: { type: String, default: '' },
+    serviceRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceRequest', default: null },
+    siteLocation: {
+      city: String,
+      address: String,
+      coordinates: {
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: undefined }
+      }
+    },
+    vendorQueue: [
+      {
+        vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', required: true },
+        rank: { type: Number, default: 0 },
+        score: { type: Number, default: 0 },
+        status: {
+          type: String,
+          enum: ['pending', 'active', 'accepted', 'rejected', 'timeout', 'skipped'],
+          default: 'pending'
+        },
+        notifiedAt: Date,
+        respondedAt: Date,
+        rejectionReason: String
+      }
+    ],
+    currentVendorIndex: { type: Number, default: -1 },
+    activeVendorUntil: { type: Date, default: null },
+    configSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+    freelancerPoolReleasedAt: { type: Date, default: null },
+    freelancerLeadEngineerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Engineer',
+      default: null
+    },
+    timeline: [
+      {
+        key: String,
+        label: String,
+        at: { type: Date, default: Date.now },
+        meta: mongoose.Schema.Types.Mixed
+      }
+    ]
   },
 
   // Admin who created it

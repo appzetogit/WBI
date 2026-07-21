@@ -45,26 +45,28 @@ const addNotesValidation = [
 ];
 
 const { verifyAadhaarPanForJob } = require('../../middleware/verificationMiddleware');
+const rateLimiter = require('../../middleware/rateLimiter');
+const { engineerApiLimiter, engineerActionLimiter } = rateLimiter;
 
 // Routes
-router.get('/jobs', authenticate, isEngineer, getAssignedJobs);
-router.get('/jobs/:id', authenticate, isEngineer, getJobById);
-router.put('/jobs/:id/respond', authenticate, isEngineer, verifyAadhaarPanForJob, respondValidation, respondToJob);
-router.put('/jobs/:id/status', authenticate, isEngineer, verifyAadhaarPanForJob, updateStatusValidation, updateJobStatus);
-router.post('/jobs/:id/start', authenticate, isEngineer, verifyAadhaarPanForJob, startJob);
-router.post('/jobs/:id/reached', authenticate, isEngineer, workerReachedLocation);
-router.post('/jobs/:id/visit/verify', authenticate, isEngineer, verifyVisit);
-router.post('/jobs/:id/complete', authenticate, isEngineer, completeJob);
-router.post('/jobs/:id/payment/collect', authenticate, isEngineer, collectCash);
-router.post('/jobs/:id/notes', authenticate, isEngineer, addNotesValidation, addWorkerNotes);
-router.post('/jobs/:id/upload', authenticate, isEngineer, uploadJobMedia);
-router.post('/jobs/:id/materials', authenticate, isEngineer, addJobMaterials);
-router.get('/jobs/:id/timeline', authenticate, isEngineer, getJobTimeline);
-router.get('/jobs/:id/progress', authenticate, isEngineer, getJobProgress);
-router.post('/jobs/:id/expenses', authenticate, isEngineer, addJobExpenses);
-router.get('/jobs/:id/report', authenticate, isEngineer, getJobReport);
-router.get('/jobs/:id/completion', authenticate, isEngineer, getJobCompletionDetails);
-router.post('/jobs/:id/share', authenticate, isEngineer, shareJobReport);
+router.get('/jobs', authenticate, isEngineer, engineerApiLimiter, getAssignedJobs);
+router.get('/jobs/:id', authenticate, isEngineer, engineerApiLimiter, getJobById);
+router.put('/jobs/:id/respond', authenticate, isEngineer, engineerActionLimiter, verifyAadhaarPanForJob, respondValidation, respondToJob);
+router.put('/jobs/:id/status', authenticate, isEngineer, engineerActionLimiter, verifyAadhaarPanForJob, updateStatusValidation, updateJobStatus);
+router.post('/jobs/:id/start', authenticate, isEngineer, engineerActionLimiter, verifyAadhaarPanForJob, startJob);
+router.post('/jobs/:id/reached', authenticate, isEngineer, engineerActionLimiter, workerReachedLocation);
+router.post('/jobs/:id/visit/verify', authenticate, isEngineer, engineerActionLimiter, verifyVisit);
+router.post('/jobs/:id/complete', authenticate, isEngineer, engineerActionLimiter, completeJob);
+router.post('/jobs/:id/payment/collect', authenticate, isEngineer, engineerActionLimiter, collectCash);
+router.post('/jobs/:id/notes', authenticate, isEngineer, engineerActionLimiter, addNotesValidation, addWorkerNotes);
+router.post('/jobs/:id/upload', authenticate, isEngineer, engineerActionLimiter, uploadJobMedia);
+router.post('/jobs/:id/materials', authenticate, isEngineer, engineerActionLimiter, addJobMaterials);
+router.get('/jobs/:id/timeline', authenticate, isEngineer, engineerApiLimiter, getJobTimeline);
+router.get('/jobs/:id/progress', authenticate, isEngineer, engineerApiLimiter, getJobProgress);
+router.post('/jobs/:id/expenses', authenticate, isEngineer, engineerActionLimiter, addJobExpenses);
+router.get('/jobs/:id/report', authenticate, isEngineer, engineerApiLimiter, getJobReport);
+router.get('/jobs/:id/completion', authenticate, isEngineer, engineerApiLimiter, getJobCompletionDetails);
+router.post('/jobs/:id/share', authenticate, isEngineer, engineerActionLimiter, shareJobReport);
 
 // Bill Routes
 router.post('/jobs/:id/bill', authenticate, isEngineer, (req, res, next) => {
@@ -78,20 +80,26 @@ router.get('/jobs/:id/bill', authenticate, isEngineer, (req, res, next) => {
 }, getBillByBookingId);
 
 // Catalog Routes (for billing)
-router.get('/catalog/services', authenticate, isEngineer, async (req, res) => {
+router.get('/catalog/services', authenticate, isEngineer, engineerApiLimiter, async (req, res) => {
   try {
-    const services = await VendorServiceCatalog.find({ status: 'active' }).populate('categoryId', 'title').sort({ name: 1 });
+    const services = await VendorServiceCatalog.find({ status: 'active' })
+      .populate('categoryId', 'title')
+      .sort({ name: 1 })
+      .limit(500)
+      .lean();
     res.status(200).json({ success: true, services });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch services catalog' });
   }
 });
 
-router.get('/catalog/parts', authenticate, isEngineer, async (req, res) => {
+router.get('/catalog/parts', authenticate, isEngineer, engineerApiLimiter, async (req, res) => {
   try {
     const parts = await VendorPartsCatalog.find({ status: 'active' })
       .populate('categoryId', 'title')
-      .sort({ name: 1 });
+      .sort({ name: 1 })
+      .limit(500)
+      .lean();
     res.status(200).json({ success: true, parts });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch parts catalog' });

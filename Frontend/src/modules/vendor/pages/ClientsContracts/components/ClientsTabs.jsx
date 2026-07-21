@@ -1,25 +1,26 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import useClientsContractsCounts from '../../../hooks/useClientsContractsCounts';
-
-const BASE = '/vendor/dynamic/clients';
-
-const TABS = [
-  { key: 'individual', label: 'Individual Clients', path: `${BASE}/individual`, countKey: 'individualClients' },
-  { key: 'b2b', label: 'B2B Clients', path: `${BASE}/b2b`, countKey: 'b2bClients' },
-  { key: 'conversations', label: 'Conversations', path: `${BASE}/conversations`, countKey: 'conversationsUnread' },
-  { key: 'proposals', label: 'Proposals', path: `${BASE}/proposals`, countKey: 'proposalsPending' },
-  { key: 'contracts', label: 'Contracts', path: `${BASE}/contracts`, countKey: 'activeContracts' },
-  { key: 'scope-changes', label: 'Scope Changes', path: `${BASE}/scope-changes`, countKey: 'scopeChangesPending' }
-];
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const ClientsTabs = () => {
   const { counts } = useClientsContractsCounts();
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/clients`;
+
+  const tabs = useMemo(() => [
+    { key: 'individual', label: 'Individual Clients', path: `${base}/individual`, countKey: 'individualClients' },
+    { key: 'b2b', label: 'B2B Clients', path: `${base}/b2b`, countKey: 'b2bClients' },
+    { key: 'conversations', label: 'Conversations', path: `${base}/conversations`, countKey: 'conversationsUnread' },
+    { key: 'proposals', label: 'Proposals', path: `${base}/proposals`, countKey: 'proposalsPending' },
+    { key: 'contracts', label: 'Contracts', path: `${base}/contracts`, countKey: 'activeContracts' },
+    { key: 'scope-changes', label: 'Scope Changes', path: `${base}/scope-changes`, countKey: 'scopeChangesPending' }
+  ], [base]);
 
   return (
     <div className="border-b border-gray-200 overflow-x-auto">
       <nav className="flex gap-1 min-w-max px-1" aria-label="Clients & Contracts tabs">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.key}
             to={tab.path}

@@ -1,23 +1,26 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import useProjectOpsCounts from '../../../hooks/useProjectOpsCounts';
-
-const BASE = '/vendor/dynamic/projects';
-const TABS = [
-  { key: 'os', label: 'Project OS', path: `${BASE}/os`, countKey: 'activeProjects' },
-  { key: 'sites', label: 'Sites & Locations', path: `${BASE}/sites`, countKey: 'activeSites' },
-  { key: 'milestones', label: 'Milestones & Tasks', path: `${BASE}/milestones`, countKey: 'openMilestones' },
-  { key: 'dispatch', label: 'Dispatch Center', path: `${BASE}/dispatch`, countKey: 'availableEngineers' },
-  { key: 'live', label: 'Live Operations', path: `${BASE}/live`, countKey: 'liveJobs' },
-  { key: 'calendar', label: 'Calendar & Schedule', path: `${BASE}/calendar`, countKey: 'eventsToday' }
-];
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const ProjectOpsTabs = () => {
   const { counts } = useProjectOpsCounts();
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/projects`;
+
+  const tabs = useMemo(() => [
+    { key: 'os', label: 'Project OS', path: `${base}/os`, countKey: 'activeProjects' },
+    { key: 'sites', label: 'Sites & Locations', path: `${base}/sites`, countKey: 'activeSites' },
+    { key: 'milestones', label: 'Milestones & Tasks', path: `${base}/milestones`, countKey: 'openMilestones' },
+    { key: 'dispatch', label: 'Dispatch Center', path: `${base}/dispatch`, countKey: 'availableEngineers' },
+    { key: 'live', label: 'Live Operations', path: `${base}/live`, countKey: 'liveJobs' },
+    { key: 'calendar', label: 'Calendar & Schedule', path: `${base}/calendar`, countKey: 'eventsToday' }
+  ], [base]);
+
   return (
     <div className="border-b border-gray-200 overflow-x-auto">
       <nav className="flex gap-1 min-w-max px-1">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.key}
             to={tab.path}

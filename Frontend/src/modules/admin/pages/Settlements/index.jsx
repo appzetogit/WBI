@@ -29,13 +29,25 @@ const SettlementManagement = () => {
 
   // Determine active tab from URL
   useEffect(() => {
-    const path = location.pathname.split('/').pop();
-    if (['pending', 'vendors', 'history', 'withdrawals'].includes(path)) {
-      setActiveTab(path);
-    } else {
+    const segments = location.pathname.split('/').filter(Boolean);
+    const vendorIdx = segments.indexOf('vendor');
+    if (vendorIdx >= 0 && segments[vendorIdx + 1] && segments[vendorIdx + 1].length > 10) {
+      return;
+    }
+    const last = segments[segments.length - 1];
+    if (['pending', 'vendors', 'history', 'withdrawals'].includes(last)) {
+      setActiveTab(last);
+    } else if (segments.includes('settlements')) {
       setActiveTab('pending');
     }
   }, [location.pathname]);
+
+  const settlementTabs = [
+    { id: 'pending', label: 'Pending settlements', path: '/admin/vendors/settlements/pending' },
+    { id: 'withdrawals', label: 'Withdrawals', path: '/admin/vendors/settlements/withdrawals' },
+    { id: 'vendors', label: 'Vendor dues', path: '/admin/vendors/settlements/vendors' },
+    { id: 'history', label: 'History', path: '/admin/vendors/settlements/history' }
+  ];
 
   useEffect(() => {
     loadData();
@@ -611,7 +623,7 @@ const SettlementManagement = () => {
                 <td className="px-6 py-4 text-right">
                   <div className="flex justify-end gap-2">
                     <button
-                      onClick={() => navigate(`/admin/settlements/vendor/${vendor._id}`)}
+                      onClick={() => navigate(`/admin/vendors/settlements/vendor/${vendor._id}`)}
                       className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                       title="View Ledger"
                     >
@@ -770,6 +782,23 @@ const SettlementManagement = () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap gap-2 border-b border-gray-100 pb-3">
+        {settlementTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => navigate(tab.path)}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === tab.id
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Dynamic Dashboard Cards */}
       {renderDashboardCards()}
 

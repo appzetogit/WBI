@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Package, Warehouse, Wrench, Box, AlertTriangle, ArrowUpRight } from 'lucide-react';
 import useResourcesCounts from '../../../hooks/useResourcesCounts';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
   <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
@@ -26,7 +27,8 @@ const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
 
 const ResourcesStatCards = () => {
   const { counts, loading } = useResourcesCounts();
-  const b = '/vendor/dynamic/resources';
+  const { basePath } = useVendorBasePath();
+  const b = `${basePath}/resources`;
   const cards = [
     { icon: Package, label: 'Inventory SKUs', value: counts.inventoryItems, color: 'bg-blue-600', href: `${b}/inventory` },
     { icon: AlertTriangle, label: 'Low / Out Stock', value: counts.lowStock, color: 'bg-amber-500', href: `${b}/inventory` },

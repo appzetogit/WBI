@@ -1,4 +1,5 @@
 const BankingEnquiry = require('../models/BankingEnquiry');
+const { queueBankingMarketplaceFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // @desc    Create a new banking enquiry
 // @route   POST /api/public/banking-enquiries
@@ -46,6 +47,30 @@ exports.createEnquiry = async (req, res) => {
       source,
       attachments: attachments || []
     });
+
+    queueBankingMarketplaceFromEnquiry(enquiry, {
+      enquiryModel: 'BankingEnquiry',
+      titleHint: serviceType || 'Banking service'
+    });
+
+    // #region agent log
+    try {
+      const { agentDebugLog } = require('../utils/agentDebugLog');
+      agentDebugLog({
+        hypothesisId: 'A',
+        location: 'bankingEnquiry.controller.js:createEnquiry',
+        message: 'Banking enquiry saved — marketplace bridge queued',
+        data: {
+          enquiryId: String(enquiry._id),
+          serviceType,
+          city,
+          queuedOpportunity: true,
+          hasQueueCall: true
+        },
+        runId: 'post-fix'
+      });
+    } catch (_) { /* ignore */ }
+    // #endregion
 
     res.status(201).json({
       success: true,

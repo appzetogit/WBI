@@ -43,7 +43,9 @@ const VendorLogin = () => {
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.identifier || !formData.password) {
+    const identifier = (formData.identifier || '').trim();
+    const password = formData.password || '';
+    if (!identifier || !password) {
       toast.error('Please enter both Email/Phone and Password');
       return;
     }
@@ -51,17 +53,25 @@ const VendorLogin = () => {
     setIsLoading(true);
     try {
       const loginPayload = {
-        mobile: formData.identifier,
-        password: formData.password
+        identifier,
+        mobile: identifier,
+        password,
+        preferredRole: 'vendor'
       };
 
       const response = await sharedAuthService.unifiedLogin(loginPayload);
       if (response.success) {
-        const isPendingVendor = response.vendor?.adminApproval === 'pending' || 
-                                (response.user?.role === 'vendor' && 
-                                 (response.user?.approvalStatus === 'pending' || response.user?.status === 'pending'));
+        const approval =
+          response.vendor?.approvalStatus ||
+          response.user?.approvalStatus ||
+          response.vendor?.adminApproval ||
+          response.user?.status;
+        const isPendingVendor =
+          response.role === 'vendor' &&
+          (approval === 'pending' || response.redirectTo === '/vendor/pending-approval');
+
         if (isPendingVendor) {
-          toast.success('Your account is under review.', { icon: <FiCheckCircle className="text-blue-500" /> });
+          toast.success('Logged in — your account is under admin review.');
           navigate('/vendor/pending-approval', { replace: true });
         } else {
           toast.success(

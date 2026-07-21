@@ -117,6 +117,53 @@ const B2BCommandCenter = () => {
         </div>
       </div>
 
+      {/* Wallet / pending activation gate */}
+      {!loadExec && execMetrics?.walletGate?.pendingJobCount > 0 && (
+        <div className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+          execMetrics.walletGate.activationBlocked
+            ? 'bg-amber-50 border-amber-200'
+            : 'bg-emerald-50 border-emerald-200'
+        }`}>
+          <div className="flex items-start gap-3">
+            <FiAlertTriangle className={`mt-0.5 shrink-0 ${execMetrics.walletGate.activationBlocked ? 'text-amber-600' : 'text-emerald-600'}`} />
+            <div>
+              <p className="text-sm font-bold text-gray-900">
+                {execMetrics.walletGate.activationBlocked ? 'Activation blocked — low wallet balance' : 'Pending jobs ready to activate'}
+              </p>
+              <p className="text-xs text-gray-600 mt-1">{execMetrics.walletGate.message}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Balance ₹{Number(execMetrics.walletGate.walletBalance || 0).toLocaleString('en-IN')} · Pending cost ₹{Number(execMetrics.walletGate.pendingBatchCost || 0).toLocaleString('en-IN')}
+                {execMetrics.walletGate.shortfall > 0 ? ` · Shortfall ₹${Number(execMetrics.walletGate.shortfall).toLocaleString('en-IN')}` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {execMetrics.walletGate.activationBlocked ? (
+              <Link to="/b2b/wallet" className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
+                Top up wallet
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await api.post('/b2b/wallet/activate-pending');
+                    if (res.data.success) {
+                      window.location.reload();
+                    }
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-[#10AFA5] text-white text-xs font-bold hover:bg-[#0d9a91]"
+              >
+                Activate jobs
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* 1. Executive KPI Ribbon */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* KPI 1: Calls Completed */}

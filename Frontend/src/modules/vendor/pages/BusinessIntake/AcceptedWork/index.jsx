@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { Trophy, CheckCircle, TrendingUp, Handshake, MapPin } from 'lucide-react';
 import { fetchAcceptedWork, formatINR } from '../../../services/businessIntakeService';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import EmptyState from '../components/EmptyState';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
-const AwardCard = ({ item }) => {
+const AwardCard = ({ item, projectsBase }) => {
+  const projectId = item.projectId;
+  const projectHref = projectId
+    ? `${projectsBase}/${projectId}`
+    : `${projectsBase}`;
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 border-l-4 border-l-green-500 shadow-sm hover:shadow-md transition-all overflow-hidden flex flex-col h-full">
       <div className="p-5 flex-1">
@@ -39,16 +46,19 @@ const AwardCard = ({ item }) => {
             <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-0.5">Awarded Value</p>
             <p className="text-lg font-black text-green-700">₹{(item.myBidAmount || 0).toLocaleString('en-IN')}</p>
           </div>
-          <button className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors">
+          <Link
+            to={projectHref}
+            className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors"
+          >
             Go to Project →
-          </button>
+          </Link>
         </div>
       </div>
     </div>
   );
 };
 
-const StatCard = ({ label, value, icon: Icon, color }) => (
+const LocalStatCard = ({ label, value, icon: Icon, color }) => (
   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-center gap-4">
     <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${color}`}>
       <Icon className="h-6 w-6 text-white" />
@@ -61,6 +71,8 @@ const StatCard = ({ label, value, icon: Icon, color }) => (
 );
 
 const AcceptedWork = () => {
+  const { basePath } = useVendorBasePath();
+  const projectsBase = `${basePath}/projects`;
   const [data, setData] = useState([]);
   const [stats, setStats] = useState({ wonThisMonth: 0, totalValue: 0 });
   const [loading, setLoading] = useState(true);
@@ -88,8 +100,8 @@ const AcceptedWork = () => {
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <StatCard label="Won This Month" value={stats.wonThisMonth} icon={CheckCircle} color="bg-green-500" />
-        <StatCard label="Total Awarded Value" value={formatINR(stats.totalValue)} icon={TrendingUp} color="bg-blue-600" />
+        <LocalStatCard label="Won This Month" value={stats.wonThisMonth} icon={CheckCircle} color="bg-green-500" />
+        <LocalStatCard label="Total Awarded Value" value={formatINR(stats.totalValue)} icon={TrendingUp} color="bg-blue-600" />
       </div>
 
       {loading && data.length === 0 ? (
@@ -103,9 +115,11 @@ const AcceptedWork = () => {
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {data.map(item => <AwardCard key={item._id} item={item} />)}
+            {data.map(item => (
+              <AwardCard key={item._id} item={item} projectsBase={projectsBase} />
+            ))}
           </div>
-          
+
           {hasMore && (
             <div className="text-center mt-8">
               <button

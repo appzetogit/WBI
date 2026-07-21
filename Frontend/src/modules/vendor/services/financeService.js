@@ -3,6 +3,7 @@ import api from '../../../services/api';
 const BASE = '/vendor/finance';
 
 export const fetchFinanceCounts = () => api.get(`${BASE}/counts`);
+export const fetchEarningsByService = () => api.get(`${BASE}/earnings-by-service`);
 export const fetchWallet = (params = {}) => api.get(`${BASE}/wallet`, { params });
 export const requestWithdrawal = (amount) => api.post(`${BASE}/wallet/withdraw`, { amount });
 

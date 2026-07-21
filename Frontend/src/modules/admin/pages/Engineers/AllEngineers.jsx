@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast';
 import CardShell from '../UserCategories/components/CardShell';
 import Modal from '../UserCategories/components/Modal';
 import adminEngineerService from '../../../../services/adminEngineerService';
+import { formatEngineerServiceLabel } from '../../utils/adminHelpers';
 
 const AllEngineers = () => {
   const [engineers, setEngineers] = useState([]);
@@ -34,7 +35,7 @@ const AllEngineers = () => {
           name: engineer.name,
           email: engineer.email,
           phone: engineer.phone,
-          serviceCategory: engineer.serviceCategory || engineer.service || 'N/A',
+          serviceCategory: formatEngineerServiceLabel(engineer),
           approvalStatus: engineer.approvalStatus,
           aadhar: engineer.aadhar?.number,
           pan: engineer.pan?.number,

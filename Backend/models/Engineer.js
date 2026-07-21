@@ -146,11 +146,29 @@ const engineerSchema = new mongoose.Schema({
     ref: 'Vendor',
     default: null
   },
+  /** Audit: company code used at signup (WBI-YYYY-XXXXXX) */
+  linkedViaCode: {
+    type: String,
+    default: null,
+    trim: true,
+    uppercase: true
+  },
+  /** Vendor must approve vendor_engineer before they can take ops jobs */
+  vendorApprovalStatus: {
+    type: String,
+    enum: ['not_required', 'pending_approval', 'approved', 'rejected'],
+    default: 'not_required'
+  },
+  vendorRejectedReason: {
+    type: String,
+    default: null
+  },
   approvalStatus: {
     type: String,
     enum: ['pending', 'approved', 'rejected', 'suspended'],
     default: 'pending'
   },
+
   serviceCategories: [{
     type: String
   }],
@@ -279,6 +297,12 @@ const engineerSchema = new mongoose.Schema({
     language: {
       type: String,
       default: 'en'
+    },
+    notificationPreferences: {
+      jobs: { type: Boolean, default: true },
+      workUpdates: { type: Boolean, default: true },
+      payments: { type: Boolean, default: true },
+      account: { type: Boolean, default: true }
     }
   },
   // Real-time Location

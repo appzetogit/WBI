@@ -1,22 +1,25 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import useResourcesCounts from '../../../hooks/useResourcesCounts';
-
-const BASE = '/vendor/dynamic/resources';
-const TABS = [
-  { key: 'capacity', label: 'Capacity Center', path: `${BASE}/capacity`, countKey: null },
-  { key: 'inventory', label: 'Inventory', path: `${BASE}/inventory`, countKey: 'inventoryItems' },
-  { key: 'tools', label: 'Tools & Equipment', path: `${BASE}/tools`, countKey: 'toolsAvailable' },
-  { key: 'warehouses', label: 'Warehouses', path: `${BASE}/warehouses`, countKey: 'warehouses' },
-  { key: 'assets', label: 'Installed Assets', path: `${BASE}/assets`, countKey: 'installedAssets' }
-];
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const ResourcesTabs = () => {
   const { counts } = useResourcesCounts();
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/resources`;
+
+  const tabs = useMemo(() => [
+    { key: 'capacity', label: 'Capacity Center', path: `${base}/capacity`, countKey: null },
+    { key: 'inventory', label: 'Inventory', path: `${base}/inventory`, countKey: 'inventoryItems' },
+    { key: 'tools', label: 'Tools & Equipment', path: `${base}/tools`, countKey: 'toolsAvailable' },
+    { key: 'warehouses', label: 'Warehouses', path: `${base}/warehouses`, countKey: 'warehouses' },
+    { key: 'assets', label: 'Installed Assets', path: `${base}/assets`, countKey: 'installedAssets' }
+  ], [base]);
+
   return (
     <div className="border-b border-gray-200 overflow-x-auto">
       <nav className="flex gap-1 min-w-max px-1">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.key}
             to={tab.path}

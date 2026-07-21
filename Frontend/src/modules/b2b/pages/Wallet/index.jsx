@@ -42,6 +42,15 @@ const Wallet = () => {
     }
   });
 
+  // Activation gate for pending_wallet jobs
+  const { data: walletGate, refetch: refetchGate } = useQuery({
+    queryKey: ['b2bWalletGate'],
+    queryFn: async () => {
+      const res = await api.get('/b2b/wallet/activation-gate');
+      return res.data.data;
+    }
+  });
+
   // Handle Quick Amount Click
   const handleQuickAmount = (amountStr) => {
     setTopupAmount(amountStr);
@@ -149,6 +158,37 @@ const Wallet = () => {
         <h2 className="text-xl font-black text-gray-800 tracking-tight">Wallet & Payments</h2>
         <p className="text-xs text-gray-400 font-semibold mt-1">Top up your wallet and view your transactions</p>
       </div>
+
+      {walletGate?.pendingJobCount > 0 && (
+        <div className={`rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          walletGate.activationBlocked ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'
+        }`}>
+          <div>
+            <p className="text-sm font-bold text-gray-900">
+              {walletGate.activationBlocked ? 'Cannot activate jobs — top up required' : 'Pending jobs can be activated'}
+            </p>
+            <p className="text-xs text-gray-600 mt-1">{walletGate.message}</p>
+          </div>
+          {!walletGate.activationBlocked && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const res = await api.post('/b2b/wallet/activate-pending');
+                  toast.success(res.data.message || 'Jobs activated');
+                  refetchGate();
+                  refetchSummary();
+                } catch (err) {
+                  toast.error(err.response?.data?.message || 'Activation failed');
+                }
+              }}
+              className="px-4 py-2 rounded-xl bg-[#10AFA5] text-white text-xs font-bold"
+            >
+              Activate pending jobs
+            </button>
+          )}
+        </div>
+      )}
 
       {/* KPI Cards section */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

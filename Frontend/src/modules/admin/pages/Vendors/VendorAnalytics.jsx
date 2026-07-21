@@ -62,6 +62,19 @@ const VendorAnalytics = () => {
   if (!data) return null;
 
   const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+  const statusDistribution = data.statusDistribution || [];
+  const topVendors = (data.topVendors || []).map((v) => ({
+    ...v,
+    bookingCount: v.bookingCount ?? v.bookingsCount ?? 0
+  }));
+  const monthlyTrend = data.monthlyTrend || [];
+  const activeRate =
+    data.activeRate ??
+    (data.totalVendors
+      ? Math.round(
+          ((statusDistribution.find((s) => s._id === 'approved')?.count || 0) / data.totalVendors) * 100
+        )
+      : 0);
 
   return (
     <div className="space-y-4">
@@ -96,7 +109,7 @@ const VendorAnalytics = () => {
             </div>
             <div>
               <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Growth</p>
-              <h3 className="text-lg font-bold text-gray-900">{data.growth || '12.5%'}</h3>
+              <h3 className="text-lg font-bold text-gray-900">{data.growth ?? '—'}</h3>
             </div>
           </div>
         </div>
@@ -107,7 +120,7 @@ const VendorAnalytics = () => {
             </div>
             <div>
               <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Active Rate</p>
-              <h3 className="text-lg font-bold text-gray-900">{Math.round((data.statusDistribution.find(s => s._id === 'approved')?.count / data.totalVendors) * 100)}%</h3>
+              <h3 className="text-lg font-bold text-gray-900">{activeRate}%</h3>
             </div>
           </div>
         </div>
@@ -120,7 +133,7 @@ const VendorAnalytics = () => {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={data.statusDistribution}
+                  data={statusDistribution}
                   dataKey="count"
                   nameKey="_id"
                   cx="50%"
@@ -128,7 +141,7 @@ const VendorAnalytics = () => {
                   innerRadius={50}
                   outerRadius={75}
                 >
-                  {data.statusDistribution.map((entry, index) => (
+                  {statusDistribution.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
@@ -143,7 +156,7 @@ const VendorAnalytics = () => {
         <CardShell icon={FiTrendingUp} title="Top Performers" className="p-3">
           <div className="h-[220px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.topVendors} layout="vertical">
+              <BarChart data={topVendors} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
                 <XAxis type="number" hide />
                 <YAxis dataKey="businessName" type="category" width={70} tick={{ fontSize: 9, fill: '#64748B' }} axisLine={false} tickLine={false} />
@@ -159,7 +172,7 @@ const VendorAnalytics = () => {
       <CardShell icon={FiTrendingUp} title="Registration Trend" className="p-3">
         <div className="h-[250px]">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data.monthlyTrend}>
+            <AreaChart data={monthlyTrend}>
               <defs>
                 <linearGradient id="colorTrend" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />

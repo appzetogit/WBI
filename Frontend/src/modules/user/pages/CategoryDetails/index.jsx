@@ -20,19 +20,64 @@ const CategoryDetails = () => {
   const fetchCategoryDetails = async () => {
     try {
       setLoading(true);
+      const slugLower = (slug || '').toLowerCase();
 
-      // Force fallback data for core categories to ensure custom UI forms are correctly mapped
-      const coreCategories = ['security-solutions', 'security', 'digital-solutions', 'digital', 'banking-solutions', 'banking', 'energy-solutions', 'energy'];
-      if (coreCategories.includes(slug.toLowerCase())) {
+      // Force fallback only for Digital Solutions (custom enquiry pages)
+      const coreCategories = ['digital-solutions', 'digital'];
+
+      if (coreCategories.includes(slugLower)) {
         handleFallbackData();
         setLoading(false);
         return;
       }
 
+      // If category has categoryCode from API, load form-schemas
+      try {
+        const catProbe = await publicCatalogService.getCategoryBySlug(slug);
+        const code = catProbe?.data?.categoryCode;
+        if (code && /^C\d{2}$/i.test(code)) {
+          const { default: api } = await import('../../../../services/api');
+          const res = await api.get(`/public/form-schemas/category/${String(code).toUpperCase()}`);
+          if (res.data?.success && res.data.data?.length) {
+            const first = res.data.data[0];
+            setCategory({
+              title: first.categoryName || catProbe.data.name,
+              description: catProbe.data.description || `${first.categoryName} services`,
+              iconName: catProbe.data.icon || 'FiGrid',
+              tags: catProbe.data.trustPoints || ['Verified Pros', 'Same-day Visit', 'PAN India']
+            });
+            setServices(
+              res.data.data.map((row) => ({
+                ...row,
+                _id: row.subCatCode || row._id,
+                name: row.subCategoryName || row.name || row.title,
+                title: row.subCategoryName || row.title || row.name,
+                iconName: row.iconName || row.icon || 'FiCheckCircle',
+                basePrice: row.basePrice || row.startingPrice || 999,
+                startingPrice: row.basePrice || row.startingPrice || 999,
+                rating: row.rating || 4.8,
+                reviews: row.reviewCount || row.reviews || 48,
+                description: row.description || `${row.subCategoryName || row.name} — book a verified engineer`
+              }))
+            );
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        /* continue to normal fetch */
+      }
+
       // Fetch category data
       const catResponse = await publicCatalogService.getCategoryBySlug(slug);
       if (catResponse && catResponse.data) {
-        setCategory(catResponse.data);
+        const cat = catResponse.data;
+        setCategory({
+          title: cat.name || cat.title,
+          description: cat.description || cat.shortDescription || '',
+          iconName: cat.icon || cat.iconName || 'FiMonitor',
+          tags: cat.trustPoints || cat.tags || []
+        });
       } else {
         handleFallbackData();
         return;
@@ -41,7 +86,15 @@ const CategoryDetails = () => {
       // Fetch services for this category
       const srvResponse = await publicCatalogService.getCategorySubServices(slug);
       if (srvResponse && srvResponse.success) {
-        setServices(srvResponse.data || []);
+        const rows = (srvResponse.data || []).map((s) => ({
+          ...s,
+          title: s.title || s.name || s.subCategoryName,
+          name: s.name || s.title || s.subCategoryName,
+          iconName: s.iconName || s.icon,
+          basePrice: s.basePrice || s.startingPrice
+        }));
+        setServices(rows);
+        if (!rows.length) handleFallbackData();
       }
     } catch (error) {
       console.error("Error fetching category details:", error);
@@ -74,12 +127,12 @@ const CategoryDetails = () => {
         tags: ["Certified Experts", "24/7 Support", "PAN India Service"]
       });
       setServices([
-        { _id: '1', title: 'ATM Service', description: 'ATM installation & maintenance support', rating: 4.8, reviews: 128, basePrice: 4999, iconName: 'FiServer' },
-        { _id: '2', title: 'ATM Cassette Service', description: 'Cash cassette repair & replacement service', rating: 4.7, reviews: 96, basePrice: 2999, iconName: 'FiArchive' },
-        { _id: '3', title: 'Passbook Printer Service', description: 'Passbook kiosk setup & repair service', rating: 4.8, reviews: 74, basePrice: 3499, iconName: 'FiPrinter' },
-        { _id: '4', title: 'Cash Deposit Machine Service', description: 'CDM installation & support service', rating: 4.9, reviews: 61, basePrice: 5999, iconName: 'FiDollarSign' },
-        { _id: '5', title: 'POS Service', description: 'POS machine deployment & support', rating: 4.7, reviews: 53, basePrice: 1999, iconName: 'FiCreditCard' },
-        { _id: '6', title: 'VSAT Service', description: 'Banking network connectivity & VSAT support', rating: 4.8, reviews: 46, basePrice: 6999, iconName: 'FiWifi' },
+        { _id: 'C05-01', title: 'ATM Maintenance', description: 'ATM installation, FLM/SLM & AMC support', rating: 4.8, reviews: 128, basePrice: 4999, iconName: 'FiServer', subCatCode: 'C05-01' },
+        { _id: 'C05-02', title: 'POS Machine Installation & Repair', description: 'POS terminal deployment & repair', rating: 4.7, reviews: 53, basePrice: 1999, iconName: 'FiCreditCard', subCatCode: 'C05-02' },
+        { _id: 'C05-03', title: 'Biometric Device Setup', description: 'Bank biometric / attendance device setup', rating: 4.8, reviews: 64, basePrice: 2499, iconName: 'FiUserCheck', subCatCode: 'C05-03' },
+        { _id: 'C05-04', title: 'Cash Recycler / Kiosk Support', description: 'CDM, cash recycler & kiosk service', rating: 4.9, reviews: 61, basePrice: 5999, iconName: 'FiDollarSign', subCatCode: 'C05-04' },
+        { _id: 'C05-05', title: 'Passbook Printer Service', description: 'Passbook printer setup & repair', rating: 4.8, reviews: 74, basePrice: 3499, iconName: 'FiPrinter', subCatCode: 'C05-05' },
+        { _id: 'C05-06', title: 'Currency Counting Machine Repair', description: 'Note counting machine repair & calibration', rating: 4.7, reviews: 42, basePrice: 2999, iconName: 'FiCpu', subCatCode: 'C05-06' },
       ]);
     } else if (slug === 'security-solutions' || slug === 'security') {
       setCategory({
@@ -110,6 +163,23 @@ const CategoryDetails = () => {
         { _id: '4', title: 'EV Service', description: 'EV charging installation & maintenance', rating: 4.7, reviews: 64, basePrice: 4999, iconName: 'FiZap' },
         { _id: '5', title: 'AC Power System Service', description: 'AC power system installation & maintenance', rating: 4.8, reviews: 58, basePrice: 5999, iconName: 'FiActivity' },
         { _id: '6', title: 'DC Power System Service', description: 'DC power system installation & maintenance', rating: 4.8, reviews: 45, basePrice: 5499, iconName: 'FiCpu' },
+      ]);
+    } else if (slug === 'networking-internet' || slug === 'networking') {
+      setCategory({
+        title: 'Networking & Internet',
+        description: 'Network setup, WiFi, cabling & troubleshooting services',
+        iconName: 'FiWifi',
+        tags: ['Certified Engineers', 'Same-day Visit', 'PAN India']
+      });
+      setServices([
+        { _id: 'C03-01', subCatCode: 'C03-01', title: 'Router & Modem Setup', description: 'ISP router/modem installation and configuration', rating: 4.8, reviews: 64, basePrice: 799, iconName: 'FiWifi' },
+        { _id: 'C03-02', subCatCode: 'C03-02', title: 'WiFi Range Extension', description: 'Extend WiFi coverage across rooms and floors', rating: 4.7, reviews: 52, basePrice: 999, iconName: 'FiWifi' },
+        { _id: 'C03-03', subCatCode: 'C03-03', title: 'Structured Cabling (LAN)', description: 'CAT6/fiber structured cabling for offices', rating: 4.8, reviews: 48, basePrice: 2499, iconName: 'FiLink' },
+        { _id: 'C03-04', subCatCode: 'C03-04', title: 'Switch & Access Point Installation', description: 'Managed switches and WiFi AP deployment', rating: 4.8, reviews: 41, basePrice: 1999, iconName: 'FiServer' },
+        { _id: 'C03-05', subCatCode: 'C03-05', title: 'Network Troubleshooting', description: 'Diagnose and fix network outages / slow speeds', rating: 4.9, reviews: 88, basePrice: 699, iconName: 'FiTool' },
+        { _id: 'C03-06', subCatCode: 'C03-06', title: 'VPN Setup', description: 'Site-to-site or remote VPN configuration', rating: 4.7, reviews: 36, basePrice: 1499, iconName: 'FiLock' },
+        { _id: 'C03-07', subCatCode: 'C03-07', title: 'CCTV-Network Integration', description: 'Integrate CCTV cameras with existing LAN/WiFi', rating: 4.8, reviews: 55, basePrice: 1799, iconName: 'FiVideo' },
+        { _id: 'C03-08', subCatCode: 'C03-08', title: 'Office Network Setup', description: 'End-to-end office LAN + WiFi setup', rating: 4.9, reviews: 72, basePrice: 4999, iconName: 'FiMonitor' }
       ]);
     } else if (slug === 'healthcare-solutions' || slug === 'healthcare') {
       setCategory({
@@ -196,68 +266,37 @@ const CategoryDetails = () => {
     const serviceName = (svc.name || svc.title || '').trim().toLowerCase();
     const isDigital = slug.toLowerCase().includes('digital');
 
+    // SMS dynamic forms (any Cxx-yy) — always prefer DynamicServiceRequest
+    if (svc.subCatCode || /^C\d{2}-\d{2}$/i.test(String(svc._id || ''))) {
+      const code = svc.subCatCode || svc._id;
+      navigate(`/user/service-request/${code}`);
+      return;
+    }
+
+    // Legacy digital enquiry pages (no FormSchema codes yet)
     if (isDigital && serviceName === 'web development') {
       navigate('/user/web-development-enquiry');
-    } else if (isDigital && serviceName === 'app development') {
-      navigate('/user/app-development-enquiry');
-    } else if (isDigital && serviceName === 'crm') {
-      navigate('/user/crm-enquiry');
-    } else if (isDigital && serviceName === 'digital marketing') {
-      navigate('/user/marketing-enquiry');
-    } else if (isDigital && (serviceName.includes('design') || serviceName.includes('ui/ux'))) {
-      navigate('/user/design-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.toLowerCase().includes('barcode')) {
-      navigate('/user/barcode-reader-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.toLowerCase().includes('vsat')) {
-      navigate('/user/vsat-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.toLowerCase().includes('pos')) {
-      navigate('/user/pos-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.includes('cdm')) {
-      navigate('/user/cdm-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.includes('passbook')) {
-      navigate('/user/passbookprinter-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.includes('cassette')) {
-      navigate('/user/atmcassette-enquiry');
-    } else if (slug.toLowerCase().includes('banking') && serviceName.includes('atm')) {
-      navigate('/user/atmservice-enquiry');
-    } else if (slug.toLowerCase().includes('banking')) {
-      navigate('/user/banking-enquiry', { state: { serviceType: svc.name || svc.title } });
-    } else if (slug.toLowerCase().includes('security') && (serviceName.includes('installation') || serviceName.includes('dismantle')) && !serviceName.includes('panel')) {
-      navigate('/user/installation-enquiry');
-    } else if (slug.toLowerCase().includes('security') && serviceName.includes('maintenance')) {
-      navigate('/user/maintenance-enquiry');
-    } else if (slug.toLowerCase().includes('security') && (serviceName.includes('breakdown') || serviceName.includes('repair'))) {
-      navigate('/user/breakdown-enquiry');
-    } else if (slug.toLowerCase().includes('security') && serviceName.includes('testing')) {
-      navigate('/user/sitetesting-enquiry');
-    } else if (slug.toLowerCase().includes('security') && serviceName.includes('monitoring')) {
-      navigate('/user/powermonitoring-enquiry');
-    } else if (slug.toLowerCase().includes('security') && serviceName.includes('panel')) {
-      navigate('/user/multipleservices-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('diesel generator')) {
-      navigate('/user/dg-service-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('ups battery')) {
-      navigate('/user/ups-battery-service-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('battery')) {
-      navigate('/user/battery-service-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('ev')) {
-      navigate('/user/ev-service-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('ac power')) {
-      navigate('/user/ac-power-service-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('dc power')) {
-      navigate('/user/dc-power-service-enquiry');
-    } else if (slug.toLowerCase().includes('energy') && serviceName.includes('testing')) {
-      navigate('/user/power-testing-service-enquiry');
-    } else if (slug.toLowerCase().includes('healthcare')) {
-      if (serviceName.includes('medical')) navigate('/user/medical-equipment-enquiry');
-      else if (serviceName.includes('quality')) navigate('/user/qc-test-enquiry');
-      else if (serviceName.includes('safety')) navigate('/user/safety-test-enquiry');
-      else if (serviceName.includes('preventive')) navigate('/user/hc-pm-enquiry');
-      else if (serviceName.includes('annual') || serviceName.includes('amc')) navigate('/user/hc-amc-enquiry');
-    } else {
-      // General fallback if no specific enquiry form exists
-      navigate(`/user/service/${svc.slug || svc._id || svc.id}`);
+      return;
     }
+    if (isDigital && serviceName === 'app development') {
+      navigate('/user/app-development-enquiry');
+      return;
+    }
+    if (isDigital && serviceName === 'crm') {
+      navigate('/user/crm-enquiry');
+      return;
+    }
+    if (isDigital && serviceName === 'digital marketing') {
+      navigate('/user/marketing-enquiry');
+      return;
+    }
+    if (isDigital && (serviceName.includes('design') || serviceName.includes('ui/ux'))) {
+      navigate('/user/design-enquiry');
+      return;
+    }
+
+    // Generic catalog fallback
+    navigate(`/user/service/${svc.slug || svc._id || svc.id}`);
   };
 
   const renderIcon = (iconName, className) => {
@@ -439,7 +478,7 @@ const CategoryDetails = () => {
                     </div>
                     
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-[15px] font-bold text-[#0F172A] mb-1 leading-tight truncate">{svc.name || svc.title}</h4>
+                      <h4 className="text-[15px] font-bold text-[#0F172A] mb-1 leading-tight truncate">{svc.name || svc.title || svc.subCategoryName}</h4>
                       <p className="text-[11px] text-[#64748B] leading-[1.4] mb-2 line-clamp-2 pr-2">
                         {svc.description}
                       </p>

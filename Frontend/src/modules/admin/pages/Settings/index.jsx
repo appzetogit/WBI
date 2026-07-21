@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiSettings, FiGrid, FiDollarSign, FiSave, FiUser, FiMail, FiTrash2, FiPlus, FiUsers, FiShield, FiFileText, FiMapPin, FiPhone, FiHeadphones, FiMessageCircle, FiEdit, FiLock, FiUnlock, FiX } from 'react-icons/fi';
 import { getSettings, updateSettings, updateAdminProfile, getAdminProfile, getAllAdmins, createAdmin, deleteAdmin, updateAdminDetails, toggleAdminStatus } from '../../services/settingsService';
@@ -7,6 +8,7 @@ import CityManagement from '../Cities';
 import { toast } from 'react-hot-toast';
 
 const AdminSettings = () => {
+  const navigate = useNavigate();
   const [settings, setSettings] = useState({
     workerAutoAssignment: true,
   });
@@ -453,6 +455,17 @@ const AdminSettings = () => {
           </div>
           <h3 className="text-lg font-bold text-gray-800 mb-2">System & Support</h3>
           <p className="text-sm text-gray-500">Manage auto-assignment and help contact info</p>
+        </div>
+      )}
+
+      {isSuperAdmin && (
+        <div onClick={() => navigate('/admin/vendors/assignment-engine')}
+          className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow cursor-pointer group">
+          <div className="w-12 h-12 bg-teal-50 rounded-lg flex items-center justify-center mb-4 group-hover:bg-teal-100 transition-colors">
+            <FiGrid className="w-6 h-6 text-teal-600" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-800 mb-2">Project Assignment Engine</h3>
+          <p className="text-sm text-gray-500">Vendor queue timeouts, freelancer pool vendor, scoring weights</p>
         </div>
       )}
 

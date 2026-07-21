@@ -5,6 +5,9 @@ const {
   getOpportunities,
   getOpportunityById,
   submitBid,
+  acceptClientRequest,
+  declineClientRequest,
+  awardMyBid,
   editBid,
   getInvitations,
   acceptInvitation,
@@ -16,17 +19,24 @@ const {
   sendProposal,
   downloadProposalPdf,
   getAcceptedWork,
-  getCounts
+  getCounts,
+  bookmarkOpportunity,
+  removeBookmark,
+  getActivityFeed
 } = require('../../controllers/vendorControllers/businessIntakeController');
 
 // All routes require vendor authentication
-// Note: The `authenticate` middleware sets req.user as the logged-in vendor
 
 // ── Opportunities ───────────────────────────────────────
 router.get('/opportunities', authenticate, getOpportunities);
 router.get('/opportunities/:id', authenticate, getOpportunityById);
 router.post('/opportunities/:id/bid', authenticate, submitBid);
+router.post('/opportunities/:id/accept', authenticate, acceptClientRequest);
+router.post('/opportunities/:id/decline', authenticate, declineClientRequest);
+router.post('/opportunities/:id/award', authenticate, awardMyBid);
 router.put('/opportunities/:id/bid/:bidId', authenticate, editBid);
+router.post('/opportunities/:id/bookmark', authenticate, bookmarkOpportunity);
+router.delete('/opportunities/:id/bookmark', authenticate, removeBookmark);
 
 // ── Invitations ─────────────────────────────────────────
 router.get('/invitations', authenticate, getInvitations);
@@ -44,7 +54,8 @@ router.get('/proposals/:id/download-pdf', authenticate, downloadProposalPdf);
 // ── Accepted Work ────────────────────────────────────────
 router.get('/accepted-work', authenticate, getAcceptedWork);
 
-// ── Sidebar Badge Counts ─────────────────────────────────
+// ── Sidebar Badge Counts + Activity ──────────────────────
 router.get('/counts', authenticate, getCounts);
+router.get('/activity', authenticate, getActivityFeed);
 
 module.exports = router;

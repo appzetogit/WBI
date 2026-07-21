@@ -5,6 +5,7 @@ import CountdownTimer from '../components/CountdownTimer';
 import { SkeletonGrid } from '../components/SkeletonCard';
 import EmptyState from '../components/EmptyState';
 import OpportunityDrawer from '../components/OpportunityDrawer';
+import { useBusinessIntake } from '../context/BusinessIntakeContext';
 
 const DeclineModal = ({ invitationId, onDecline, onClose }) => {
   const [reason, setReason] = useState('');
@@ -158,6 +159,7 @@ const InvitationCard = ({ invitation, onAccept, onDecline, onView }) => {
 };
 
 const DirectInvitations = () => {
+  const { refreshKey } = useBusinessIntake();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedOpp, setSelectedOpp] = useState(null);
@@ -171,7 +173,7 @@ const DirectInvitations = () => {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load, refreshKey]);
 
   const handleAccept = (id) => setData(prev => prev.filter(i => i._id !== id));
   const handleDecline = (id) => setData(prev => prev.filter(i => i._id !== id));

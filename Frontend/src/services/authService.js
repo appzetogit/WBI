@@ -288,9 +288,14 @@ export const vendorAuthService = {
     } catch (error) {
       console.error('Logout error:', error);
     }
-    localStorage.removeItem('vendorAccessToken');
-    localStorage.removeItem('vendorRefreshToken');
-    localStorage.removeItem('vendorData');
+    ['vendorAccessToken', 'vendorRefreshToken', 'vendorData', 'vendorToken'].forEach((key) => {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    });
+    if (localStorage.getItem('role') === 'vendor') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+    }
   },
 
   // Get profile
@@ -451,12 +456,22 @@ export const engineerAuthService = {
   },
 
   createJoiningFeeOrder: async (data) => {
-    const response = await api.post('/engineer/joining-fee/create-order', data);
+    const response = await api.post('/engineer/joining-fee/create-order', data, { timeout: 45000 });
+    return response.data;
+  },
+
+  validateVendorCode: async (code, sessionId) => {
+    const response = await api.post('/engineer/validate-vendor-code', { code, sessionId });
+    return response.data;
+  },
+
+  resolveInviteToken: async (token) => {
+    const response = await api.get(`/engineer/invite/${token}`);
     return response.data;
   },
 
   verifyJoiningFeePayment: async (data) => {
-    const response = await api.post('/engineer/joining-fee/verify-payment', data);
+    const response = await api.post('/engineer/joining-fee/verify-payment', data, { timeout: 45000 });
     return response.data;
   },
 

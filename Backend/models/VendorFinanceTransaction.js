@@ -18,6 +18,12 @@ const vendorFinanceTransactionSchema = new mongoose.Schema({
   referenceCode: { type: String, default: '' },
   balanceAfter: { type: Number, default: 0 },
   status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'], default: 'completed', index: true },
+  /** SMS category — enables per-service earnings for registered vendors */
+  serviceCategoryCode: { type: String, default: '', uppercase: true, index: true },
+  serviceCategoryName: { type: String, default: '' },
+  subCatCode: { type: String, default: '', uppercase: true, index: true },
+  subCategoryName: { type: String, default: '' },
+  source: { type: String, default: 'manual', index: true },
   occurredAt: { type: Date, default: Date.now, index: true },
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });
@@ -36,5 +42,6 @@ vendorFinanceTransactionSchema.pre('save', async function (next) {
 });
 
 vendorFinanceTransactionSchema.index({ vendorId: 1, occurredAt: -1 });
+vendorFinanceTransactionSchema.index({ vendorId: 1, serviceCategoryCode: 1, occurredAt: -1 });
 
 module.exports = mongoose.model('VendorFinanceTransaction', vendorFinanceTransactionSchema);

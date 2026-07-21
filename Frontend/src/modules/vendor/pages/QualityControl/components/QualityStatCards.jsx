@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { FileCheck, ClipboardCheck, UserCheck, Building2, AlertTriangle, GitPullRequest, ShieldAlert, ArrowUpRight } from 'lucide-react';
 import useQualityCounts from '../../../hooks/useQualityCounts';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
   <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
@@ -26,7 +27,8 @@ const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
 
 const QualityStatCards = () => {
   const { counts, loading } = useQualityCounts();
-  const b = '/vendor/dynamic/quality';
+  const { basePath } = useVendorBasePath();
+  const b = `${basePath}/quality`;
   const cards = [
     { icon: FileCheck, label: 'Proof Pending', value: counts.proofPending, color: 'bg-amber-500', href: `${b}/proof` },
     { icon: ClipboardCheck, label: 'QA Pending', value: counts.qaPending, color: 'bg-blue-600', href: `${b}/qa` },

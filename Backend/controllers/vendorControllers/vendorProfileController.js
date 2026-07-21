@@ -8,7 +8,7 @@ const cloudinaryService = require('../../services/cloudinaryService');
  */
 const getProfile = async (req, res) => {
   try {
-    const vendorId = req.user.id;
+    const vendorId = req.user._id || req.user.id;
 
     const vendor = await Vendor.findById(vendorId).select('-password -__v');
     if (!vendor) {
@@ -51,6 +51,9 @@ const getProfile = async (req, res) => {
         isEmailVerified: vendor.isEmailVerified || false,
         profilePhoto: vendor.profilePhoto || null,
         aadharDocument: vendor.aadhar?.document || null,
+        settings: vendor.settings || { serviceRange: 10 },
+        operatingCities: vendor.operatingCities || vendor.operationalCities || [],
+        operationalCities: vendor.operationalCities || vendor.operatingCities || [],
         createdAt: vendor.createdAt,
         updatedAt: vendor.updatedAt
       }
@@ -78,8 +81,8 @@ const updateProfile = async (req, res) => {
       });
     }
 
-    const vendorId = req.user.id;
-    const { name, businessName, address, profilePhoto, serviceCategory, skills, aadharNumber, aadharDocument, panNumber, panDocument, serviceRange } = req.body;
+    const vendorId = req.user._id || req.user.id;
+    const { name, businessName, address, profilePhoto, serviceCategory, skills, aadharNumber, aadharDocument, panNumber, panDocument, serviceRange, operatingCities } = req.body;
 
     console.log('Update Vendor Profile Body:', JSON.stringify(req.body, null, 2));
 
@@ -156,6 +159,17 @@ const updateProfile = async (req, res) => {
       vendor.settings.serviceRange = Number(serviceRange) || 10;
     }
 
+    if (operatingCities !== undefined) {
+      const cities = Array.isArray(operatingCities)
+        ? operatingCities.map((c) => String(c).trim()).filter(Boolean)
+        : String(operatingCities)
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean);
+      vendor.operatingCities = cities;
+      vendor.operationalCities = cities;
+    }
+
     // Handle skills
     if (skills !== undefined) {
       vendor.skills = Array.isArray(skills) ? skills : [];
@@ -217,7 +231,9 @@ const updateProfile = async (req, res) => {
         profilePhoto: vendor.profilePhoto,
         service: vendor.service,
         skills: vendor.skills,
-        settings: vendor.settings
+        settings: vendor.settings,
+        operatingCities: vendor.operatingCities || [],
+        operationalCities: vendor.operationalCities || []
       }
     });
   } catch (error) {

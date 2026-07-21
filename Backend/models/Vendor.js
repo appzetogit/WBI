@@ -177,6 +177,10 @@ const vendorSchema = new mongoose.Schema({
     type: Number,
     default: 10
   },
+  maxCapacityPerMonth: {
+    type: Number,
+    default: 200
+  },
   vendorTier: {
     type: String,
     enum: ['bronze', 'silver', 'gold', 'platinum'],
@@ -191,7 +195,8 @@ const vendorSchema = new mongoose.Schema({
     categoryName: String,
     subServices: [String],
     approvedAt: Date,
-    status: { type: String, enum: ['active', 'suspended'], default: 'active' }
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin', default: null },
+    status: { type: String, enum: ['pending', 'active', 'suspended'], default: 'pending' }
   }],
   service: {
     type: [String], // Changed to array for multiple categories
@@ -286,12 +291,76 @@ const vendorSchema = new mongoose.Schema({
     enum: ['pending', 'dispatched', 'delivered'],
     default: 'pending'
   },
+  kitWaybill: {
+    type: String,
+    default: null,
+    trim: true
+  },
+  operationalAuditStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
+  },
+  operationalAuditAt: {
+    type: Date,
+    default: null
+  },
+  workspaceProvisioning: {
+    status: {
+      type: String,
+      enum: ['idle', 'in_progress', 'completed', 'failed'],
+      default: 'idle'
+    },
+    startedAt: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
+    error: { type: String, default: null }
+  },
   approvalDate: {
     type: Date
   },
   rejectedReason: {
     type: String
   },
+  /** Engineer signup linking — WBI-{YEAR}-{6 chars} e.g. WBI-2026-X7K9M2 */
+  uniqueCompanyCode: {
+    type: String,
+    default: null,
+    trim: true,
+    uppercase: true,
+    sparse: true,
+    unique: true,
+    index: true
+  },
+  codeStatus: {
+    type: String,
+    enum: ['active', 'revoked'],
+    default: 'active'
+  },
+  codeGeneratedAt: {
+    type: Date,
+    default: null
+  },
+  codeRegeneratedCount: {
+    type: Number,
+    default: 0
+  },
+  companyCodeHistory: [{
+    code: String,
+    revokedAt: Date,
+    reason: { type: String, default: 'regenerated' }
+  }],
+  inviteLinkToken: {
+    type: String,
+    default: null,
+    sparse: true,
+    unique: true,
+    index: true
+  },
+  inviteLinkExpiresAt: {
+    type: Date,
+    default: null
+  },
+
   profilePhoto: {
     type: String,
     default: null
@@ -378,6 +447,12 @@ const vendorSchema = new mongoose.Schema({
     soundAlerts: {
       type: Boolean,
       default: true
+    },
+    notificationPreferences: {
+      leads: { type: Boolean, default: true },
+      jobs: { type: Boolean, default: true },
+      payments: { type: Boolean, default: true },
+      account: { type: Boolean, default: true }
     },
     language: {
       type: String,
@@ -508,9 +583,13 @@ vendorSchema.index({ 'wallet.earnings': -1 });
 vendorSchema.index({ geoLocation: '2dsphere' }); // Fast geo queries
 vendorSchema.index({ isOnline: 1, availability: 1, approvalStatus: 1 }); // Compound index for vendor search
 
-// Hash password before saving
+// Hash password before saving (skip if already a bcrypt hash)
 vendorSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
+  if (!this.isModified('password') || !this.password) {
+    return next();
+  }
+  // Prevent double-hashing if password was already hashed upstream
+  if (/^\$2[aby]\$\d{2}\$/.test(this.password)) {
     return next();
   }
   const salt = await bcrypt.genSalt(10);
@@ -520,6 +599,7 @@ vendorSchema.pre('save', async function (next) {
 
 // Compare password method
 vendorSchema.methods.comparePassword = async function (candidatePassword) {
+  if (!this.password || !candidatePassword) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 

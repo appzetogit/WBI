@@ -10,12 +10,11 @@ import {
 } from 'react-icons/fi';
 import Logo from '../../../../components/common/Logo';
 import { logout } from '../../services/authService';
-import toast from 'react-hot-toast';
 import CashLimitModal from '../common/CashLimitModal';
 import GlobalBookingAlert from '../common/GlobalBookingAlert';
 
 const navItems = [
-  { name: 'Dashboard', path: '/vendor/dynamic/dashboard', icon: FiHome },
+  { name: 'Dashboard', path: '/vendor', icon: FiHome },
   { name: 'My Profile', path: '/vendor/digital-solution/my-profile', icon: FiUser },
   { name: 'Team & Engineers', path: '/vendor/digital-solution/engineers', icon: FiUsers },
   { name: 'Services', path: '/vendor/digital-solution/services', icon: FiBriefcase },
@@ -57,10 +56,10 @@ const DigitalVendorLayout = () => {
   const handleLogout = async () => {
     try {
       await logout();
-      navigate('/vendor/login');
     } catch {
-      toast.error('Logout failed');
+      /* local session still cleared by authService */
     }
+    navigate('/vendor/login', { replace: true });
   };
 
   return (

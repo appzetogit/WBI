@@ -1,42 +1,43 @@
 import React from 'react';
-import { Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiUsers, FiClock, FiActivity, FiDollarSign } from 'react-icons/fi';
+import { useLocation } from 'react-router-dom';
 
-// Import sub-components
-// Import sub-components
 import AllEngineers from './AllEngineers';
 import EngineerJobs from './EngineerJobs';
 import EngineerAnalytics from './EngineerAnalytics';
+import EngineerPayments from './EngineerPayments';
+import EngineerVerifications from './EngineerVerifications';
+import AdminHubTabs from '../../components/layout/AdminHubTabs';
+
+const ENGINEER_TABS = [
+  { to: 'all', label: 'All Engineers', end: true },
+  { to: 'jobs', label: 'Jobs' },
+  { to: 'analytics', label: 'Analytics' },
+  { to: 'payments', label: 'Payments' },
+  { to: 'verifications', label: 'Verification' }
+];
 
 const Engineers = () => {
   const location = useLocation();
 
-  const navTabs = [
-    { name: 'All Engineers', path: '/admin/engineers/all', icon: FiUsers },
-    { name: 'Engineer Jobs', path: '/admin/engineers/jobs', icon: FiClock },
-    { name: 'Engineer Analytics', path: '/admin/engineers/analytics', icon: FiActivity },
-  ];
-
-  const getPageTitle = () => {
-    const currentTab = navTabs.find(tab => location.pathname === tab.path);
-    return currentTab ? currentTab.name : 'Engineer Management';
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Content Area */}
+    <div className="space-y-4">
+      <AdminHubTabs basePath="/admin/engineers" tabs={ENGINEER_TABS} />
+
       <motion.div
         key={location.pathname}
-        initial={{ opacity: 0, y: 10 }}
+        initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
+        transition={{ duration: 0.2 }}
       >
         <Routes>
           <Route path="/" element={<Navigate to="all" replace />} />
           <Route path="all" element={<AllEngineers />} />
           <Route path="jobs" element={<EngineerJobs />} />
           <Route path="analytics" element={<EngineerAnalytics />} />
+          <Route path="payments" element={<EngineerPayments />} />
+          <Route path="verifications" element={<EngineerVerifications />} />
         </Routes>
       </motion.div>
     </div>

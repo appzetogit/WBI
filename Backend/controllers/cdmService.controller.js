@@ -1,4 +1,5 @@
 const CdmService = require('../models/CdmService');
+const { queueBankingMarketplaceFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // CREATE an enquiry (Public App)
 exports.createEnquiry = async (req, res) => {
@@ -12,6 +13,11 @@ exports.createEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    queueBankingMarketplaceFromEnquiry(newEnquiry, {
+      enquiryModel: 'CdmService',
+      titleHint: 'CDM Service'
+    });
 
     res.status(201).json({
       success: true,

@@ -402,10 +402,44 @@ async function sendNotificationToAdmin(adminId, payload, includeMobile = true) {
   }
 }
 
+async function sendNotificationToEngineer(engineerId, payload, includeMobile = true) {
+  try {
+    const Engineer = require('../models/Engineer');
+    const engineer = await Engineer.findById(engineerId).select('fcmTokens fcmTokenMobile').lean();
+    if (!engineer) {
+      console.warn(`[FCM] Engineer ${engineerId} not found`);
+      return;
+    }
+    let tokens = [];
+    if (engineer.fcmTokens && engineer.fcmTokens.length > 0) {
+      tokens = [...tokens, ...engineer.fcmTokens];
+    }
+    if (includeMobile && engineer.fcmTokenMobile && engineer.fcmTokenMobile.length > 0) {
+      tokens = [...tokens, ...engineer.fcmTokenMobile];
+    }
+    tokens = [...new Set(tokens.filter(Boolean))];
+    if (!tokens.length) {
+      console.warn(`[FCM] No tokens for engineer ${engineerId}`);
+      return;
+    }
+    const finalPayload = {
+      ...payload,
+      data: {
+        ...(payload.data || {}),
+        role: 'engineer'
+      }
+    };
+    await sendPushNotification(tokens, finalPayload);
+  } catch (error) {
+    console.error(`[FCM] Error sending notification to engineer ${engineerId}:`, error.message);
+  }
+}
+
 module.exports = {
   sendPushNotification,
   sendNotificationToUser,
   sendNotificationToVendor,
   sendNotificationToWorker,
-  sendNotificationToAdmin
+  sendNotificationToAdmin,
+  sendNotificationToEngineer
 };

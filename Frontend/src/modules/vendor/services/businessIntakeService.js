@@ -16,6 +16,15 @@ export const fetchOpportunityById = (id) =>
 export const submitBid = (id, data) =>
   api.post(`${BASE}/opportunities/${id}/bid`, data);
 
+export const acceptClientRequest = (id, data = {}) =>
+  api.post(`${BASE}/opportunities/${id}/accept`, data);
+
+export const declineClientRequest = (id, reason = '') =>
+  api.post(`${BASE}/opportunities/${id}/decline`, { reason });
+
+export const awardMyBid = (id) =>
+  api.post(`${BASE}/opportunities/${id}/award`);
+
 export const updateBid = (id, bidId, data) =>
   api.put(`${BASE}/opportunities/${id}/bid/${bidId}`, data);
 
@@ -55,6 +64,17 @@ export const fetchAcceptedWork = (params = {}) =>
 // ── Counts (Sidebar Badges) ───────────────────────────────
 export const fetchCounts = () =>
   api.get(`${BASE}/counts`);
+
+// ── Bookmarks ─────────────────────────────────────────────
+export const bookmarkOpportunity = (id) =>
+  api.post(`${BASE}/opportunities/${id}/bookmark`);
+
+export const removeBookmark = (id) =>
+  api.delete(`${BASE}/opportunities/${id}/bookmark`);
+
+// ── Activity Feed ─────────────────────────────────────────
+export const fetchActivityFeed = (params = {}) =>
+  api.get(`${BASE}/activity`, { params });
 
 // ── Utility: Format ₹ ────────────────────────────────────
 export const formatINR = (amount) => {

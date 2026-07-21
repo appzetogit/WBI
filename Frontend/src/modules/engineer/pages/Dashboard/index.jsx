@@ -106,7 +106,7 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
-    registerFCMToken('worker', true).catch(err => console.error('FCM registration failed:', err));
+    registerFCMToken('engineer', true).catch(() => {});
 
     const handleUpdate = () => {
       queryClient.invalidateQueries({ queryKey: ['engineerDashboardStats'] });
@@ -314,6 +314,8 @@ const Dashboard = () => {
           {[
             { icon: <FaBriefcase />, label: workerProfile?.status === 'ONLINE' ? 'Available\nFor Work' : 'Unavailable\n(Busy)', color: workerProfile?.status === 'ONLINE' ? 'text-teal-600' : 'text-gray-400', bg: workerProfile?.status === 'ONLINE' ? 'bg-teal-50' : 'bg-gray-100', isToggle: true },
             { icon: <FaCalendarAlt />, label: 'My\nSchedule', color: 'text-blue-500', bg: 'bg-blue-50', route: '/engineer/schedule' },
+            { icon: <FaBriefcase />, label: 'B2B\nJobs', color: 'text-cyan-600', bg: 'bg-cyan-50', route: '/engineer/b2b-jobs' },
+            { icon: <FaBriefcase />, label: 'Vendor\nJobs', color: 'text-indigo-600', bg: 'bg-indigo-50', route: '/engineer/ops-jobs' },
             { icon: <FaWallet />, label: 'My\nEarnings', color: 'text-emerald-500', bg: 'bg-emerald-50', route: '/engineer/wallet' },
             { icon: <FaFileSignature />, label: 'Proposals\nSent', color: 'text-purple-500', bg: 'bg-purple-50', route: '/engineer/proposals' },
             { icon: <FaStar />, label: `Reviews\n(${workerProfile?.rating?.toFixed(1) || '0.0'})`, color: 'text-orange-500', bg: 'bg-orange-50', route: '/engineer/profile/ratings' }
@@ -374,10 +376,17 @@ const Dashboard = () => {
               <>
                 {stats?.recentJobs && stats.recentJobs.length > 0 ? (
                   stats.recentJobs.map((job) => {
+                    const isOpsJob = !!job.isOpsJob;
                     const isDigital = !!job.isDigital;
-                    const jobTitle = job?.serviceId?.name || job?.serviceId?.title || job?.serviceCategory || 'Service Task';
-                    const clientName = isDigital ? (job?.address?.city || 'Digital Client') : (job?.userId?.name || 'Onsite Customer');
-                    const priceDisplay = isDigital 
+                    const jobTitle = isOpsJob
+                      ? (job.serviceId?.title || job.serviceId?.name || 'Vendor job')
+                      : (job?.serviceId?.name || job?.serviceId?.title || job?.serviceCategory || 'Service Task');
+                    const clientName = isOpsJob
+                      ? (job?.userId?.name || 'Vendor client')
+                      : isDigital
+                      ? (job?.address?.city || 'Digital Client')
+                      : (job?.userId?.name || 'Onsite Customer');
+                    const priceDisplay = isDigital
                       ? `₹${Number(job?.basePrice || 0).toLocaleString()} - ₹${Number(job?.finalAmount || 0).toLocaleString()}`
                       : `₹${Number(job?.finalAmount || job?.basePrice || 0).toLocaleString()}`;
                     
@@ -388,7 +397,11 @@ const Dashboard = () => {
                     return (
                       <div 
                         key={job?._id || Math.random()} 
-                        onClick={() => navigate(isDigital ? `/engineer/projects` : `/engineer/job/${job?._id}`)}
+                        onClick={() => {
+                          if (isOpsJob) navigate(`/engineer/ops-jobs/${job._id}`);
+                          else if (isDigital) navigate('/engineer/projects');
+                          else navigate(`/engineer/job/${job?._id}`);
+                        }}
                         className="bg-white rounded-3xl p-4 shadow-sm border border-gray-100 cursor-pointer active:scale-[0.99] transition-transform"
                       >
                         <div className="flex gap-4">
@@ -397,8 +410,8 @@ const Dashboard = () => {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
-                              <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${isDigital ? 'bg-indigo-500' : 'bg-teal-500'}`}>
-                                {isDigital ? 'Digital' : 'Onsite'}
+                              <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${isOpsJob ? 'bg-indigo-500' : isDigital ? 'bg-indigo-500' : 'bg-teal-500'}`}>
+                                {isOpsJob ? 'Vendor' : isDigital ? 'Digital' : 'Onsite'}
                               </span>
                               <span className="text-gray-400 text-xs font-medium">{displayDate}</span>
                             </div>

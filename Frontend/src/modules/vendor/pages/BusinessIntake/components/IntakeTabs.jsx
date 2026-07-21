@@ -1,27 +1,28 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import useBusinessIntakeCounts from '../../../hooks/useBusinessIntakeCounts';
-
-const BASE = '/vendor/dynamic/business-intake';
-
-const TABS = [
-  { key: 'all', label: 'All Opportunities', path: `${BASE}/all`, countKey: 'allOpportunities' },
-  { key: 'requests', label: 'Client Requests', path: `${BASE}/requests`, countKey: 'clientRequests' },
-  { key: 'b2b', label: 'B2B Opportunities', path: `${BASE}/b2b`, countKey: 'b2bOpportunities' },
-  { key: 'bulk', label: 'Bulk Requirements', path: `${BASE}/bulk`, countKey: 'bulkRequirements' },
-  { key: 'rfq', label: 'Bid Requests', path: `${BASE}/rfq`, countKey: 'bidQuoteRequests' },
-  { key: 'invitations', label: 'Invitations', path: `${BASE}/invitations`, countKey: 'directInvitations' },
-  { key: 'proposals', label: 'Proposals', path: `${BASE}/proposals`, countKey: 'proposalsPending' },
-  { key: 'accepted', label: 'Accepted Work', path: `${BASE}/accepted`, countKey: 'acceptedWork' },
-];
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const IntakeTabs = () => {
   const { counts } = useBusinessIntakeCounts();
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/business-intake`;
+
+  const tabs = useMemo(() => [
+    { key: 'all', label: 'All Opportunities', path: `${base}/all`, countKey: 'allOpportunities' },
+    { key: 'requests', label: 'Client Requests', path: `${base}/requests`, countKey: 'clientRequests' },
+    { key: 'b2b', label: 'B2B Opportunities', path: `${base}/b2b`, countKey: 'b2bOpportunities' },
+    { key: 'bulk', label: 'Bulk Requirements', path: `${base}/bulk`, countKey: 'bulkRequirements' },
+    { key: 'rfq', label: 'Bid Requests', path: `${base}/rfq`, countKey: 'bidQuoteRequests' },
+    { key: 'invitations', label: 'Invitations', path: `${base}/invitations`, countKey: 'directInvitations' },
+    { key: 'proposals', label: 'Proposals', path: `${base}/proposals`, countKey: 'proposalsPending' },
+    { key: 'accepted', label: 'Accepted Work', path: `${base}/accepted`, countKey: 'acceptedWork' },
+  ], [base]);
 
   return (
     <div className="border-b border-gray-200 overflow-x-auto">
       <nav className="flex gap-1 min-w-max px-1" aria-label="Business Intake tabs">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.key}
             to={tab.path}

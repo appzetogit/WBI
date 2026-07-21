@@ -5,6 +5,10 @@ const B2BPaymentMethod = require('../../models/B2BPaymentMethod');
 const B2BInvoice = require('../../models/B2BInvoice');
 const B2BCompany = require('../../models/B2BCompany');
 const { createOrder, verifyPayment } = require('../../services/razorpayService');
+const {
+  getPendingWalletGate,
+  activatePendingWalletJobs
+} = require('../../services/b2bWalletService');
 
 // Socket notification helper
 const emitWalletEvent = (req, eventName, roomName, data) => {
@@ -226,14 +230,74 @@ const verifyTopupPayment = async (req, res) => {
       balance: wallet.balance
     });
 
+    // Auto-activate pending_wallet jobs if balance now covers them
+    let activation = null;
+    try {
+      activation = await activatePendingWalletJobs(txn.companyId, req.app);
+      if (activation.activated > 0) {
+        wallet = await B2BWallet.findOne({ companyId: txn.companyId });
+      }
+    } catch (actErr) {
+      console.error('[B2B Topup] Pending activation failed (non-blocking):', actErr.message);
+    }
+
+    const gate = activation?.gate || (await getPendingWalletGate(txn.companyId));
+
     res.status(200).json({
       success: true,
-      message: 'Wallet balance successfully credited',
-      wallet
+      message: activation?.activated
+        ? `Wallet credited. Activated ${activation.activated} pending job(s).`
+        : 'Wallet balance successfully credited',
+      wallet,
+      activation,
+      walletGate: gate
     });
   } catch (error) {
     console.error('B2B Verify Topup Error:', error);
     res.status(500).json({ success: false, message: 'Failed to verify transaction payment' });
+  }
+};
+
+/**
+ * GET pending_wallet activation gate (balance vs pending batch cost)
+ */
+const getWalletActivationGate = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const gate = await getPendingWalletGate(companyId);
+    res.status(200).json({ success: true, data: gate });
+  } catch (error) {
+    console.error('B2B Wallet Gate Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to compute wallet activation gate' });
+  }
+};
+
+/**
+ * POST manually activate pending_wallet jobs when funded
+ */
+const activatePendingJobs = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const result = await activatePendingWalletJobs(companyId, req.app);
+
+    if (result.blocked) {
+      return res.status(400).json({
+        success: false,
+        message: result.gate.message,
+        data: result
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: result.activated
+        ? `Activated ${result.activated} job(s). Matching queued.`
+        : 'No pending jobs to activate',
+      data: result
+    });
+  } catch (error) {
+    console.error('B2B Activate Pending Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to activate pending jobs' });
   }
 };
 
@@ -345,5 +409,7 @@ module.exports = {
   getDeductionRule,
   getPaymentMethods,
   addPaymentMethod,
-  deletePaymentMethod
+  deletePaymentMethod,
+  getWalletActivationGate,
+  activatePendingJobs
 };

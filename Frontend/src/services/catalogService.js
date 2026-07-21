@@ -296,6 +296,32 @@ export const publicCatalogService = {
     return response.data;
   },
 
+  /**
+   * Search Excel catalog sub-services (C01–C24) by name / code / category.
+   * Not cached — query-specific; abort via signal for typing race safety.
+   */
+  searchSubServices: async (q, { limit = 40, signal } = {}) => {
+    const query = String(q || '').trim();
+    if (query.length < 2) {
+      return { success: true, count: 0, data: [] };
+    }
+    const params = new URLSearchParams({
+      q: query,
+      limit: String(limit)
+    });
+    const response = await api.get(`/public/form-schemas/search?${params.toString()}`, {
+      signal
+    });
+    return response.data;
+  },
+
+  /** Clear local catalog caches after admin publish (call from admin UI or hard refresh) */
+  invalidateLocalCatalogCache: () => {
+    apiCache.invalidatePrefix('public:');
+    apiCache.invalidatePrefix('public:serviceCategories');
+    apiCache.invalidate('public:serviceCategories');
+  },
+
   // Get all active brands (formerly services)
   getBrands: async (params = {}) => {
     const queryParams = new URLSearchParams();

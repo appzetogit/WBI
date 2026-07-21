@@ -5,18 +5,118 @@
 const Opportunity = require('../../models/Opportunity');
 const VendorProposal = require('../../models/VendorProposal');
 const Vendor = require('../../models/Vendor');
+const ServiceRequest = require('../../models/ServiceRequest');
+const ServiceConfig = require('../../models/ServiceConfig');
 const mongoose = require('mongoose');
+const { expandCategoryMatchCodes } = require('../../utils/serviceCategoryAliases');
+const { onVendorAccepted, recordVendorReject } = require('../../services/projectAssignmentEngine.service');
+const { createOpsProjectFromOpportunity } = require('../../utils/createOpsProjectFromOpportunity');
 
 // ─────────────────────────────────────────────────────────
 // HELPER: format currency
 const formatINR = (amount) => `₹${Number(amount || 0).toLocaleString('en-IN')}`;
 
-// HELPER: Get vendor categories
+const vidStr = (id) => (id ? String(id) : '');
+
+const vendorAssignmentFlags = (opp, vendorId) => {
+  const queue = opp.assignment?.vendorQueue || [];
+  if (!queue.length) {
+    return { isMyTurnToRespond: true, assignmentActiveUntil: opp.assignment?.activeVendorUntil || null };
+  }
+  const active = queue.find((q) => q.status === 'active');
+  const inQueue = queue.some((q) => vidStr(q.vendorId) === vidStr(vendorId));
+  if (!active) {
+    return {
+      isMyTurnToRespond: inQueue && queue.some((q) => q.status === 'pending' && vidStr(q.vendorId) === vidStr(vendorId)),
+      assignmentActiveUntil: null
+    };
+  }
+  return {
+    isMyTurnToRespond: vidStr(active.vendorId) === vidStr(vendorId),
+    assignmentActiveUntil: opp.assignment?.activeVendorUntil || null
+  };
+};
+
+/** Approved vendors can transact; verified KYC preferred but not hard-blocked for approved accounts */
+const assertVendorCanBid = (vendor) => {
+  if (!vendor) return { ok: false, status: 404, message: 'Vendor not found' };
+  const kycVerified =
+    vendor.kycStatus === 'verified' ||
+    vendor.compliance?.kycStatus === 'verified';
+  const approved = vendor.approvalStatus === 'approved';
+  if (kycVerified || approved) return { ok: true, kycVerified, approved };
+  return {
+    ok: false,
+    status: 403,
+    message: 'Complete KYC verification (or get account approved) before bidding.',
+    code: 'KYC_REQUIRED'
+  };
+};
+
+const ensureLinkedProposal = async ({
+  vendorId,
+  opportunity,
+  amount,
+  proposalText,
+  timeline,
+  linkedBidId,
+  status = 'sent'
+}) => {
+  const existing = linkedBidId
+    ? await VendorProposal.findOne({ vendorId, linkedBidId }).lean()
+    : await VendorProposal.findOne({
+        vendorId,
+        opportunityId: opportunity._id,
+        status: { $in: ['sent', 'draft', 'viewed', 'accepted', 'negotiating'] }
+      }).lean();
+  if (existing) return existing;
+
+  const subtotal = parseFloat(amount) || 0;
+  const proposal = new VendorProposal({
+    vendorId: new mongoose.Types.ObjectId(vendorId),
+    opportunityId: opportunity._id,
+    title: `Bid for: ${opportunity.title}`,
+    coverLetter: proposalText || '',
+    pricing: {
+      lineItems: [],
+      subtotal,
+      gstPercentage: 18,
+      gstAmount: subtotal * 0.18,
+      totalAmount: subtotal * 1.18
+    },
+    timeline: { totalDays: parseInt(timeline, 10) || 30 },
+    status,
+    sentAt: status === 'sent' || status === 'accepted' ? new Date() : null,
+    linkedBidId: linkedBidId || null
+  });
+  await proposal.save();
+  return proposal;
+};
+
+// HELPER: Get vendor category codes (pending + active; exclude suspended)
 const getVendorCategoryCodes = (vendor) => {
-  if (!vendor.approvedServices || !vendor.approvedServices.length) return [];
+  if (!vendor?.approvedServices?.length) return [];
   return vendor.approvedServices
-    .filter(s => s.status === 'active')
-    .map(s => s.categoryCode);
+    .filter((s) => s.status !== 'suspended')
+    .map((s) => s.categoryCode)
+    .filter(Boolean);
+};
+
+// HELPER: opportunity match scoped to vendor services (+ legacy aliases e.g. C01↔CCTV)
+const buildOpportunityBaseFilter = async (vendorId, extra = {}) => {
+  const vendor = await Vendor.findById(vendorId).select('approvedServices').lean();
+  const codes = getVendorCategoryCodes(vendor);
+  const matchCodes = await expandCategoryMatchCodes(codes);
+  const filter = {
+    eligibleVendors: new mongoose.Types.ObjectId(vendorId),
+    ...extra
+  };
+  if (matchCodes.length) {
+    filter.categoryCode = { $in: matchCodes };
+  } else {
+    filter.categoryCode = { $in: [] };
+  }
+  return { filter, codes, matchCodes, vendor };
 };
 
 // ─────────────────────────────────────────────────────────
@@ -27,31 +127,83 @@ const getOpportunities = async (req, res) => {
     const vendorId = req.user._id || req.user.id;
     const {
       type,
-      status = 'open',
+      status,
       category,
       city,
+      location,
       minBudget,
       maxBudget,
+      budgetMin,
+      budgetMax,
       priority,
       search,
+      bookmarked,
       sort = 'createdAt',
       order = 'desc',
       page = 1,
       limit = 20
     } = req.query;
 
-    // Base filter: vendor must be in eligibleVendors
-    const filter = {
-      eligibleVendors: new mongoose.Types.ObjectId(vendorId)
-    };
+    const { filter, codes, matchCodes } = await buildOpportunityBaseFilter(vendorId);
+    const vid = new mongoose.Types.ObjectId(vendorId);
 
-    if (status) filter.status = status;
+    // #region agent log
+    try {
+      const { agentDebugLog } = require('../../utils/agentDebugLog');
+      agentDebugLog({
+        hypothesisId: 'D',
+        location: 'businessIntakeController.js:getOpportunities',
+        message: 'Vendor opportunities query',
+        data: {
+          vendorId: String(vendorId),
+          codes,
+          matchCodes,
+          filterCategory: filter.categoryCode,
+          type: type || null,
+          status: status || null
+        }
+      });
+    } catch (_) { /* ignore */ }
+    // #endregion
+
+    // Default to open unless bookmarking (show all bookmarked) or status explicitly set
+    const isBookmarkQuery = bookmarked === 'true' || bookmarked === true;
+    const resolvedStatus = status !== undefined ? status : (isBookmarkQuery ? '' : 'open');
+    if (resolvedStatus) filter.status = resolvedStatus;
     if (type) filter.type = type;
-    if (category) filter.categoryCode = category;
-    if (city) filter['requirements.cities'] = { $in: [new RegExp(city, 'i')] };
+    // Explicit category filter must still be within approved services (+ aliases)
+    if (category) {
+      const code = String(category).toUpperCase();
+      const allowed = await expandCategoryMatchCodes([code]);
+      const overlap = allowed.filter((c) => matchCodes.includes(c));
+      if (codes.length && !overlap.length && !matchCodes.includes(code)) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          typeCounts: {},
+          pagination: { page: 1, limit: parseInt(limit), total: 0, pages: 0 }
+        });
+      }
+      filter.categoryCode = { $in: overlap.length ? overlap : [code] };
+    }
+    const cityFilter = city || location;
+    if (cityFilter) {
+      filter.$and = filter.$and || [];
+      filter.$and.push({
+        $or: [
+          { 'requirements.cities': { $in: [new RegExp(cityFilter, 'i')] } },
+          { 'clientInfo.city': new RegExp(cityFilter, 'i') }
+        ]
+      });
+    }
     if (priority) filter.priority = priority;
-    if (minBudget) filter['budget.min'] = { $gte: Number(minBudget) };
-    if (maxBudget) filter['budget.max'] = { $lte: Number(maxBudget) };
+    const resolvedMin = minBudget || budgetMin;
+    const resolvedMax = maxBudget || budgetMax;
+    if (resolvedMin) filter['budget.min'] = { $gte: Number(resolvedMin) };
+    if (resolvedMax) filter['budget.max'] = { $lte: Number(resolvedMax) };
+    if (bookmarked === 'true' || bookmarked === true) {
+      filter['bookmarkedBy.vendorId'] = vid;
+    }
 
     if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -88,29 +240,68 @@ const getOpportunities = async (req, res) => {
       { $push: { viewedBy: { vendorId: new mongoose.Types.ObjectId(vendorId), viewedAt: new Date() } } }
     ).catch(err => console.error('View tracking error:', err));
 
-    // Add hasMyBid flag (not exposing other vendors' amounts)
+    // Add hasMyBid / isBookmarked flags (not exposing other vendors' amounts)
     const enriched = opportunities.map(opp => {
-      const myBid = opp.bids?.find(b => b.vendorId?.toString() === vendorId.toString());
+      const myBid = opp.bids?.find(b => vidStr(b.vendorId) === vidStr(vendorId));
+      const isBookmarked = (opp.bookmarkedBy || []).some(
+        (b) => vidStr(b.vendorId) === vidStr(vendorId)
+      );
+      const assignmentFlags = vendorAssignmentFlags(opp, vendorId);
       return {
         ...opp,
         hasMyBid: !!myBid,
         myBidStatus: myBid?.status || null,
         myBidId: myBid?._id || null,
+        myBidAmount: myBid?.amount ?? null,
+        isBookmarked,
+        ...assignmentFlags,
+        bookmarkedBy: undefined,
         bids: undefined // remove all bids from list view
       };
     });
 
-    // Get badge counts per type
+    // Get badge counts per type — scoped to approved services (+ aliases)
+    const countMatch = {
+      eligibleVendors: new mongoose.Types.ObjectId(vendorId),
+      status: 'open'
+    };
+    if (matchCodes.length) countMatch.categoryCode = { $in: matchCodes };
+
     const counts = await Opportunity.aggregate([
-      { $match: { eligibleVendors: new mongoose.Types.ObjectId(vendorId), status: 'open' } },
+      { $match: countMatch },
       { $group: { _id: '$type', count: { $sum: 1 } } }
     ]);
     const typeCounts = counts.reduce((acc, c) => ({ ...acc, [c._id]: c.count }), {});
+
+    // #region agent log
+    try {
+      const { agentDebugLog } = require('../../utils/agentDebugLog');
+      agentDebugLog({
+        hypothesisId: 'D',
+        location: 'businessIntakeController.js:getOpportunities:result',
+        message: 'Vendor opportunities result',
+        data: {
+          vendorId: String(vendorId),
+          total,
+          returned: enriched.length,
+          typeCounts,
+          sampleTitles: enriched.slice(0, 5).map((o) => ({
+            id: String(o._id),
+            code: o.opportunityCode,
+            cat: o.categoryCode,
+            title: o.title
+          }))
+        }
+      });
+    } catch (_) { /* ignore */ }
+    // #endregion
 
     res.status(200).json({
       success: true,
       data: enriched,
       typeCounts,
+      approvedServiceCodes: codes,
+      matchCodes,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -148,16 +339,24 @@ const getOpportunityById = async (req, res) => {
     ).catch(() => {});
 
     // Find MY bid only — hide other vendors' details
-    const myBid = opportunity.bids?.find(b => b.vendorId?.toString() === vendorId.toString());
+    const myBid = opportunity.bids?.find(b => vidStr(b.vendorId) === vidStr(vendorId));
     const totalBids = opportunity.bids?.length || 0;
+    const isBookmarked = (opportunity.bookmarkedBy || []).some(
+      (b) => vidStr(b.vendorId) === vidStr(vendorId)
+    );
 
     return res.status(200).json({
       success: true,
       data: {
         ...opportunity,
         bids: undefined, // never expose other bids
+        bookmarkedBy: undefined,
         totalBidsCount: totalBids,
-        myBid: myBid || null
+        myBid: myBid || null,
+        hasMyBid: !!myBid,
+        myBidStatus: myBid?.status || null,
+        isBookmarked,
+        ...vendorAssignmentFlags(opportunity, vendorId)
       }
     });
   } catch (error) {
@@ -175,16 +374,15 @@ const submitBid = async (req, res) => {
     const { id } = req.params;
     const { amount, proposalText, timeline, teamSize, milestones, technicalBid, financialBid } = req.body;
 
-    // KYC check
-    const vendor = await Vendor.findById(vendorId).select('kycStatus compliance approvedServices').lean();
-    if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
-
-    const kycVerified = vendor.kycStatus === 'verified' || vendor.compliance?.kycStatus === 'verified';
-    if (!kycVerified) {
-      return res.status(403).json({
+    const vendor = await Vendor.findById(vendorId)
+      .select('kycStatus compliance approvedServices approvalStatus')
+      .lean();
+    const gate = assertVendorCanBid(vendor);
+    if (!gate.ok) {
+      return res.status(gate.status).json({
         success: false,
-        message: 'Complete your KYC verification before submitting bids.',
-        code: 'KYC_REQUIRED'
+        message: gate.message,
+        code: gate.code
       });
     }
 
@@ -197,74 +395,66 @@ const submitBid = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Opportunity not found or you are not eligible' });
     }
 
-    // Validate: opportunity must be open
     if (opportunity.status !== 'open') {
       return res.status(400).json({ success: false, message: 'This opportunity is no longer accepting bids' });
     }
 
-    // Validate: deadline not passed
     if (opportunity.deadline && new Date() > new Date(opportunity.deadline)) {
       return res.status(400).json({ success: false, message: 'Bid deadline has passed' });
     }
 
-    // Validate: vendor hasn't already bid
-    const existingBid = opportunity.bids.find(b => b.vendorId?.toString() === vendorId.toString());
+    const existingBid = opportunity.bids.find((b) => vidStr(b.vendorId) === vidStr(vendorId));
     if (existingBid) {
-      return res.status(400).json({ success: false, message: 'You have already submitted a bid for this opportunity' });
+      return res.status(400).json({
+        success: false,
+        message: 'You have already submitted a bid for this opportunity',
+        data: { bidId: existingBid._id, status: existingBid.status }
+      });
     }
 
-    // Validate amount
-    if (!amount || isNaN(amount) || amount <= 0) {
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
       return res.status(400).json({ success: false, message: 'Please provide a valid bid amount' });
     }
 
-    // Add bid to opportunity
     opportunity.bids.push({
       vendorId: new mongoose.Types.ObjectId(vendorId),
       amount: parseFloat(amount),
       proposalText: proposalText || '',
-      timeline: parseInt(timeline) || 30,
-      teamSize: parseInt(teamSize) || 1,
+      timeline: parseInt(timeline, 10) || 30,
+      teamSize: parseInt(teamSize, 10) || 1,
       milestones: milestones || [],
       technicalBid: technicalBid || '',
       financialBid: financialBid || '',
       status: 'submitted',
-      submittedAt: new Date()
+      submittedAt: new Date(),
+      updatedAt: new Date()
     });
 
-    // If first bid, change status to 'open' stays (or we can track 'bidding')
     await opportunity.save();
-
-    // Create a formal proposal linked to this bid
     const newBid = opportunity.bids[opportunity.bids.length - 1];
-    const proposal = new VendorProposal({
-      vendorId: new mongoose.Types.ObjectId(vendorId),
-      opportunityId: new mongoose.Types.ObjectId(id),
-      title: `Bid for: ${opportunity.title}`,
-      coverLetter: proposalText || '',
-      pricing: {
-        lineItems: [],
-        subtotal: parseFloat(amount),
-        gstPercentage: 18,
-        gstAmount: parseFloat(amount) * 0.18,
-        totalAmount: parseFloat(amount) * 1.18
-      },
-      timeline: { totalDays: parseInt(timeline) || 30 },
-      status: 'sent',
-      sentAt: new Date(),
-      linkedBidId: newBid._id
-    });
 
-    await proposal.save();
+    let proposal = null;
+    try {
+      proposal = await ensureLinkedProposal({
+        vendorId,
+        opportunity,
+        amount,
+        proposalText: proposalText || technicalBid || financialBid || '',
+        timeline,
+        linkedBidId: newBid._id,
+        status: 'sent'
+      });
+    } catch (propErr) {
+      console.error('submitBid proposal create error (bid saved):', propErr);
+    }
 
-    // Emit socket event to admin (if socket available)
     try {
       const io = req.app.get('io');
       if (io) {
         io.to('admin-room').emit('new-bid-submitted', {
           opportunityId: id,
           opportunityTitle: opportunity.title,
-          vendorId: vendorId.toString(),
+          vendorId: vidStr(vendorId),
           amount,
           bidId: newBid._id
         });
@@ -278,15 +468,285 @@ const submitBid = async (req, res) => {
       message: 'Bid submitted successfully',
       data: {
         bidId: newBid._id,
-        proposalId: proposal._id,
-        proposalCode: proposal.proposalCode
+        myBidStatus: 'submitted',
+        hasMyBid: true,
+        proposalId: proposal?._id || null,
+        proposalCode: proposal?.proposalCode || null
       }
     });
   } catch (error) {
     console.error('submitBid error:', error);
-    res.status(500).json({ success: false, message: 'Failed to submit bid' });
+    res.status(500).json({ success: false, message: error.message || 'Failed to submit bid' });
   }
 };
+
+// ─────────────────────────────────────────────────────────
+// 3b. POST /opportunities/:id/accept — client_request → award + project
+// ─────────────────────────────────────────────────────────
+const acceptClientRequest = async (req, res) => {
+  try {
+    const vendorId = req.user._id || req.user.id;
+    const { id } = req.params;
+    const { amount, proposalText, timeline, teamSize } = req.body || {};
+
+    const vendor = await Vendor.findById(vendorId)
+      .select('kycStatus compliance approvalStatus')
+      .lean();
+    const gate = assertVendorCanBid(vendor);
+    if (!gate.ok) {
+      return res.status(gate.status).json({ success: false, message: gate.message, code: gate.code });
+    }
+
+    const opportunity = await Opportunity.findOne({
+      _id: id,
+      eligibleVendors: new mongoose.Types.ObjectId(vendorId),
+      status: 'open'
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ success: false, message: 'Request not found or already closed' });
+    }
+
+    const committedPhases = ['awaiting_engineer', 'awarded'];
+    if (committedPhases.includes(opportunity.assignment?.phase)) {
+      return res.status(409).json({
+        success: false,
+        message: 'This request is already committed to a vendor. Awaiting engineer acceptance.'
+      });
+    }
+
+    if (opportunity.type !== 'client_request' && opportunity.type !== 'direct_invitation') {
+      return res.status(400).json({
+        success: false,
+        message: 'Use Submit Bid for this opportunity type, then wait for client award.'
+      });
+    }
+
+    // Assignment engine: only the active vendor in queue may accept (when queue exists)
+    const queue = opportunity.assignment?.vendorQueue || [];
+    if (queue.length) {
+      const active = queue.find((q) => q.status === 'active');
+      if (active && vidStr(active.vendorId) !== vidStr(vendorId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Another vendor is currently reviewing this project. Please wait for your turn.'
+        });
+      }
+    }
+
+    if (opportunity.deadline && new Date() > new Date(opportunity.deadline)) {
+      // Client requests stay accept-able while open; soft-warn only (response SLA is soft)
+      if (opportunity.type !== 'client_request') {
+        return res.status(400).json({ success: false, message: 'This request has expired' });
+      }
+    }
+
+    const paidSr = opportunity.assignment?.serviceRequestId
+      ? await ServiceRequest.findById(opportunity.assignment.serviceRequestId)
+          .select('payment.amount payment.status requestCode')
+          .lean()
+      : null;
+    const customerPaid =
+      paidSr?.payment?.status === 'paid' ? Number(paidSr.payment.amount) || 0 : 0;
+
+    const bidAmount =
+      parseFloat(amount) ||
+      customerPaid ||
+      opportunity.budget?.max ||
+      opportunity.budget?.min ||
+      0;
+    let myBid = opportunity.bids.find((b) => vidStr(b.vendorId) === vidStr(vendorId));
+    if (!myBid) {
+      opportunity.bids.push({
+        vendorId: new mongoose.Types.ObjectId(vendorId),
+        amount: bidAmount,
+        proposalText: proposalText || 'Accepted client request',
+        timeline: parseInt(timeline, 10) || 30,
+        teamSize: parseInt(teamSize, 10) || 1,
+        status: 'accepted',
+        submittedAt: new Date(),
+        updatedAt: new Date()
+      });
+      myBid = opportunity.bids[opportunity.bids.length - 1];
+    } else {
+      myBid.status = 'accepted';
+      myBid.updatedAt = new Date();
+      if (bidAmount > 0) myBid.amount = bidAmount;
+    }
+
+    // Close others
+    opportunity.bids.forEach((b) => {
+      if (vidStr(b.vendorId) !== vidStr(vendorId) && b.status !== 'rejected') {
+        b.status = 'rejected';
+        b.rejectionReason = 'Another vendor accepted this request';
+      }
+    });
+
+    const project = await createOpsProjectFromOpportunity(opportunity, vendorId, bidAmount);
+
+    opportunity.awardedTo = {
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      projectId: project._id,
+      awardedAt: null
+    };
+    await opportunity.save();
+
+    await onVendorAccepted(opportunity._id, vendorId);
+
+    let proposal = null;
+    try {
+      proposal = await ensureLinkedProposal({
+        vendorId,
+        opportunity,
+        amount: bidAmount,
+        proposalText: proposalText || 'Accepted client request',
+        timeline,
+        linkedBidId: myBid._id,
+        status: 'accepted'
+      });
+      if (proposal && proposal.status !== 'accepted') {
+        await VendorProposal.updateOne({ _id: proposal._id }, { status: 'accepted' });
+      }
+    } catch (e) {
+      console.error('acceptClientRequest proposal error:', e.message);
+    }
+
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to('admin-room').emit('client-request-accepted', {
+          opportunityId: id,
+          vendorId: vidStr(vendorId),
+          projectId: project._id
+        });
+      }
+    } catch (e) {}
+
+    res.status(200).json({
+      success: true,
+      message: 'Request accepted. Project created — assign an engineer next.',
+      data: {
+        opportunityId: opportunity._id,
+        projectId: project._id,
+        projectCode: project.projectCode,
+        proposalId: proposal?._id || null,
+        status: 'vendor_committed',
+        needsEngineerAssignment: true
+      }
+    });
+  } catch (error) {
+    console.error('acceptClientRequest error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to accept request' });
+  }
+};
+
+// 3b-decline. POST /opportunities/:id/decline — client_request reject / skip
+// ─────────────────────────────────────────────────────────
+const declineClientRequest = async (req, res) => {
+  try {
+    const vendorId = req.user._id || req.user.id;
+    const { id } = req.params;
+    const { reason } = req.body || {};
+
+    const opportunity = await Opportunity.findOne({
+      _id: id,
+      eligibleVendors: new mongoose.Types.ObjectId(vendorId),
+      status: 'open'
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ success: false, message: 'Request not found or already closed' });
+    }
+
+    const result = await recordVendorReject(id, vendorId, reason || 'Vendor declined');
+    if (!result.ok) {
+      return res.status(400).json({ success: false, message: result.message });
+    }
+
+    res.status(200).json({ success: true, message: 'Request declined. Next vendor will be notified if available.' });
+  } catch (error) {
+    console.error('declineClientRequest error:', error);
+    res.status(500).json({ success: false, message: 'Failed to decline request' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────
+// 3c. POST /opportunities/:id/award — award to me (I already bid)
+//     Used when client/ops confirms the vendor's bid (MVP until client portal award exists)
+// ─────────────────────────────────────────────────────────
+const awardMyBid = async (req, res) => {
+  try {
+    const vendorId = req.user._id || req.user.id;
+    const { id } = req.params;
+
+    const opportunity = await Opportunity.findOne({
+      _id: id,
+      eligibleVendors: new mongoose.Types.ObjectId(vendorId)
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found' });
+    }
+
+    if (opportunity.status === 'awarded' && vidStr(opportunity.awardedTo?.vendorId) === vidStr(vendorId)) {
+      return res.status(200).json({
+        success: true,
+        message: 'Already awarded to you',
+        data: { projectId: opportunity.awardedTo?.projectId || null, status: 'awarded' }
+      });
+    }
+
+    if (opportunity.status !== 'open') {
+      return res.status(400).json({ success: false, message: 'Opportunity is not open for award' });
+    }
+
+    const myBid = opportunity.bids.find((b) => vidStr(b.vendorId) === vidStr(vendorId));
+    if (!myBid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Submit a bid first, then confirm award after client acceptance.'
+      });
+    }
+
+    myBid.status = 'accepted';
+    myBid.updatedAt = new Date();
+    opportunity.bids.forEach((b) => {
+      if (vidStr(b.vendorId) !== vidStr(vendorId) && b.status !== 'rejected') {
+        b.status = 'rejected';
+        b.rejectionReason = 'Another vendor was awarded';
+      }
+    });
+
+    const project = await createOpsProjectFromOpportunity(opportunity, vendorId, myBid.amount);
+    opportunity.status = 'awarded';
+    opportunity.awardedTo = {
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      projectId: project._id,
+      awardedAt: new Date()
+    };
+    await opportunity.save();
+
+    await VendorProposal.updateMany(
+      { vendorId: new mongoose.Types.ObjectId(vendorId), opportunityId: opportunity._id },
+      { status: 'accepted' }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Award confirmed. Project created.',
+      data: {
+        projectId: project._id,
+        projectCode: project.projectCode,
+        status: 'awarded'
+      }
+    });
+  } catch (error) {
+    console.error('awardMyBid error:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to award opportunity' });
+  }
+};
+
+// PLACEHOLDER removed — see acceptClientRequest / awardMyBid above
 
 // ─────────────────────────────────────────────────────────
 // 4. PUT /opportunities/:id/bid/:bidId
@@ -407,17 +867,38 @@ const acceptInvitation = async (req, res) => {
       vendorId: new mongoose.Types.ObjectId(vendorId),
       awardedAt: new Date()
     };
+
+    let project = null;
+    try {
+      project = await createOpsProjectFromOpportunity(
+        opportunity,
+        vendorId,
+        opportunity.budget?.max || opportunity.budget?.min || 0
+      );
+      opportunity.awardedTo.projectId = project._id;
+    } catch (projErr) {
+      console.error('acceptInvitation project create error:', projErr.message);
+    }
+
     await opportunity.save();
 
     // Emit socket to admin
     try {
       const io = req.app.get('io');
       if (io) {
-        io.to('admin-room').emit('invitation-accepted', { opportunityId: id, vendorId: vendorId.toString() });
+        io.to('admin-room').emit('invitation-accepted', {
+          opportunityId: id,
+          vendorId: vendorId.toString(),
+          projectId: project?._id || null
+        });
       }
     } catch (e) {}
 
-    res.status(200).json({ success: true, message: 'Invitation accepted successfully' });
+    res.status(200).json({
+      success: true,
+      message: 'Invitation accepted successfully',
+      data: { projectId: project?._id || null, projectCode: project?.projectCode || null }
+    });
   } catch (error) {
     console.error('acceptInvitation error:', error);
     res.status(500).json({ success: false, message: 'Failed to accept invitation' });
@@ -857,36 +1338,34 @@ const getCounts = async (req, res) => {
   try {
     const vendorId = req.user._id || req.user.id;
     const vid = new mongoose.Types.ObjectId(vendorId);
+    const vendor = await Vendor.findById(vendorId).select('approvedServices').lean();
+    const codes = getVendorCategoryCodes(vendor);
+    const matchCodes = await expandCategoryMatchCodes(codes);
+    const oppScope = { eligibleVendors: vid, status: 'open' };
+    if (matchCodes.length) oppScope.categoryCode = { $in: matchCodes };
+    else oppScope.categoryCode = { $in: [] };
 
     const [typeCounts, invitationCount, pendingProposals, acceptedWork, acceptedThisWeek, pendingQuotes] = await Promise.all([
-      // Open opportunities per type
       Opportunity.aggregate([
-        { $match: { eligibleVendors: vid, status: 'open' } },
+        { $match: oppScope },
         { $group: { _id: '$type', count: { $sum: 1 } } }
       ]),
-      // Direct invitations open
-      Opportunity.countDocuments({ type: 'direct_invitation', eligibleVendors: vid, status: 'open' }),
-      // Proposals awaiting client response (sent/viewed)
+      Opportunity.countDocuments({ ...oppScope, type: 'direct_invitation' }),
       VendorProposal.countDocuments({ vendorId: vid, status: { $in: ['sent', 'viewed', 'negotiating'] } }),
-      // Total accepted work
       Opportunity.countDocuments({ status: 'awarded', 'awardedTo.vendorId': vid }),
-      // Accepted this week
       Opportunity.countDocuments({
         status: 'awarded',
         'awardedTo.vendorId': vid,
         'awardedTo.awardedAt': { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
       }),
-      // Open RFQs where vendor has not yet bid
       Opportunity.countDocuments({
+        ...oppScope,
         type: 'bid_quote_request',
-        eligibleVendors: vid,
-        status: 'open',
         bids: { $not: { $elemMatch: { vendorId: vid } } }
       })
     ]);
 
     const counts = typeCounts.reduce((acc, c) => ({ ...acc, [c._id]: c.count }), {});
-
     const totalOpen = Object.values(counts).reduce((s, v) => s + v, 0);
 
     res.status(200).json({
@@ -901,7 +1380,9 @@ const getCounts = async (req, res) => {
         proposalsPending: pendingProposals,
         pendingQuotes: pendingQuotes + pendingProposals,
         acceptedWork,
-        acceptedThisWeek
+        acceptedThisWeek,
+        approvedServiceCodes: codes,
+        matchCodes
       }
     });
   } catch (error) {
@@ -910,10 +1391,210 @@ const getCounts = async (req, res) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────
+// 16. POST /opportunities/:id/bookmark
+// ─────────────────────────────────────────────────────────
+const bookmarkOpportunity = async (req, res) => {
+  try {
+    const vendorId = req.user._id || req.user.id;
+    const { id } = req.params;
+    const vid = new mongoose.Types.ObjectId(vendorId);
+
+    const opportunity = await Opportunity.findOne({
+      _id: id,
+      eligibleVendors: vid
+    });
+
+    if (!opportunity) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found or not eligible' });
+    }
+
+    const already = (opportunity.bookmarkedBy || []).some(
+      (b) => b.vendorId?.toString() === vendorId.toString()
+    );
+
+    if (!already) {
+      opportunity.bookmarkedBy = opportunity.bookmarkedBy || [];
+      opportunity.bookmarkedBy.push({ vendorId: vid, bookmarkedAt: new Date() });
+      await opportunity.save();
+    }
+
+    res.status(200).json({ success: true, message: 'Bookmarked', data: { isBookmarked: true } });
+  } catch (error) {
+    console.error('bookmarkOpportunity error:', error);
+    res.status(500).json({ success: false, message: 'Failed to bookmark opportunity' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────
+// 17. DELETE /opportunities/:id/bookmark
+// ─────────────────────────────────────────────────────────
+const removeBookmark = async (req, res) => {
+  try {
+    const vendorId = req.user._id || req.user.id;
+    const { id } = req.params;
+    const vid = new mongoose.Types.ObjectId(vendorId);
+
+    const result = await Opportunity.updateOne(
+      { _id: id, eligibleVendors: vid },
+      { $pull: { bookmarkedBy: { vendorId: vid } } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found or not eligible' });
+    }
+
+    res.status(200).json({ success: true, message: 'Bookmark removed', data: { isBookmarked: false } });
+  } catch (error) {
+    console.error('removeBookmark error:', error);
+    res.status(500).json({ success: false, message: 'Failed to remove bookmark' });
+  }
+};
+
+// ─────────────────────────────────────────────────────────
+// 18. GET /activity — recent Business Intake events for vendor
+// ─────────────────────────────────────────────────────────
+const getActivityFeed = async (req, res) => {
+  try {
+    const vendorId = req.user._id || req.user.id;
+    const vid = new mongoose.Types.ObjectId(vendorId);
+    const limit = Math.min(parseInt(req.query.limit) || 10, 30);
+
+    const { filter: oppScope, matchCodes } = await buildOpportunityBaseFilter(vendorId);
+    // Activity includes open + recently awarded (drop status constraint for broader feed)
+    delete oppScope.status;
+
+    const [recentOpps, withBids, recentAwards, recentProposals] = await Promise.all([
+      Opportunity.find({ ...oppScope, status: 'open' })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('title type createdAt categoryName')
+        .lean(),
+      Opportunity.find({
+        eligibleVendors: vid,
+        ...(matchCodes.length ? { categoryCode: { $in: matchCodes } } : {}),
+        'bids.vendorId': vid
+      })
+        .sort({ updatedAt: -1 })
+        .limit(8)
+        .select('title type bids categoryName updatedAt')
+        .lean(),
+      Opportunity.find({ status: 'awarded', 'awardedTo.vendorId': vid })
+        .sort({ 'awardedTo.awardedAt': -1 })
+        .limit(5)
+        .select('title awardedTo categoryName')
+        .lean(),
+      VendorProposal.find({ vendorId: vid })
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .select('title status updatedAt createdAt')
+        .lean()
+    ]);
+
+    const bidEvents = withBids.flatMap((opp) => {
+      const myBid = (opp.bids || []).find((b) => b.vendorId?.toString() === vendorId.toString());
+      if (!myBid) return [];
+      return [{ ...opp, myBid }];
+    });
+
+    const timeAgo = (date) => {
+      if (!date) return '';
+      const diff = Date.now() - new Date(date).getTime();
+      const mins = Math.floor(diff / 60000);
+      const hours = Math.floor(mins / 60);
+      const days = Math.floor(hours / 24);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return `${mins}m ago`;
+      if (hours < 24) return `${hours}h ago`;
+      if (days < 7) return `${days}d ago`;
+      return new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    };
+
+    const events = [];
+
+    recentOpps.forEach((o) => {
+      const typeLabel =
+        o.type === 'direct_invitation'
+          ? 'Direct invitation'
+          : o.type === 'client_request'
+          ? 'New client request'
+          : o.type === 'bulk_requirement'
+          ? 'Bulk requirement'
+          : o.type === 'bid_quote_request'
+          ? 'New RFQ'
+          : 'New opportunity';
+      events.push({
+        id: `opp-${o._id}`,
+        type: 'opportunity',
+        text: `${typeLabel}: ${o.title}`,
+        time: timeAgo(o.createdAt),
+        at: o.createdAt,
+        colorKey: 'blue'
+      });
+    });
+
+    bidEvents.forEach((o) => {
+      const myBid = o.myBid || (o.bids || []).find((b) => b.vendorId?.toString() === vendorId.toString());
+      if (!myBid) return;
+      const statusText =
+        myBid.status === 'shortlisted'
+          ? 'Bid shortlisted'
+          : myBid.status === 'accepted'
+          ? 'Bid accepted'
+          : myBid.status === 'rejected'
+          ? 'Bid not selected'
+          : 'Bid under review';
+      events.push({
+        id: `bid-${o._id}-${myBid._id}`,
+        type: 'bid',
+        text: `${statusText} for ${o.title}`,
+        time: timeAgo(myBid.updatedAt || myBid.submittedAt),
+        at: myBid.updatedAt || myBid.submittedAt,
+        colorKey: myBid.status === 'accepted' ? 'green' : myBid.status === 'shortlisted' ? 'violet' : 'amber'
+      });
+    });
+
+    recentAwards.forEach((o) => {
+      events.push({
+        id: `award-${o._id}`,
+        type: 'award',
+        text: `Project won: ${o.title}`,
+        time: timeAgo(o.awardedTo?.awardedAt),
+        at: o.awardedTo?.awardedAt,
+        colorKey: 'green'
+      });
+    });
+
+    recentProposals.forEach((p) => {
+      events.push({
+        id: `prop-${p._id}`,
+        type: 'proposal',
+        text: `Proposal ${p.status}: ${p.title}`,
+        time: timeAgo(p.updatedAt || p.createdAt),
+        at: p.updatedAt || p.createdAt,
+        colorKey: 'blue'
+      });
+    });
+
+    events.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+
+    res.status(200).json({
+      success: true,
+      data: events.slice(0, limit)
+    });
+  } catch (error) {
+    console.error('getActivityFeed error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch activity feed' });
+  }
+};
+
 module.exports = {
   getOpportunities,
   getOpportunityById,
   submitBid,
+  acceptClientRequest,
+  declineClientRequest,
+  awardMyBid,
   editBid,
   getInvitations,
   acceptInvitation,
@@ -925,5 +1606,8 @@ module.exports = {
   sendProposal,
   downloadProposalPdf,
   getAcceptedWork,
-  getCounts
+  getCounts,
+  bookmarkOpportunity,
+  removeBookmark,
+  getActivityFeed
 };

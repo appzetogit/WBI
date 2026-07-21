@@ -362,15 +362,25 @@ exports.resetPassword = async (req, res) => {
 
 exports.unifiedLogin = async (req, res) => {
   try {
-    const mobileOrPhone = req.body.mobile || req.body.phone;
-    const password = req.body.password;
+    const rawIdentifier = (
+      req.body.identifier ||
+      req.body.email ||
+      req.body.mobile ||
+      req.body.phone ||
+      ''
+    ).toString().trim();
+    const password = (req.body.password || '').toString();
+    const preferredRole = (req.body.preferredRole || req.body.role || '').toString().toLowerCase() || null;
 
-    if (!mobileOrPhone || !password) {
-      return res.status(400).json({ success: false, message: 'Mobile/Phone and password are required' });
+    if (!rawIdentifier || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email/phone and password are required'
+      });
     }
 
-    // Dynamic role lookup from database
-    const searchResult = await findUserAcrossCollections(mobileOrPhone);
+    // Prefer the portal role when logging in from a role-specific page (e.g. vendor login)
+    const searchResult = await findUserAcrossCollections(rawIdentifier, preferredRole);
     if (!searchResult) {
       return res.status(404).json({ success: false, message: 'Account not found with this mobile/email' });
     }
@@ -379,7 +389,10 @@ exports.unifiedLogin = async (req, res) => {
 
     // Verify Password
     if (!foundUser.password) {
-      return res.status(401).json({ success: false, message: 'Please login using your social account or reset your password' });
+      return res.status(401).json({
+        success: false,
+        message: 'No password set for this account. Please use Forgot Password to create one.'
+      });
     }
     const isMatch = await foundUser.comparePassword(password);
     if (!isMatch) {
@@ -410,18 +423,18 @@ exports.unifiedLogin = async (req, res) => {
 
     // Update login session
     const loginSessionId = Date.now().toString();
-    const updateQuery = { 
+    const updateQuery = {
       loginSessionId,
       $set: { fcmTokens: [], fcmTokenMobile: [] }
     };
-    
+
     if (resolvedRole === 'admin') {
       updateQuery.lastLogin = new Date();
     }
-    
+
     // Update document safely
     await matchedModel.findByIdAndUpdate(foundUser._id, updateQuery).catch(() => {
-       return matchedModel.findByIdAndUpdate(foundUser._id, { loginSessionId });
+      return matchedModel.findByIdAndUpdate(foundUser._id, { loginSessionId });
     });
 
     // Generate token with all required claims
@@ -441,17 +454,26 @@ exports.unifiedLogin = async (req, res) => {
     userResponse.mobile = foundUser.phone || foundUser.mobile || null;
     userResponse.role = resolvedRole;
     userResponse.status = foundUser.status || foundUser.approvalStatus || undefined;
+    userResponse.approvalStatus = foundUser.approvalStatus || undefined;
+
+    // Pending vendors still get a session, but land on the approval workflow
+    const isPendingVendor =
+      resolvedRole === 'vendor' &&
+      (foundUser.approvalStatus || 'pending') === 'pending';
 
     res.status(200).json({
       success: true,
-      message: 'Login successful',
+      message: isPendingVendor
+        ? 'Login successful. Your account is pending admin approval.'
+        : 'Login successful',
       token: tokens.accessToken,
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       user: userResponse,
+      vendor: resolvedRole === 'vendor' ? userResponse : undefined,
       role: resolvedRole,
       profileId: foundUser._id.toString(),
-      redirectTo: resolvedRedirect
+      redirectTo: isPendingVendor ? '/vendor/pending-approval' : resolvedRedirect
     });
 
   } catch (error) {

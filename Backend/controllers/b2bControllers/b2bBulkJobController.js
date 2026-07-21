@@ -375,9 +375,12 @@ const confirmUpload = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Company not found. Please re-login.' });
     }
 
-    // Verify Wallet Balance
+    // Verify Wallet Balance — jobs held in pending_wallet when insufficient (activation gated)
     const wallet = await B2BWallet.findOne({ companyId });
     const isInsufficient = !wallet || wallet.balance < batch.estimatedCost;
+    const shortfall = isInsufficient
+      ? parseFloat((((batch.estimatedCost || 0) - (wallet?.balance || 0))).toFixed(2))
+      : 0;
 
     // Duplicate confirmation check (checks if batch is already confirmed recently)
     const duplicateBatch = await B2BBatch.findOne({
@@ -405,9 +408,18 @@ const confirmUpload = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isInsufficient ? 'Job creation started, but jobs will be held in pending_wallet state due to low balance.' : 'Job creation started in background matching queue.',
+      message: isInsufficient
+        ? `Job creation started. Activation blocked: wallet short by ₹${shortfall}. Jobs will stay in pending_wallet until top-up.`
+        : 'Job creation started in background matching queue.',
       status: 'processing',
-      isInsufficient
+      isInsufficient,
+      activationBlocked: isInsufficient,
+      walletGate: {
+        walletBalance: wallet?.balance || 0,
+        pendingBatchCost: batch.estimatedCost || 0,
+        shortfall,
+        canActivate: !isInsufficient
+      }
     });
   } catch (error) {
     console.error('[B2B Confirm Error]:', error);

@@ -85,11 +85,10 @@ const WorkerRoutes = () => {
     location.pathname === '/worker/login' ||
     location.pathname === '/worker/signup' ||
     location.pathname === '/worker/forgot-password' ||
-    location.pathname === '/engineer/login' ||
-    location.pathname === '/engineer/signup' ||
     location.pathname.endsWith('/map') ||
     location.pathname.endsWith('/success') ||
-    location.pathname.includes('/billing');
+    location.pathname.includes('/billing') ||
+    location.pathname.includes('/progress');
 
   const shouldShowBottomNav = !shouldHideBottomNav;
 

@@ -111,6 +111,35 @@ const createTransporter = () => {
   });
 };
 
+const getAppUrl = (path = '') => {
+  const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+  if (!path) return base;
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+};
+
+const escapeHtml = (str) =>
+  String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+async function sendMailSafe({ to, subject, html, preheader, title }) {
+  if (!to) return { success: false, skipped: true };
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.log(`[EMAIL] (no SMTP) To: ${to} | ${subject}`);
+    return { success: true, logged: true };
+  }
+  const transporter = createTransporter();
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || 'WBI <noreply@wbi.com>',
+    to,
+    subject,
+    html: emailWrapper(html, title || subject, preheader || subject)
+  });
+  return { success: true };
+}
+
 /**
  * Send OTP Email - Professional Style
  */
@@ -229,7 +258,7 @@ const sendBookingEmails = async (booking, user, vendor, service) => {
         </div>
 
         <div class="btn-container">
-          <a href="#" class="btn">Track Order in App</a>
+          <a href="${getAppUrl(`/user/bookings/${booking._id}`)}" class="btn">Track order in app</a>
         </div>
       `;
 
@@ -257,7 +286,7 @@ const sendBookingEmails = async (booking, user, vendor, service) => {
         </div>
 
         <div class="btn-container">
-          <a href="#" class="btn" style="background-color: ${COLORS.secondary};">Accept & View Details</a>
+          <a href="${getAppUrl('/vendor/bookings')}" class="btn" style="background-color: ${COLORS.secondary};">View in vendor portal</a>
         </div>
       `;
 
@@ -389,6 +418,143 @@ const sendDuesPaymentApprovedEmail = async (vendor, amount, balanceAfter) => {
   } catch (error) { console.error(error); }
 };
 
+async function sendEngineerOpsJobAssignedEmail(engineer, vendor, job, project) {
+  const email = engineer?.email;
+  if (!email) return { success: false, skipped: true };
+
+  const vendorName = escapeHtml(vendor?.businessName || vendor?.name || 'Your vendor');
+  const content = `
+    <div class="badge badge-primary">New assignment</div>
+    <h2>You have a new field job</h2>
+    <p><strong>${vendorName}</strong> assigned you a job. Open the engineer app to accept and view client details.</p>
+    <div class="card">
+      <div class="card-title">Job details</div>
+      <div class="data-row"><span class="data-label">Job code</span><span class="data-value">${escapeHtml(job.jobCode || job._id)}</span></div>
+      <div class="data-row"><span class="data-label">Service</span><span class="data-value">${escapeHtml(job.title)}</span></div>
+      <div class="data-row"><span class="data-label">Client</span><span class="data-value">${escapeHtml(job.clientName || '—')}</span></div>
+      <div class="data-row"><span class="data-label">Location</span><span class="data-value">${escapeHtml([job.city, job.address].filter(Boolean).join(' — ') || '—')}</span></div>
+      <div class="data-row"><span class="data-label">Budget (est.)</span><span class="data-value">₹${Number(job.budget || 0).toLocaleString('en-IN')}</span></div>
+    </div>
+    <div class="btn-container">
+      <a href="${getAppUrl(`/engineer/ops-jobs/${job._id}`)}" class="btn">Open job in app</a>
+    </div>
+  `;
+  return sendMailSafe({
+    to: email,
+    subject: `Action required: ${job.jobCode || 'New job'} — WBI`,
+    html: content,
+    title: 'New job assigned',
+    preheader: `${vendorName} assigned: ${job.title}`
+  });
+}
+
+async function sendVendorOpportunityEmail(vendor, opp) {
+  if (!vendor?.email) return { success: false, skipped: true };
+  const content = `
+    <div class="badge badge-primary">New opportunity</div>
+    <h2>New business intake</h2>
+    <p>Hello ${escapeHtml(vendor.businessName || vendor.name)}, a new project is available. Review and respond in your vendor portal.</p>
+    <div class="card">
+      <div class="card-title">Opportunity</div>
+      <div class="data-row"><span class="data-label">Code</span><span class="data-value">${escapeHtml(opp.opportunityCode || '—')}</span></div>
+      <div class="data-row"><span class="data-label">Title</span><span class="data-value">${escapeHtml(opp.title || '—')}</span></div>
+      <div class="data-row"><span class="data-label">City</span><span class="data-value">${escapeHtml(opp.city || '—')}</span></div>
+      <div class="data-row"><span class="data-label">Budget</span><span class="data-value">${escapeHtml(opp.budgetLabel || 'On request')}</span></div>
+      <div class="data-row"><span class="data-label">Engineers needed</span><span class="data-value">${opp.requiredEngineers || 1}</span></div>
+    </div>
+    <div class="btn-container">
+      <a href="${getAppUrl('/vendor/business-intake')}" class="btn">View in portal</a>
+    </div>
+  `;
+  return sendMailSafe({
+    to: vendor.email,
+    subject: `New lead: ${opp.opportunityCode || 'Opportunity'} — WBI`,
+    html: content,
+    title: 'New opportunity',
+    preheader: opp.title || 'New project in your area'
+  });
+}
+
+async function sendVendorEngineerJobUpdateEmail(vendor, job, engineer, status) {
+  if (!vendor?.email) return { success: false, skipped: true };
+  const engineerName = escapeHtml(engineer?.name || job.engineerName || 'Engineer');
+  const verbs = { accepted: 'accepted', rejected: 'declined', completed: 'completed' };
+  const verb = verbs[status] || status;
+  const content = `
+    <div class="badge badge-success">Job update</div>
+    <h2>${engineerName} ${verb} the job</h2>
+    <p>Your ops job status has been updated.</p>
+    <div class="card">
+      <div class="data-row"><span class="data-label">Job</span><span class="data-value">${escapeHtml(job.title || job.jobCode)}</span></div>
+      <div class="data-row"><span class="data-label">Engineer</span><span class="data-value">${engineerName}</span></div>
+      <div class="data-row"><span class="data-label">Time</span><span class="data-value">${new Date().toLocaleString('en-IN')}</span></div>
+    </div>
+    <div class="btn-container">
+      <a href="${getAppUrl(job.projectId ? `/vendor/project-ops/${job.projectId}` : '/vendor/project-ops')}" class="btn">Open project</a>
+    </div>
+  `;
+  return sendMailSafe({
+    to: vendor.email,
+    subject: `Engineer ${verb}: ${job.jobCode || job.title} — WBI`,
+    html: content,
+    title: 'Job update',
+    preheader: `${engineerName} ${verb} — ${job.title}`
+  });
+}
+
+async function sendVendorPartnerActivationEmail(vendor, onboardingPayload = {}) {
+  if (!vendor?.email) return { success: false, skipped: true };
+  const partnerName = escapeHtml(vendor.businessName || vendor.name || 'Partner');
+  const code = onboardingPayload.uniqueCompanyCode || vendor.uniqueCompanyCode;
+  const content = `
+    <div class="badge badge-success">Go live</div>
+    <h2>Your partner workspace is active</h2>
+    <p>Hello ${partnerName}, congratulations — your WBI partner dashboard has been provisioned and is ready to use.</p>
+    <div class="card">
+      <div class="card-title">Activation summary</div>
+      <div class="data-row"><span class="data-label">Partner</span><span class="data-value">${partnerName}</span></div>
+      ${code ? `<div class="data-row"><span class="data-label">Company code</span><span class="data-value">${escapeHtml(code)}</span></div>` : ''}
+      <div class="data-row"><span class="data-label">Activated</span><span class="data-value">${new Date().toLocaleString('en-IN')}</span></div>
+    </div>
+    <div class="btn-container">
+      <a href="${getAppUrl('/vendor/digital-solution/dashboard')}" class="btn">Open partner dashboard</a>
+    </div>
+  `;
+  return sendMailSafe({
+    to: vendor.email,
+    subject: 'Partner workspace active — WBI',
+    html: content,
+    title: 'Workspace active',
+    preheader: 'Your WBI partner dashboard is live'
+  });
+}
+
+async function sendServiceRequestPaymentEmail({ email, name, serviceName, requestCode, amount, razorpayPaymentId, serviceRequestId }) {
+  if (!email) return { success: false, skipped: true };
+  const content = `
+    <div class="badge badge-success">Payment received</div>
+    <h2>Thank you, ${escapeHtml(name)}</h2>
+    <p>We received your payment. Your request is being assigned to verified vendors.</p>
+    <div class="card">
+      <div class="card-title">Payment summary</div>
+      <div class="data-row"><span class="data-label">Request ID</span><span class="data-value">${escapeHtml(requestCode || serviceRequestId)}</span></div>
+      <div class="data-row"><span class="data-label">Service</span><span class="data-value">${escapeHtml(serviceName)}</span></div>
+      <div class="data-row"><span class="data-label">Amount paid</span><span class="data-value">₹${Number(amount || 0).toLocaleString('en-IN')}</span></div>
+      ${razorpayPaymentId ? `<div class="data-row"><span class="data-label">Payment ref</span><span class="data-value">${escapeHtml(razorpayPaymentId)}</span></div>` : ''}
+    </div>
+    <div class="btn-container">
+      <a href="${getAppUrl('/user/my-bookings')}" class="btn">Track status</a>
+    </div>
+  `;
+  return sendMailSafe({
+    to: email,
+    subject: `Payment received — ${serviceName} — WBI`,
+    html: content,
+    title: 'Payment received',
+    preheader: `₹${amount} received for ${serviceName}`
+  });
+}
+
 module.exports = {
   sendOTPEmail,
   sendWelcomeEmail,
@@ -396,7 +562,13 @@ module.exports = {
   sendBookingCompletionEmails,
   sendWithdrawalApprovedEmail,
   sendDuesPaymentApprovedEmail,
-  sendB2BJobCompletionEmail
+  sendB2BJobCompletionEmail,
+  sendEngineerOpsJobAssignedEmail,
+  sendVendorOpportunityEmail,
+  sendVendorEngineerJobUpdateEmail,
+  sendVendorPartnerActivationEmail,
+  sendServiceRequestPaymentEmail,
+  getAppUrl
 };
 
 /**

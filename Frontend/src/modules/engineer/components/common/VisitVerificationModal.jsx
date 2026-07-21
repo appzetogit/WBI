@@ -1,29 +1,101 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiX, FiCheckCircle } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import engineerService from '../../../../services/engineerService';
+import { getUserFacingError } from '../../../../utils/userFacingError';
 
 /**
- * Reusable Visit Verification Modal
- * Used for OTP-based arrival verification by vendors/workers
- * 
- * @param {boolean} isOpen - Whether modal is visible
- * @param {function} onClose - Callback to close modal
- * @param {string} bookingId - The booking ID to verify
- * @param {function} onSuccess - Callback on successful verification
+ * Visit Verification Modal — OTP + fresh GPS check-in
  */
 const VisitVerificationModal = ({ isOpen, onClose, bookingId, onSuccess }) => {
   const [otpInput, setOtpInput] = useState(['', '', '', '']);
   const [loading, setLoading] = useState(false);
+  const verifyingRef = useRef(false);
 
-  // Auto-verify as last digit enters
+  const getPosition = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Geolocation is not supported on this device'));
+        return;
+      }
+
+      // Production: require a fresh high-accuracy fix (no stale cached coords)
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        (error) => {
+          // Fallback once with slightly longer timeout
+          navigator.geolocation.getCurrentPosition(
+            resolve,
+            reject,
+            { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 }
+          );
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    });
+  };
+
+  const handleVerify = useCallback(async () => {
+    const otp = otpInput.join('');
+    if (otp.length !== 4) {
+      toast.error('Please enter the 4-digit OTP');
+      return;
+    }
+    if (verifyingRef.current) return;
+    verifyingRef.current = true;
+    setLoading(true);
+
+    try {
+      const position = await getPosition();
+      const accuracy = position.coords.accuracy;
+      if (typeof accuracy === 'number' && accuracy > 200) {
+        toast.error('GPS accuracy is too low. Move outdoors and try again.');
+        return;
+      }
+
+      const location = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      };
+
+      const response = await engineerService.verifyVisit(bookingId, otp, location);
+
+      if (response.success) {
+        toast.success('Visit verified successfully');
+        setOtpInput(['', '', '', '']);
+        onSuccess?.(response);
+        onClose?.();
+      } else {
+        toast.error(response.message || 'Invalid OTP. Please try again.');
+      }
+    } catch (error) {
+      if (error?.code === 1) {
+        toast.error('Location permission is required to verify arrival.');
+      } else if (error?.code === 3) {
+        toast.error('Could not get GPS fix in time. Try again outdoors.');
+      } else {
+        toast.error(getUserFacingError(error, 'Visit verification failed. Please try again.'));
+      }
+    } finally {
+      verifyingRef.current = false;
+      setLoading(false);
+    }
+  }, [otpInput, bookingId, onSuccess, onClose]);
+
   React.useEffect(() => {
+    if (!isOpen) {
+      setOtpInput(['', '', '', '']);
+      verifyingRef.current = false;
+      setLoading(false);
+      return;
+    }
     const otpValue = otpInput.join('');
-    if (otpValue.length === 4 && !loading && isOpen) {
+    if (otpValue.length === 4 && !loading) {
       handleVerify();
     }
-  }, [otpInput]);
+  }, [otpInput, isOpen, loading, handleVerify]);
 
   const handleOtpChange = (index, value) => {
     const sanitized = value.replace(/[^0-9]/g, '');
@@ -33,7 +105,6 @@ const VisitVerificationModal = ({ isOpen, onClose, bookingId, onSuccess }) => {
     newOtp[index] = sanitized;
     setOtpInput(newOtp);
 
-    // Auto-focus next input
     if (sanitized && index < 3) {
       document.getElementById(`visit-otp-${index + 1}`)?.focus();
     }
@@ -45,176 +116,75 @@ const VisitVerificationModal = ({ isOpen, onClose, bookingId, onSuccess }) => {
     }
   };
 
-  // Robust Geolocation Helper - PERMISSIVE MODE
-  const getPosition = () => {
-    return new Promise((resolve, reject) => {
-      // FASTEST STRATEGY: Prefer Wi-Fi/Cell (Low Accuracy) + Cached Positions
-      const options = {
-        enableHighAccuracy: false, // Disable GPS requirement for speed
-        timeout: 30000,            // 30s timeout
-        maximumAge: Infinity       // Accept any valid cached position
-      };
-
-      navigator.geolocation.getCurrentPosition(
-        resolve,
-        (error) => {
-          console.warn("Low accuracy geo failed, trying high accuracy fallback...", error);
-          // Emergency fallback: Try GPS
-          navigator.geolocation.getCurrentPosition(
-            resolve,
-            reject,
-            { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
-          );
-        },
-        options
-      );
-    });
-  };
-
-  const handleVerify = async () => {
-    const otp = otpInput.join('');
-    if (otp.length !== 4) {
-      toast.error('Please enter 4-digit OTP');
-      return;
-    }
-
-    setLoading(true);
-
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is required for verification');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const position = await getPosition();
-      const location = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude
-      };
-
-      // Use workerService instead of direct import
-      const response = await engineerService.verifyVisit(bookingId, otp, location);
-
-      if (response.success) {
-        toast.success('Visit Verified Successfully!');
-        setOtpInput(['', '', '', '']);
-        onClose();
-        onSuccess?.();
-      } else {
-        toast.error(response.message || 'Verification failed');
-      }
-    } catch (error) {
-      console.error("Verification Error:", error);
-
-      // Handle geolocation errors
-      if (error.code === 1) {
-        toast.error('Location permission denied. Please enable location access.');
-      } else if (error.code === 2) {
-        toast.error('Location unavailable. Check your GPS settings.');
-      } else if (error.code === 3) {
-        toast.error('Location timeout. Please try again.');
-      } else {
-        // API error
-        toast.error(error.response?.data?.message || 'Verification failed');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleClose = () => {
-    if (!loading) {
-      setOtpInput(['', '', '', '']);
-      onClose();
-    }
-  };
-
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          {/* Backdrop */}
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={handleClose}
+            onClick={loading ? undefined : onClose}
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           />
-
-          {/* Modal Content */}
           <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            initial={{ scale: 0.95, opacity: 0, y: 16 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-            transition={{ type: 'spring', damping: 25 }}
-            className="bg-white w-full max-w-sm rounded-[24px] p-8 shadow-2xl relative z-10"
+            exit={{ scale: 0.95, opacity: 0, y: 16 }}
+            className="bg-white w-full max-w-md rounded-3xl shadow-2xl relative z-10 overflow-hidden"
           >
-            {/* Header */}
-            <div className="flex justify-between items-center mb-6">
+            <div className="px-6 pt-6 pb-2 flex justify-between items-start">
               <div>
-                <h3 className="text-2xl font-bold text-gray-900 leading-tight">
-                  Verify Arrival
-                </h3>
-                <p className="text-xs text-teal-600 font-bold uppercase tracking-wider mt-1">
-                  Check-in Verification
+                <h3 className="text-xl font-bold text-gray-900">Verify Arrival</h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Enter the customer OTP. Your current GPS location will be recorded.
                 </p>
               </div>
               <button
-                onClick={handleClose}
+                type="button"
                 disabled={loading}
-                className="p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-400 disabled:opacity-50"
+                onClick={onClose}
+                className="p-2 rounded-full hover:bg-gray-100 text-gray-500"
+                aria-label="Close"
               >
-                <FiX className="w-6 h-6" />
+                <FiX className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Description */}
-            <div className="mb-8">
-              <p className="text-gray-500 font-medium leading-relaxed">
-                Please enter the <span className="text-gray-900 font-bold">4-digit code</span> provided by the customer to confirm your arrival.
-              </p>
-            </div>
+            <div className="px-6 py-6">
+              <div className="flex justify-center gap-3 mb-6">
+                {otpInput.map((digit, index) => (
+                  <input
+                    key={index}
+                    id={`visit-otp-${index}`}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={1}
+                    value={digit}
+                    disabled={loading}
+                    onChange={(e) => handleOtpChange(index, e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(index, e)}
+                    className="w-14 h-14 text-center text-2xl font-bold border-2 border-gray-200 rounded-xl focus:border-teal-500 focus:outline-none disabled:opacity-60"
+                  />
+                ))}
+              </div>
 
-            {/* OTP Inputs */}
-            <div className="flex justify-between gap-3 mb-8">
-              {otpInput.map((digit, idx) => (
-                <input
-                  key={idx}
-                  id={`visit-otp-${idx}`}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  autoFocus={idx === 0}
-                  disabled={loading}
-                  className={`w-14 h-16 text-center text-2xl font-bold rounded-2xl transition-all outline-none border-2 disabled:opacity-50
-                    ${digit
-                      ? 'border-teal-500 bg-teal-50 text-teal-900'
-                      : 'border-gray-200 bg-gray-50 text-gray-800 focus:border-teal-400 focus:bg-white focus:shadow-lg focus:shadow-teal-100'
-                    }`}
-                  onChange={(e) => handleOtpChange(idx, e.target.value)}
-                  onKeyDown={(e) => handleKeyDown(idx, e)}
-                />
-              ))}
-            </div>
-
-            {/* Verify Button */}
-            <button
-              onClick={handleVerify}
-              disabled={loading}
-              className="w-full py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-bold text-lg shadow-xl shadow-teal-600/20 transition-all active:scale-[0.98] disabled:opacity-70 disabled:shadow-none flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
+              <button
+                type="button"
+                onClick={handleVerify}
+                disabled={loading || otpInput.join('').length !== 4}
+                className="w-full py-3.5 rounded-xl text-white font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+                style={{ backgroundColor: '#10AFA5' }}
+              >
+                {loading ? (
+                  <span className="inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
                   <FiCheckCircle className="w-5 h-5" />
-                  <span>Verify & Start Work</span>
-                </>
-              )}
-            </button>
+                )}
+                {loading ? 'Verifying…' : 'Verify & Continue'}
+              </button>
+            </div>
           </motion.div>
         </div>
       )}

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FiCheckCircle, FiUpload, FiMapPin, FiCreditCard, FiUser, FiBriefcase, FiZap, FiLayers } from 'react-icons/fi';
+import React, { useState, useEffect } from 'react';
+import { FiCheckCircle, FiUpload, FiMapPin, FiCreditCard, FiUser, FiBriefcase, FiZap, FiLayers, FiLoader } from 'react-icons/fi';
 import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
 import { toast } from 'react-hot-toast';
 import api from '../../../../services/api';
@@ -519,80 +519,240 @@ export const StepOneTimeCapacity = ({ data, updateData }) => (
 
 export const StepProjectServices = ({ data, updateData }) => {
   const [expandedCategory, setExpandedCategory] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [regTemplates, setRegTemplates] = useState([]);
 
-  const categories = [
-    { name: "CCTV & Surveillance (C01)", services: ["CCTV Camera Installation", "CCTV Maintenance & AMC", "CCTV Repair & Troubleshooting", "DVR/NVR Setup", "CCTV Cabling & Wiring", "Remote Viewing Setup", "Camera Relocation", "Old to New Migration"] },
-    { name: "IT & Computer Services (C02)", services: ["Desktop Repair", "Laptop Repair", "OS Installation", "Virus Removal", "Data Recovery", "Hardware Upgrade", "Printer Repair", "Software Installation", "Computer AMC", "Server Setup"] },
-    { name: "Networking & Internet (C03)", services: ["Router & Modem Setup", "WiFi Range Extension", "Structured Cabling", "Switch & Access Point Installation", "Network Troubleshooting", "VPN Setup", "CCTV-Network Integration", "Office Network Setup"] },
-    { name: "Energy & Power Backup (C04)", services: ["Solar Panel Installation", "Solar Maintenance", "Inverter Installation", "UPS Installation", "Battery Replacement", "Generator Installation", "Stabilizer Installation", "Solar Inspection"] },
-    { name: "Banking & Financial Devices (C05)", services: ["ATM Maintenance", "POS Machine Installation", "Biometric Device Setup", "Cash Recycler/Kiosk Support", "Passbook Printer Service", "Currency Counting Machine Repair"] },
-    { name: "Security Systems (C07)", services: ["Access Control Systems", "Video Door Phone Installation", "Burglar Alarm Systems", "Fire Alarm Systems", "Boom Barrier Installation", "Intercom Systems", "Smart Lock Installation"] },
-    { name: "Telecom & Communication (C08)", services: ["Landline Installation", "EPABX Setup & Repair", "Fiber/Broadband Installation", "Mobile Tower Maintenance", "Telephone Exchange Service", "Intercom System Repair"] },
-    { name: "Healthcare Equipment (C10)", services: ["Oxygen Concentrator Service", "Wheelchair & Mobility Aid Repair", "Hospital Bed Maintenance", "BP Monitor/Glucometer Calibration", "Nebulizer Repair", "Medical Refrigerator Service", "Diagnostic Equipment AMC"] },
-    { name: "Agricultural Machinery (C11)", services: ["Tractor Repair", "Power Tiller Repair", "Water Pump Installation", "Irrigation System Setup", "Agricultural Drone Service", "Sprayer & Duster Repair", "Rice Mill & Thresher Maintenance", "Borewell Motor Repair"] },
-    { name: "Office & Commercial Equipment (C15)", services: ["Printer/Copier AMC", "EPABX & Intercom Setup", "Biometric Attendance System", "Projector Installation & Repair", "Shredder Repair", "Scanner Setup"] },
-    { name: "Industrial Machinery & Automation (C16)", services: ["PLC/Automation Repair", "Motor Rewinding", "Compressor Repair", "Generator/DG Set Service", "Conveyor System Maintenance", "Industrial Electrical AMC"] },
-    { name: "Elevator & Lift Services (C18)", services: ["Lift Installation", "Lift AMC & Repair", "Escalator Maintenance"] },
-    { name: "Fire & Safety Equipment (C19)", services: ["Fire Extinguisher Refill/Service", "Smoke Detector Installation", "Sprinkler System Maintenance", "Fire Hydrant System Check"] },
-    { name: "Educational & Institutional Equipment (C20)", services: ["Smart Board & Projector Setup", "Biometric Attendance Systems", "Computer Lab AMC", "Public Address System Setup"] },
-    { name: "Retail & POS Equipment (C21)", services: ["Billing Software Setup", "Barcode Scanner/Printer Repair", "POS Terminal Maintenance", "Weighing Scale Calibration"] },
-    { name: "Smart Home Automation (C23)", services: ["Smart Lighting Setup", "Home Automation Panel Installation", "Smart Switch & Sensor Setup", "Voice Assistant Integration"] }
-  ];
+  const selectedServices = data.selectedProjectServices || [];
+  const selectedCodes = selectedServices.map((s) => s.categoryCode);
+  const selectedCodesKey = selectedCodes.join(',');
 
-  const selected = data.projectServices || [];
-  
-  const toggle = (srv) => {
-    if (selected.includes(srv)) updateData({ projectServices: selected.filter(s => s !== srv) });
-    else updateData({ projectServices: [...selected, srv] });
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get('/public/service-configs');
+        if (cancelled) return;
+        if (res.data?.success) {
+          setCategories(res.data.data || []);
+          setLoadError(null);
+        } else {
+          setLoadError('Failed to load service catalog');
+        }
+      } catch (err) {
+        if (!cancelled) setLoadError(err.response?.data?.message || 'Failed to load services');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedCodesKey) {
+      setRegTemplates([]);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const res = await api.get(
+          `/public/registration-templates?codes=${encodeURIComponent(selectedCodesKey)}`
+        );
+        if (!cancelled && res.data?.success) {
+          setRegTemplates(res.data.data || []);
+          updateData({ registrationRequirements: res.data.data || [] });
+        }
+      } catch {
+        if (!cancelled) setRegTemplates([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCodesKey]);
+
+  const toggleCategory = (cat) => {
+    const exists = selectedServices.find((s) => s.categoryCode === cat.categoryCode);
+    let next;
+    if (exists) {
+      next = selectedServices.filter((s) => s.categoryCode !== cat.categoryCode);
+    } else {
+      const defaultSubs = (cat.subCategories?.length
+        ? cat.subCategories.map((s) => s.subCatName || s.subCatCode)
+        : (cat.projectMilestones || []).map((m) => m.title));
+      next = [
+        ...selectedServices,
+        {
+          categoryCode: cat.categoryCode,
+          categoryName: cat.categoryName,
+          subServices: defaultSubs
+        }
+      ];
+    }
+    updateData({
+      selectedProjectServices: next,
+      projectServices: next.map((s) => `${s.categoryName} (${s.categoryCode})`)
+    });
   };
-  
-  const getSelectedCount = (cat) => cat.services.filter(s => selected.includes(s)).length;
+
+  const toggleSubService = (cat, title) => {
+    const existing = selectedServices.find((s) => s.categoryCode === cat.categoryCode);
+    if (!existing) {
+      const next = [
+        ...selectedServices,
+        { categoryCode: cat.categoryCode, categoryName: cat.categoryName, subServices: [title] }
+      ];
+      updateData({
+        selectedProjectServices: next,
+        projectServices: next.map((s) => `${s.categoryName} (${s.categoryCode})`)
+      });
+      return;
+    }
+
+    const subs = existing.subServices || [];
+    const nextSubs = subs.includes(title) ? subs.filter((t) => t !== title) : [...subs, title];
+    let next = selectedServices.map((s) =>
+      s.categoryCode === cat.categoryCode ? { ...s, subServices: nextSubs } : s
+    );
+    if (nextSubs.length === 0) {
+      next = next.filter((s) => s.categoryCode !== cat.categoryCode);
+    }
+    updateData({
+      selectedProjectServices: next,
+      projectServices: next.map((s) => `${s.categoryName} (${s.categoryCode})`)
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
+        <FiLoader className="w-5 h-5 animate-spin" /> Loading service catalog...
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+        {loadError}. Please refresh and try again.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 animate-fade-in flex flex-col h-full">
       <h3 className="text-xl font-bold">Project Expertise</h3>
-      <p className="text-gray-500 text-sm mb-4">Select the large-scale projects you are equipped to handle.</p>
-      
+      <p className="text-gray-500 text-sm mb-4">
+        Select from live service templates. Milestones auto-configure after approval.
+      </p>
       <div className="flex-1 overflow-y-auto space-y-3 max-h-[50vh] pr-2">
-        {categories.map((cat, idx) => {
-          const isExpanded = expandedCategory === idx;
-          const selectedCount = getSelectedCount(cat);
-          
+        {categories.map((cat) => {
+          const isExpanded = expandedCategory === cat.categoryCode;
+          const isSelected = selectedCodes.includes(cat.categoryCode);
+          const selected = selectedServices.find((s) => s.categoryCode === cat.categoryCode);
+          const milestones = cat.projectMilestones || [];
+          const serviceOptions = (cat.subCategories?.length
+            ? cat.subCategories.map((s) => s.subCatName || s.subCatCode)
+            : milestones.map((m) => m.title));
+          const selectedCount = selected?.subServices?.length || 0;
+
           return (
-            <div key={idx} className="border rounded-xl bg-white overflow-hidden shadow-sm transition-all">
-              <div 
+            <div key={cat.categoryCode} className="border rounded-xl bg-white overflow-hidden shadow-sm transition-all">
+              <div
                 className={`flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-teal-50/50 border-b' : ''}`}
-                onClick={() => setExpandedCategory(isExpanded ? null : idx)}
+                onClick={() => setExpandedCategory(isExpanded ? null : cat.categoryCode)}
               >
-                <div className="flex items-center gap-3">
-                   <h4 className={`font-bold ${isExpanded || selectedCount > 0 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
-                     {cat.name}
-                   </h4>
-                   {selectedCount > 0 && (
-                     <span className="bg-[#0D8A72] text-white text-[10px] font-bold px-2.5 py-1 rounded-full">
-                       {selectedCount} Selected
-                     </span>
-                   )}
+                <div className="flex items-center gap-3 min-w-0">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(e) => { e.stopPropagation(); toggleCategory(cat); }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded"
+                  />
+                  <div className="min-w-0">
+                    <h4 className={`font-bold truncate ${isSelected ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
+                      {cat.categoryCode} · {cat.categoryName}
+                    </h4>
+                    <p className="text-[11px] text-gray-400">
+                      {serviceOptions.length} {cat.subCategories?.length ? 'sub-services' : 'milestone template steps'}
+                    </p>
+                  </div>
+                  {selectedCount > 0 && (
+                    <span className="bg-[#0D8A72] text-white text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0">
+                      {selectedCount} Selected
+                    </span>
+                  )}
                 </div>
-                <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D8A72]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className={`w-5 h-5 shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D8A72]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
               </div>
-              
+
               {isExpanded && (
-                <div className="p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
-                  {cat.services.map(srv => (
-                    <label key={srv} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors shadow-sm ${selected.includes(srv) ? 'bg-teal-50/50 border-[#0D8A72]' : 'bg-white hover:border-[#0D8A72]/50'}`}>
-                      <input type="checkbox" checked={selected.includes(srv)} onChange={() => toggle(srv)} className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded" />
-                      <span className={`text-sm font-medium ${selected.includes(srv) ? 'text-[#0D8A72]' : 'text-gray-700'}`}>{srv}</span>
-                    </label>
-                  ))}
+                <div className="p-4 bg-gray-50 space-y-3 animate-fade-in">
+                  <p className="text-xs text-gray-500">
+                    {cat.subCategories?.length ? 'Sub-services for this category:' : 'Milestone capabilities for this service:'}
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {serviceOptions.map((title, idx) => {
+                      const checked = selected?.subServices?.includes(title);
+                      return (
+                        <label key={`${cat.categoryCode}-${title}`} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors shadow-sm ${checked ? 'bg-teal-50/50 border-[#0D8A72]' : 'bg-white hover:border-[#0D8A72]/50'}`}>
+                          <input
+                            type="checkbox"
+                            checked={!!checked}
+                            onChange={() => toggleSubService(cat, title)}
+                            className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded"
+                          />
+                          <span className={`text-sm font-medium ${checked ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
+                            {idx + 1}. {title}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {regTemplates.length > 0 && (
+        <div className="mt-4 border border-teal-100 bg-teal-50/40 rounded-xl p-4 space-y-3">
+          <h4 className="text-sm font-bold text-[#0D8A72]">Dynamic requirements for selected services</h4>
+          {regTemplates.map((tpl) => (
+            <div key={tpl.categoryCode} className="text-xs text-gray-700 space-y-1">
+              <p className="font-semibold">
+                {tpl.categoryCode} · {tpl.categoryName}
+              </p>
+              {(tpl.requiredDocuments || []).length > 0 && (
+                <p>
+                  <span className="text-gray-500">Documents: </span>
+                  {tpl.requiredDocuments.map((d) => d.label || d.key).join(', ')}
+                </p>
+              )}
+              {(tpl.requiredCertifications || []).length > 0 && (
+                <p>
+                  <span className="text-gray-500">Certifications: </span>
+                  {tpl.requiredCertifications.map((d) => d.label || d.key).join(', ')}
+                </p>
+              )}
+              {(tpl.requiredSkills || []).length > 0 && (
+                <p>
+                  <span className="text-gray-500">Skills: </span>
+                  {tpl.requiredSkills.join(', ')}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

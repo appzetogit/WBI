@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Users, UserCheck, UsersRound, ClipboardList, CalendarOff, Clock, FileBadge, ArrowUpRight } from 'lucide-react';
 import useWorkforceCounts from '../../../hooks/useWorkforceCounts';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
   <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
@@ -26,7 +27,8 @@ const Stat = ({ icon: Icon, label, value, color, href, loading }) => (
 
 const WorkforceStatCards = () => {
   const { counts, loading } = useWorkforceCounts();
-  const b = '/vendor/dynamic/workforce';
+  const { basePath } = useVendorBasePath();
+  const b = `${basePath}/workforce`;
   const cards = [
     { icon: Users, label: 'Engineers', value: counts.totalEngineers, color: 'bg-blue-600', href: `${b}/engineers` },
     { icon: UserCheck, label: 'Available', value: counts.available, color: 'bg-emerald-600', href: `${b}/availability` },

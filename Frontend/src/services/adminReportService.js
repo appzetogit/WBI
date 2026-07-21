@@ -31,6 +31,16 @@ const adminReportService = {
     }
   },
 
+  // Get Engineer Report
+  getEngineerReport: async (params) => {
+    try {
+      const response = await api.get('/admin/reports/engineers', { params });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { message: 'Failed to fetch engineer report' };
+    }
+  },
+
   // Get Customer/User Report
   getCustomerReport: async (params) => {
     try {

@@ -30,6 +30,7 @@ const iconMap = {
   Vendors: FiBriefcase,
   Workers: FiUser,
   Engineers: FiUser,
+  B2B: FiBriefcase,
   "Project OS Templates": FiGrid,
   "Form Builder": FiGrid,
   Verifications: FiShield,
@@ -70,18 +71,34 @@ const getChildRoute = (parentRoute, childName) => {
       "Vendor Bookings": "/admin/vendors/bookings",
       "Vendor Analytics": "/admin/vendors/analytics",
       "Vendor Payments": "/admin/vendors/payments",
+      "Settlements & Withdrawals": "/admin/vendors/settlements/pending",
+      "Service Management": "/admin/vendors/service-management",
+      "Vendor Services Catalog": "/admin/vendors/services-catalog",
+      "Vendor Parts Catalog": "/admin/vendors/parts-catalog",
+      "Project OS Templates": "/admin/vendors/project-templates",
+      "Project Assignment Engine": "/admin/vendors/assignment-engine",
+      "Service Form Builder": "/admin/vendors/form-builder",
+    },
+    "/admin/b2b": {
+      "Company Approvals": "/admin/b2b/companies",
+      "Corporate Wallets": "/admin/b2b/wallets",
+      "Invoices": "/admin/b2b/invoices",
+      "Reports": "/admin/b2b/reports",
+      "Support Tickets": "/admin/b2b/support",
     },
     "/admin/workers": {
       "All Workers": "/admin/workers/all",
       "Worker Jobs": "/admin/workers/jobs",
       "Worker Analytics": "/admin/workers/analytics",
       "Worker Payments": "/admin/workers/payments",
+      "Document Verification": "/admin/workers/verifications",
     },
     "/admin/engineers": {
       "All Engineers": "/admin/engineers/all",
       "Engineer Jobs": "/admin/engineers/jobs",
       "Engineer Analytics": "/admin/engineers/analytics",
       "Engineer Payments": "/admin/engineers/payments",
+      "Document Verification": "/admin/engineers/verifications",
     },
     "/admin/bookings": {
       "All Bookings": "/admin/bookings",
@@ -115,14 +132,15 @@ const getChildRoute = (parentRoute, childName) => {
     "/admin/settings": {
       "General Settings": "/admin/settings/general",
       "Worker Assignment": "/admin/settings/worker-assignment",
-      "Service Configuration": "/admin/settings/service-config",
+      "Service Configuration": "/admin/vendors/service-management",
+      "Project Assignment Engine": "/admin/vendors/assignment-engine",
       "System Settings": "/admin/settings/system",
     },
     "/admin/settlements": {
-      "Pending": "/admin/settlements/pending",
-      "Withdrawals": "/admin/settlements/withdrawals",
-      "Vendors with Due": "/admin/settlements/vendors",
-      "History": "/admin/settlements/history",
+      "Pending": "/admin/vendors/settlements/pending",
+      "Withdrawals": "/admin/vendors/settlements/withdrawals",
+      "Vendors with Due": "/admin/vendors/settlements/vendors",
+      "History": "/admin/vendors/settlements/history",
     },
     "/admin/digital-solutions": {
       "Web Development": "/admin/web-enquiries",
@@ -365,8 +383,8 @@ const AdminSidebar = ({ isOpen, onClose }) => {
               {counts.vendors > 99 ? '99+' : counts.vendors}
             </span>
           )}
-          {item.title === "Settlements" && (counts.withdrawals + counts.pendingSettlements) > 0 && (
-            <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse mr-2">
+          {item.title === "Vendors" && (counts.withdrawals + counts.pendingSettlements) > 0 && (
+            <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm mr-2">
               {(counts.withdrawals + counts.pendingSettlements) > 99 ? '99+' : (counts.withdrawals + counts.pendingSettlements)}
             </span>
           )}
@@ -400,7 +418,9 @@ const AdminSidebar = ({ isOpen, onClose }) => {
                   const isChildActive =
                     location.pathname === childRoute ||
                     (childRoute !== item.route &&
-                      location.pathname.startsWith(childRoute));
+                      location.pathname.startsWith(childRoute)) ||
+                    (child === 'Settlements & Withdrawals' &&
+                      location.pathname.startsWith('/admin/vendors/settlements'));
 
                   return (
                     <div
@@ -409,20 +429,20 @@ const AdminSidebar = ({ isOpen, onClose }) => {
                         handleMenuItemClick(childRoute, item.title)
                       }
                       className={`
-                        px-3 py-2 text-sm rounded-lg transition-colors cursor-pointer flex justify-between items-center
+                        px-3 py-2.5 text-sm rounded-lg transition-colors cursor-pointer flex justify-between items-center
                         ${isChildActive
-                          ? "bg-primary-50 text-white font-medium"
-                          : "text-gray-400 hover:bg-slate-700"
+                          ? "bg-slate-600 text-white font-semibold shadow-inner"
+                          : "text-slate-300 hover:bg-slate-700 hover:text-white font-medium"
                         }
                       `}>
                       <span>{child}</span>
-                      {item.title === "Settlements" && child === "Pending" && counts.pendingSettlements > 0 && (
+                      {item.title === "Vendors" && child === "Settlements & Withdrawals" && counts.pendingSettlements > 0 && (
                         <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full">
                           {counts.pendingSettlements}
                         </span>
                       )}
-                      {item.title === "Settlements" && child === "Withdrawals" && counts.withdrawals > 0 && (
-                        <span className="bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full">
+                      {item.title === "Vendors" && child === "Settlements & Withdrawals" && counts.withdrawals > 0 && (
+                        <span className="bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">
                           {counts.withdrawals}
                         </span>
                       )}

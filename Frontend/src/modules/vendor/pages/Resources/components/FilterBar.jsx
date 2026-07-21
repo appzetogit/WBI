@@ -5,7 +5,7 @@ import { useVendorConfig } from '../../../context/VendorConfigContext';
 
 const FilterBar = ({ onApply }) => {
   const { search, setSearch, filters, updateFilter } = useResourcesOps();
-  const { approvedServices = [] } = useVendorConfig() || {};
+  const { approvedServices = [], inventoryCategories = [], toolCategories = [] } = useVendorConfig() || {};
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -34,6 +34,30 @@ const FilterBar = ({ onApply }) => {
             </option>
           ))}
         </select>
+        {inventoryCategories.length > 0 && (
+          <select
+            value={filters.inventoryCategory || ''}
+            onChange={(e) => updateFilter('inventoryCategory', e.target.value)}
+            className="px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white min-w-[160px]"
+          >
+            <option value="">All Inventory Types</option>
+            {inventoryCategories.map((item) => (
+              <option key={item.name} value={item.name}>{item.name}</option>
+            ))}
+          </select>
+        )}
+        {toolCategories.length > 0 && (
+          <select
+            value={filters.toolCategory || ''}
+            onChange={(e) => updateFilter('toolCategory', e.target.value)}
+            className="px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white min-w-[150px]"
+          >
+            <option value="">All Tools</option>
+            {toolCategories.map((item) => (
+              <option key={item.name} value={item.name}>{item.name}</option>
+            ))}
+          </select>
+        )}
         <select
           value={filters.status}
           onChange={(e) => updateFilter('status', e.target.value)}

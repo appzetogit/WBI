@@ -12,12 +12,18 @@ const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const isRfq = type === 'bid_quote_request';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
+    if (!opportunityId) {
+      setError('Missing opportunity id. Close and reopen the opportunity.');
+      return;
+    }
     if (!form.amount || isNaN(form.amount) || Number(form.amount) <= 0) {
       setError('Please enter a valid bid amount');
       return;
@@ -32,10 +38,16 @@ const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
         technicalBid: form.technicalBid,
         financialBid: form.financialBid
       });
+      if (!res.data?.success) {
+        setError(res.data?.message || 'Failed to submit bid');
+        return;
+      }
+      setSuccess('Bid submitted. Linked proposal created.');
       onSuccess?.(res.data);
     } catch (err) {
       const msg = err.response?.data?.message || 'Failed to submit bid. Please try again.';
-      setError(msg);
+      const code = err.response?.data?.code;
+      setError(code === 'KYC_REQUIRED' ? `${msg} (Open Compliance to verify KYC)` : msg);
     } finally {
       setLoading(false);
     }
@@ -50,6 +62,11 @@ const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
           {error}
         </div>
       )}
+      {success && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm px-4 py-2 rounded-lg">
+          {success}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -61,6 +78,7 @@ const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="e.g. 500000"
             required
+            min="1"
           />
         </div>
         <div>
@@ -71,6 +89,7 @@ const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
             onChange={e => setForm(p => ({ ...p, timeline: e.target.value }))}
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="30"
+            min="1"
           />
         </div>
       </div>
@@ -83,6 +102,7 @@ const BidForm = ({ opportunityId, type, onSuccess, onCancel }) => {
           onChange={e => setForm(p => ({ ...p, teamSize: e.target.value }))}
           className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
           placeholder="2"
+          min="1"
         />
       </div>
 

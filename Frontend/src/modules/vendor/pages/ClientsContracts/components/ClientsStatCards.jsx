@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Users, Building2, MessageSquare, FileText, FileSignature, GitBranch, ArrowUpRight } from 'lucide-react';
 import useClientsContractsCounts from '../../../hooks/useClientsContractsCounts';
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const StatCard = ({ icon: Icon, label, value, color, href, loading }) => (
   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow">
@@ -28,7 +29,8 @@ const StatCard = ({ icon: Icon, label, value, color, href, loading }) => (
 
 const ClientsStatCards = () => {
   const { counts, loading } = useClientsContractsCounts();
-  const base = '/vendor/dynamic/clients';
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/clients`;
 
   const cards = [
     { icon: Users, label: 'Individual Clients', value: counts.individualClients, color: 'bg-blue-600', href: `${base}/individual` },

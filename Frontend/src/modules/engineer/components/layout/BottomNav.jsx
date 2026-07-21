@@ -4,10 +4,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { FiHome, FiBriefcase, FiUser, FiDollarSign, FiFolder } from 'react-icons/fi';
 import { HiHome, HiBriefcase, HiUser, HiFolder } from 'react-icons/hi';
-import { FiBell } from 'react-icons/fi';
 import { gsap } from 'gsap';
 import { workerTheme as themeColors } from '../../../../theme';
-import api from '../../../../services/api';
 import engineerService from '../../../../services/engineerService';
 
 const BottomNav = memo(() => {
@@ -18,68 +16,70 @@ const BottomNav = memo(() => {
   const iconRefs = useRef({});
   const activeAnimations = useRef({});
   const [pendingJobsCount, setPendingJobsCount] = useState(0);
-  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
   const queryClient = useQueryClient();
 
-  // Load counts
+  // Load pending job count from engineer API cache / fetch (not worker localStorage)
   useEffect(() => {
-    const updatePendingCount = () => {
+    let cancelled = false;
+
+    const updatePendingCount = async () => {
       try {
-        // Count pending assigned jobs (waiting for accept/reject)
-        const assignedJobs = JSON.parse(localStorage.getItem('workerAssignedJobs') || '[]');
-        const pendingJobs = assignedJobs.filter(job =>
-          job.workerStatus === 'PENDING'
-        );
-        setPendingJobsCount(pendingJobs.length);
-      } catch (error) {
-        console.error('Error reading pending jobs:', error);
+        const cached = queryClient.getQueryData(['engineerAssignedJobs', 1, 'all']);
+        const jobs = cached?.data?.jobs || cached?.jobs || [];
+        if (Array.isArray(jobs) && jobs.length) {
+          const pending = jobs.filter((job) =>
+            ['PENDING', 'pending', 'pending_acceptance', 'ASSIGNED'].includes(job.workerStatus || job.status)
+          ).length;
+          if (!cancelled) setPendingJobsCount(pending);
+          return;
+        }
+
+        const res = await engineerService.getAssignedJobs({ page: 1, limit: 20, status: 'pending' });
+        const list = res?.data?.jobs || res?.jobs || [];
+        if (!cancelled) {
+          setPendingJobsCount(Array.isArray(list) ? list.length : 0);
+        }
+      } catch {
+        // Non-blocking — badge stays at last known value
       }
     };
 
     updatePendingCount();
-
     window.addEventListener('storage', updatePendingCount);
-    window.addEventListener('workerJobsUpdated', updatePendingCount);
-    
+    window.addEventListener('engineerJobsUpdated', updatePendingCount);
+
     // Background Prefetching for Sub-1-second loading
     const prefetchTabs = async () => {
       try {
-        
-        // Prefetch Dashboard
         queryClient.prefetchQuery({
           queryKey: ['engineerDashboardStats'],
           queryFn: () => engineerService.getDashboardStats(),
           staleTime: 60 * 1000
         });
-        
-        // Prefetch Profile
+
         queryClient.prefetchQuery({
           queryKey: ['engineerProfile'],
           queryFn: () => engineerService.getProfile(),
           staleTime: 60 * 1000
         });
 
-        // Prefetch Jobs
         queryClient.prefetchQuery({
           queryKey: ['engineerAssignedJobs', 1, 'all'],
           queryFn: () => engineerService.getAssignedJobs({ page: 1, limit: 10, status: 'all' }),
           staleTime: 60 * 1000
         });
-        
-        // Prefetch Wallet (if controller has getWallet)
-        // (Assuming we'll add it soon if it's missing)
-      } catch (err) {
+      } catch {
         // Silently ignore prefetch errors
       }
     };
 
-    // Delay prefetching slightly so it doesn't block initial render
     const prefetchTimer = setTimeout(prefetchTabs, 500);
 
     return () => {
+      cancelled = true;
       window.removeEventListener('storage', updatePendingCount);
-      window.removeEventListener('workerJobsUpdated', updatePendingCount);
+      window.removeEventListener('engineerJobsUpdated', updatePendingCount);
       clearTimeout(prefetchTimer);
     };
   }, [queryClient]);

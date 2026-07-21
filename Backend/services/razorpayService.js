@@ -76,18 +76,29 @@ const createOrder = async (amount, currency = 'INR', receipt = null, notes = {})
 };
 
 /**
- * Verify payment signature
+ * Verify payment signature (timing-safe)
  */
 const verifyPayment = (razorpay_order_id, razorpay_payment_id, razorpay_signature) => {
   const crypto = require('crypto');
   const secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!secret || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return false;
+  }
 
   const generated_signature = crypto
     .createHmac('sha256', secret)
     .update(`${razorpay_order_id}|${razorpay_payment_id}`)
     .digest('hex');
 
-  return generated_signature === razorpay_signature;
+  try {
+    const expected = Buffer.from(generated_signature);
+    const actual = Buffer.from(String(razorpay_signature));
+    if (expected.length !== actual.length) return false;
+    return crypto.timingSafeEqual(expected, actual);
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -95,6 +106,9 @@ const verifyPayment = (razorpay_order_id, razorpay_payment_id, razorpay_signatur
  */
 const getPaymentDetails = async (paymentId) => {
   try {
+    if (!razorpay) {
+      return { success: false, error: 'Razorpay not initialized' };
+    }
     const payment = await razorpay.payments.fetch(paymentId);
     return {
       success: true,
@@ -106,6 +120,38 @@ const getPaymentDetails = async (paymentId) => {
       success: false,
       error: error.message
     };
+  }
+};
+
+/**
+ * Get order details (for reuse / status checks)
+ */
+const getOrderDetails = async (orderId) => {
+  try {
+    if (!razorpay) {
+      return { success: false, error: 'Razorpay not initialized' };
+    }
+    const order = await razorpay.orders.fetch(orderId);
+    return { success: true, order };
+  } catch (error) {
+    console.error('Razorpay get order error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Fetch payments for an order
+ */
+const getOrderPayments = async (orderId) => {
+  try {
+    if (!razorpay) {
+      return { success: false, error: 'Razorpay not initialized' };
+    }
+    const result = await razorpay.orders.fetchPayments(orderId);
+    return { success: true, payments: result.items || [] };
+  } catch (error) {
+    console.error('Razorpay fetch order payments error:', error);
+    return { success: false, error: error.message, payments: [] };
   }
 };
 
@@ -292,6 +338,8 @@ module.exports = {
   createOrder,
   verifyPayment,
   getPaymentDetails,
+  getOrderDetails,
+  getOrderPayments,
   refundPayment,
   createQRCode,
   getQRCodePayments,

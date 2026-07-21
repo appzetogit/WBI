@@ -184,10 +184,18 @@ const updateProfile = async (req, res) => {
     }
 
     if (req.body.settings) {
+      const prevPrefs = engineer.settings?.notificationPreferences || {};
+      const incomingPrefs = req.body.settings.notificationPreferences || {};
       engineer.settings = {
         notifications: req.body.settings.notifications !== undefined ? req.body.settings.notifications : (engineer.settings?.notifications ?? true),
         soundAlerts: req.body.settings.soundAlerts !== undefined ? req.body.settings.soundAlerts : (engineer.settings?.soundAlerts ?? true),
-        language: req.body.settings.language || engineer.settings?.language || 'en'
+        language: req.body.settings.language || engineer.settings?.language || 'en',
+        notificationPreferences: {
+          jobs: incomingPrefs.jobs !== undefined ? incomingPrefs.jobs : (prevPrefs.jobs ?? true),
+          workUpdates: incomingPrefs.workUpdates !== undefined ? incomingPrefs.workUpdates : (prevPrefs.workUpdates ?? true),
+          payments: incomingPrefs.payments !== undefined ? incomingPrefs.payments : (prevPrefs.payments ?? true),
+          account: incomingPrefs.account !== undefined ? incomingPrefs.account : (prevPrefs.account ?? true)
+        }
       };
     }
 

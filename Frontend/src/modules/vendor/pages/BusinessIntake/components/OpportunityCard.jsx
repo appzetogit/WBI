@@ -2,7 +2,6 @@ import React from 'react';
 import {
   MapPin,
   Clock,
-  Users,
   Building2,
   IndianRupee,
   Eye,
@@ -17,6 +16,7 @@ import {
   priorityConfig,
   getActionLabel,
 } from '../../../services/businessIntakeService';
+import { useVendorConfig } from '../../../context/VendorConfigContext';
 
 const OpportunityCard = ({
   opportunity,
@@ -27,11 +27,13 @@ const OpportunityCard = ({
   bookmarked = false,
   onBookmark,
 }) => {
+  const { approvedServices = [] } = useVendorConfig() || {};
   const {
     _id,
     title,
     type,
     categoryName,
+    categoryCode,
     subServices = [],
     clientInfo,
     requirements,
@@ -42,6 +44,9 @@ const OpportunityCard = ({
     myBidStatus,
     status,
     createdAt,
+    isMyTurnToRespond,
+    assignmentActiveUntil,
+    assignment,
   } = opportunity;
 
   const typeInfo = typeLabels[type] || { label: type, color: 'bg-gray-100 text-gray-700', badge: type };
@@ -65,6 +70,27 @@ const OpportunityCard = ({
       : type === 'bulk_requirement'
       ? 'Team required'
       : null;
+
+  const queueActive = (assignment?.vendorQueue || []).some((q) => q.status === 'active');
+  const showYourTurn =
+    type === 'client_request' &&
+    status === 'open' &&
+    !hasMyBid &&
+    queueActive &&
+    isMyTurnToRespond === true;
+  const showWaitingTurn =
+    type === 'client_request' &&
+    status === 'open' &&
+    !hasMyBid &&
+    queueActive &&
+    isMyTurnToRespond === false;
+
+  const skillTags =
+    subServices?.length > 0
+      ? subServices
+      : (approvedServices || []).find(
+          (s) => (s.categoryCode || s.code) === categoryCode
+        )?.subServices || [];
 
   const primaryHandler = type === 'client_request' ? onAccept : onBid;
 
@@ -112,6 +138,16 @@ const OpportunityCard = ({
           {priority !== 'normal' && (
             <span className={`text-[10px] font-bold uppercase ${priorityInfo.color}`}>
               {priorityInfo.label}
+            </span>
+          )}
+          {showYourTurn && (
+            <span className="text-[10px] font-bold uppercase px-2 py-1 rounded-md bg-emerald-50 text-emerald-700">
+              Your turn
+            </span>
+          )}
+          {showWaitingTurn && (
+            <span className="text-[10px] font-bold uppercase px-2 py-1 rounded-md bg-gray-100 text-gray-600">
+              In queue
             </span>
           )}
         </div>
@@ -166,9 +202,9 @@ const OpportunityCard = ({
       </div>
 
       {/* Skill Tags */}
-      {subServices?.length > 0 && (
+      {skillTags?.length > 0 && (
         <div className="px-5 pb-3 flex flex-wrap gap-1.5">
-          {subServices.slice(0, 4).map((skill) => (
+          {skillTags.slice(0, 4).map((skill) => (
             <span
               key={skill}
               className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600"
@@ -176,8 +212,8 @@ const OpportunityCard = ({
               {skill}
             </span>
           ))}
-          {subServices.length > 4 && (
-            <span className="text-[11px] text-gray-400">+{subServices.length - 4}</span>
+          {skillTags.length > 4 && (
+            <span className="text-[11px] text-gray-400">+{skillTags.length - 4}</span>
           )}
         </div>
       )}
@@ -221,9 +257,10 @@ const OpportunityCard = ({
         {!hasMyBid && status === 'open' && type !== 'direct_invitation' && (
           <button
             onClick={() => primaryHandler?.(_id, opportunity)}
-            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            disabled={showWaitingTurn}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {actionLabel}
+            {showWaitingTurn ? 'Waiting turn' : actionLabel}
           </button>
         )}
         {type === 'direct_invitation' && status === 'open' && !hasMyBid && (

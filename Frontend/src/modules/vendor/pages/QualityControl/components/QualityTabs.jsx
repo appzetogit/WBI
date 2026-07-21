@@ -1,24 +1,27 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
 import useQualityCounts from '../../../hooks/useQualityCounts';
-
-const BASE = '/vendor/dynamic/quality';
-const TABS = [
-  { key: 'proof', label: 'Proof Review', path: `${BASE}/proof`, countKey: 'proofPending' },
-  { key: 'qa', label: 'QA & Rework', path: `${BASE}/qa`, countKey: 'qaPending' },
-  { key: 'client-approvals', label: 'Client Approvals', path: `${BASE}/client-approvals`, countKey: 'clientPending' },
-  { key: 'b2b-approvals', label: 'B2B Approvals', path: `${BASE}/b2b-approvals`, countKey: 'b2bPending' },
-  { key: 'issues', label: 'Issues & Risks', path: `${BASE}/issues`, countKey: 'openIssues', red: true },
-  { key: 'change-requests', label: 'Change Requests', path: `${BASE}/change-requests`, countKey: 'changePending' },
-  { key: 'damage', label: 'Damage Incidents', path: `${BASE}/damage`, countKey: 'openDamage', red: true }
-];
+import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const QualityTabs = () => {
   const { counts } = useQualityCounts();
+  const { basePath } = useVendorBasePath();
+  const base = `${basePath}/quality`;
+
+  const tabs = useMemo(() => [
+    { key: 'proof', label: 'Proof Review', path: `${base}/proof`, countKey: 'proofPending' },
+    { key: 'qa', label: 'QA & Rework', path: `${base}/qa`, countKey: 'qaPending' },
+    { key: 'client-approvals', label: 'Client Approvals', path: `${base}/client-approvals`, countKey: 'clientPending' },
+    { key: 'b2b-approvals', label: 'B2B Approvals', path: `${base}/b2b-approvals`, countKey: 'b2bPending' },
+    { key: 'issues', label: 'Issues & Risks', path: `${base}/issues`, countKey: 'openIssues', red: true },
+    { key: 'change-requests', label: 'Change Requests', path: `${base}/change-requests`, countKey: 'changePending' },
+    { key: 'damage', label: 'Damage Incidents', path: `${base}/damage`, countKey: 'openDamage', red: true }
+  ], [base]);
+
   return (
     <div className="border-b border-gray-200 overflow-x-auto">
       <nav className="flex gap-1 min-w-max px-1">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <NavLink
             key={tab.key}
             to={tab.path}

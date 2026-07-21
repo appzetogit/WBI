@@ -39,6 +39,10 @@ const Wallet = lazy(() => import('../pages/Wallet'));
 const BillingPage = lazy(() => import('../pages/BillingPage'));
 const Schedule = lazy(() => import('../pages/Schedule'));
 const Proposals = lazy(() => import('../pages/Proposals'));
+const B2BJobs = lazy(() => import('../pages/B2BJobs'));
+const OpsJobs = lazy(() => import('../pages/OpsJobs'));
+const OpsJobDetail = lazy(() => import('../pages/OpsJobs/OpsJobDetail'));
+const FreelancerPool = lazy(() => import('../pages/FreelancerPool'));
 
 const PageLoader = () => (
   <div className="min-h-[60vh] flex items-center justify-center">
@@ -70,11 +74,11 @@ const EngineerRoutes = () => {
   const shouldHideBottomNav =
     location.pathname === '/engineer/login' ||
     location.pathname === '/engineer/signup' ||
-    location.pathname === '/engineer/login' ||
-    location.pathname === '/engineer/signup' ||
+    location.pathname === '/engineer/forgot-password' ||
     location.pathname.endsWith('/map') ||
     location.pathname.endsWith('/success') ||
-    location.pathname.includes('/billing');
+    location.pathname.includes('/billing') ||
+    location.pathname.includes('/progress');
 
   const shouldShowBottomNav = !shouldHideBottomNav;
 
@@ -92,6 +96,10 @@ const EngineerRoutes = () => {
               <Route path="/" element={<ProtectedRoute userType="engineer"><Navigate to="dashboard" replace /></ProtectedRoute>} />
               <Route path="/dashboard" element={protectedPage(Dashboard)} />
               <Route path="/jobs" element={protectedPage(AssignedJobs)} />
+              <Route path="/b2b-jobs" element={protectedPage(B2BJobs)} />
+              <Route path="/ops-jobs" element={protectedPage(OpsJobs)} />
+              <Route path="/ops-jobs/:id" element={protectedPage(OpsJobDetail)} />
+              <Route path="/freelancer-pool" element={protectedPage(FreelancerPool)} />
               <Route path="/job/:id" element={protectedPage(JobDetails)} />
               <Route path="/job/:id/progress" element={protectedPage(JobProgress)} />
               <Route path="/job/:id/map" element={protectedPage(JobMap)} />

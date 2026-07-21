@@ -9,6 +9,11 @@ const withdrawalSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Worker'
   },
+  engineerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Engineer',
+    index: true
+  },
   amount: {
     type: Number,
     required: true,
