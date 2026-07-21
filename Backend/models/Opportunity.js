@@ -144,6 +144,8 @@ const opportunitySchema = new mongoose.Schema({
     requiredEngineers: { type: Number, default: 1, min: 1 },
     subCatCode: { type: String, default: '' },
     serviceRequestId: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceRequest', default: null },
+    b2bJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'B2BJob', default: null },
+    b2bCompanyId: { type: mongoose.Schema.Types.ObjectId, ref: 'B2BCompany', default: null },
     siteLocation: {
       city: String,
       address: String,

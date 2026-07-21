@@ -10,6 +10,7 @@ const Wallet = require('../../models/Wallet');
 const WalletTransaction = require('../../models/WalletTransaction');
 const Engineer = require('../../models/Engineer');
 const B2BCompany = require('../../models/B2BCompany');
+const EnterpriseProjectFlow = require('../../models/EnterpriseProjectFlow');
 const { sendB2BJobCompletionEmail } = require('../../services/emailService');
 const { sendSMS } = require('../../services/smsService');
 
@@ -475,10 +476,20 @@ exports.completeB2BJob = async (req, res) => {
       session.endSession();
     }
 
+    try {
+      const { onB2BJobCompleted } = require('../../services/enterpriseB2BOrchestrator.service');
+      await onB2BJobCompleted(job._id, { status });
+    } catch (flowErr) {
+      console.warn('[completeB2BJob] enterprise flow:', flowErr.message);
+    }
+
     if (status === 'completed' && job.charge > 0) {
       try {
-        const platformCutPercent = 15;
-        const engineerShare = Math.round(job.charge * (1 - platformCutPercent / 100));
+        const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: job._id }).lean();
+        const { computeB2BEngineerPayout } = require('../../services/escrowReleaseEngine.service');
+        const payout = await computeB2BEngineerPayout(job, flow?.configSnapshot);
+        const engineerShare = payout.engineerShare;
+        const platformCutPercent = payout.platformCommissionPercent ?? payout.rules?.platformCommissionPercent ?? 0;
 
         let engineerWallet = await Wallet.findOne({ ownerId: engineerId, ownerType: 'engineer' });
         if (!engineerWallet) {

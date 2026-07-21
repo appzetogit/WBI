@@ -362,6 +362,7 @@ app.use('/api/admin', require('./routes/admin-routes/engineerManagement.routes')
 app.use('/api/admin/service-categories', require('./routes/admin-routes/serviceCategoryManagement.routes'));
 app.use('/api/admin/category', require('./routes/admin-routes/serviceCategoryManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/serviceConfig.routes'));
+app.use('/api/admin/enterprise-b2b', require('./routes/admin-routes/enterpriseB2BFlow.routes'));
 app.use('/api/admin/sub-services', require('./routes/admin-routes/subServiceManagement.routes'));
 app.use('/api/admin/sub-service', require('./routes/admin-routes/subServiceManagement.routes'));
 app.use('/api/admin/custom-skills', require('./routes/admin-routes/customSkillManagement.routes'));

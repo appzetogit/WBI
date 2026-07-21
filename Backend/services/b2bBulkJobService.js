@@ -682,7 +682,11 @@ const processJobCreation = async (batchId, app) => {
     // 7. Trigger the Engineer Allocation matching queue for each job ONLY if wallet was sufficient
     if (!isInsufficient) {
       const b2bMatchingService = require('./b2bMatchingService');
+      const { bootstrapFlowFromB2BJob } = require('./enterpriseB2BOrchestrator.service');
       for (const jobMongoId of jobIdsList) {
+        bootstrapFlowFromB2BJob(jobMongoId).catch((err) => {
+          console.warn(`[B2B Flow] bootstrap failed for ${jobMongoId}:`, err.message);
+        });
         // Trigger matching async in background
         b2bMatchingService.queueJobMatching(jobMongoId, app).catch(err => {
           console.error(`[Matching Trigger Error] Job ID ${jobMongoId} allocation failed:`, err);

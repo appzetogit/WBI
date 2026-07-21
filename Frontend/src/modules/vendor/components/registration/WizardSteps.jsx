@@ -1,67 +1,282 @@
-import React, { useState, useEffect } from 'react';
-import { FiCheckCircle, FiUpload, FiMapPin, FiCreditCard, FiUser, FiBriefcase, FiZap, FiLayers, FiLoader } from 'react-icons/fi';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FiCheckCircle, FiUpload, FiMapPin, FiCreditCard, FiUser, FiBriefcase, FiZap, FiLayers, FiLoader, FiShield } from 'react-icons/fi';
 import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
 import { toast } from 'react-hot-toast';
+import { useDebouncedCallback } from 'use-debounce';
 import api from '../../../../services/api';
+import ValidatedInput from '../../../../components/common/ValidatedInput';
+import { validators } from '../../../../utils/validationUtils';
+import { sendOTP, verifyLogin } from '../../services/authService';
+
+const OTP_RESEND_SECONDS = 45;
+
+const normalizeMobile = (raw) => String(raw || '').replace(/\D/g, '').slice(-10);
+
+const handleOtpApiError = (err, fallback) => {
+  if (err?.response?.status === 429) {
+    toast.error('Too many OTP requests. Please wait a few minutes and try again.');
+    return;
+  }
+  toast.error(err?.response?.data?.message || fallback);
+};
 
 export const Step1Account = ({ data, updateData, errors }) => {
+  const navigate = useNavigate();
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
-  
-  const handleSendOtp = () => {
-    if (data.mobile && data.mobile.length >= 10) {
-      setOtpSent(true);
-      updateData({ isPhoneVerified: false });
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendIn, setResendIn] = useState(0);
+  const otpInputRef = useRef(null);
+  const lastSentPhone = useRef('');
+
+  const mobileDigits = normalizeMobile(data.mobile);
+  const verified = !!data.isPhoneVerified;
+
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const t = setInterval(() => setResendIn((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [resendIn]);
+
+  useEffect(() => {
+    if (otpSent && !verified && otpInputRef.current) {
+      otpInputRef.current.focus();
+    }
+  }, [otpSent, verified]);
+
+  const resetPhoneVerification = useCallback(() => {
+    updateData({
+      isPhoneVerified: false,
+      verificationToken: null
+    });
+    setOtpSent(false);
+    setOtp('');
+    setResendIn(0);
+  }, [updateData]);
+
+  const handleMobileChange = (e) => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+    updateData({ mobile: digits });
+    if (verified || (otpSent && digits !== lastSentPhone.current)) {
+      resetPhoneVerification();
     }
   };
 
-  const handleVerifyOtp = () => {
-    if (otp === '1234') { 
-      updateData({ isPhoneVerified: true });
-    } else {
-      alert("Invalid OTP! Use 1234 for simulation.");
+  const handleSendOtp = useDebouncedCallback(async () => {
+    const phone = mobileDigits;
+    const check = validators.mobile(phone);
+    if (!check.isValid) {
+      toast.error(check.message);
+      return;
+    }
+    if (sendingOtp || (resendIn > 0 && otpSent)) return;
+
+    setSendingOtp(true);
+    try {
+      const res = await sendOTP(phone);
+      if (res.success) {
+        if (res.vendor?.adminApproval === 'pending') {
+          toast.success(res.message || 'Your application is under review.');
+          navigate('/vendor/pending-approval');
+          return;
+        }
+        lastSentPhone.current = phone;
+        setOtpSent(true);
+        setResendIn(OTP_RESEND_SECONDS);
+        toast.success('OTP sent to your mobile');
+      } else {
+        toast.error(res.message || 'Failed to send OTP');
+      }
+    } catch (err) {
+      handleOtpApiError(err, 'Failed to send OTP');
+    } finally {
+      setSendingOtp(false);
+    }
+  }, 400);
+
+  const handleVerifyOtp = async () => {
+    const phone = mobileDigits;
+    if (!validators.mobile(phone).isValid) {
+      toast.error('Enter a valid 10-digit mobile number');
+      return;
+    }
+    if (!otp || otp.length !== 6) {
+      toast.error('Enter the 6-digit OTP from SMS');
+      return;
+    }
+    if (verifyingOtp) return;
+
+    setVerifyingOtp(true);
+    try {
+      const res = await verifyLogin({ phone, otp });
+      if (!res.success) {
+        toast.error(res.message || 'Invalid OTP');
+        return;
+      }
+
+      if (res.vendor?.adminApproval === 'pending') {
+        toast.success(res.message || 'Account under review.');
+        navigate('/vendor/pending-approval');
+        return;
+      }
+
+      if (!res.isNewUser && (res.accessToken || res.user)) {
+        toast.error('This mobile number is already registered. Please log in.');
+        navigate('/vendor/login');
+        return;
+      }
+
+      if (res.verificationToken) {
+        updateData({
+          isPhoneVerified: true,
+          verificationToken: res.verificationToken,
+          mobile: phone
+        });
+        setOtp('');
+        toast.success('Mobile number verified');
+      } else {
+        toast.error('Verification session missing. Please request a new OTP.');
+      }
+    } catch (err) {
+      handleOtpApiError(err, 'Could not verify OTP');
+    } finally {
+      setVerifyingOtp(false);
     }
   };
+
+  const inputClass =
+    'w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0D8A72]/25 focus:border-[#0D8A72] transition-all';
 
   return (
-    <div className="space-y-4">
-      <h3 className="text-xl font-bold">Account Setup</h3>
+    <div className="space-y-6">
       <div>
-        <label className="block text-sm font-medium mb-1">Owner Name</label>
-        <input type="text" className="w-full p-3 border rounded-xl" value={data.ownerName || ''} onChange={e => updateData({ ownerName: e.target.value })} placeholder="John Doe" />
+        <h3 className="text-xl font-bold text-gray-900">Account setup</h3>
+        <p className="text-sm text-gray-500 mt-1">
+          Verify your mobile with OTP, then set login credentials. We never share your number.
+        </p>
       </div>
+
+      <ValidatedInput
+        label="Owner name"
+        name="ownerName"
+        value={data.ownerName || ''}
+        onChange={(e) => updateData({ ownerName: e.target.value })}
+        placeholder="As on PAN / Aadhaar"
+        validator={validators.name}
+      />
+
       <div>
-        <label className="block text-sm font-medium mb-1">Mobile Number</label>
-        <div className="flex gap-2">
-          <input type="text" className="flex-1 p-3 border rounded-xl" value={data.mobile || ''} onChange={e => updateData({ mobile: e.target.value })} placeholder="10-digit number" disabled={data.isPhoneVerified} />
-          {!data.isPhoneVerified && (
-            <button type="button" onClick={handleSendOtp} className="px-4 bg-[#0D8A72] text-white rounded-xl font-medium transition-colors hover:bg-teal-700">
-              {otpSent ? 'Resend OTP' : 'Send OTP'}
+        <label className="block text-sm font-bold text-gray-700 mb-1.5">
+          Mobile number <span className="text-red-500">*</span>
+        </label>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="flex flex-1 items-center rounded-xl border border-gray-200 bg-gray-50 focus-within:ring-2 focus-within:ring-[#0D8A72]/25 focus-within:border-[#0D8A72] overflow-hidden">
+            <span className="pl-3 pr-2 text-sm font-semibold text-gray-500 border-r border-gray-200 py-3 bg-white/80">
+              +91
+            </span>
+            <input
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel-national"
+              className="flex-1 py-3 px-3 bg-transparent focus:outline-none text-gray-900"
+              value={data.mobile || ''}
+              onChange={handleMobileChange}
+              placeholder="10-digit number"
+              disabled={verified}
+              maxLength={10}
+              aria-invalid={!!errors.mobile}
+            />
+          </div>
+          {!verified ? (
+            <button
+              type="button"
+              onClick={() => handleSendOtp()}
+              disabled={sendingOtp || mobileDigits.length !== 10 || (otpSent && resendIn > 0)}
+              className="sm:w-auto w-full px-5 py-3 bg-[#0D8A72] text-white rounded-xl font-semibold hover:bg-[#0a735f] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shrink-0"
+            >
+              {sendingOtp && <FiLoader className="w-4 h-4 animate-spin" />}
+              {otpSent ? (resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend OTP') : 'Send OTP'}
             </button>
-          )}
-          {data.isPhoneVerified && (
-            <div className="flex items-center px-4 bg-green-50 text-green-700 border border-green-200 rounded-xl font-medium">
-              <FiCheckCircle className="mr-2"/> Verified
+          ) : (
+            <div className="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl font-semibold shrink-0">
+              <FiCheckCircle className="w-5 h-5" aria-hidden />
+              Verified
             </div>
           )}
         </div>
+        {verified && (
+          <button
+            type="button"
+            className="text-xs text-[#0D8A72] font-semibold mt-2 hover:underline"
+            onClick={resetPhoneVerification}
+          >
+            Change mobile number
+          </button>
+        )}
       </div>
-      
-      {otpSent && !data.isPhoneVerified && (
-        <div className="p-4 bg-teal-50 border border-[#0D8A72]/20 rounded-xl flex gap-3 animate-fade-in">
-          <input type="text" className="flex-1 p-3 border rounded-xl" placeholder="Enter OTP (Use 1234)" value={otp} onChange={e => setOtp(e.target.value)} />
-          <button type="button" onClick={handleVerifyOtp} className="px-6 bg-gray-900 text-white rounded-xl font-medium hover:bg-black">Verify</button>
+
+      {otpSent && !verified && (
+        <div
+          className="p-4 bg-teal-50/80 border border-teal-100 rounded-2xl space-y-3"
+          role="region"
+          aria-label="OTP verification"
+        >
+          <div className="flex items-start gap-2">
+            <FiShield className="w-5 h-5 text-[#0D8A72] mt-0.5 shrink-0" />
+            <p className="text-sm text-gray-700">
+              Enter the <strong>6-digit code</strong> sent to +91 {mobileDigits}. Valid for a few minutes.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              ref={otpInputRef}
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleVerifyOtp();
+              }}
+              className={`${inputClass} tracking-[0.35em] text-center text-lg font-semibold sm:flex-1`}
+              placeholder="••••••"
+              aria-label="6-digit OTP"
+            />
+            <button
+              type="button"
+              onClick={handleVerifyOtp}
+              disabled={verifyingOtp || otp.length !== 6}
+              className="px-6 py-3 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {verifyingOtp && <FiLoader className="w-4 h-4 animate-spin" />}
+              Verify OTP
+            </button>
+          </div>
         </div>
       )}
 
-      <div>
-        <label className="block text-sm font-medium mb-1">Email</label>
-        <input type="email" className="w-full p-3 border rounded-xl" value={data.email || ''} onChange={e => updateData({ email: e.target.value })} placeholder="john@example.com" />
-      </div>
-      <div>
-        <label className="block text-sm font-medium mb-1">Password</label>
-        <input type="password" className="w-full p-3 border rounded-xl" value={data.password || ''} onChange={e => updateData({ password: e.target.value })} placeholder="Create a strong password" />
-      </div>
+      <ValidatedInput
+        label="Business email"
+        name="email"
+        type="email"
+        value={data.email || ''}
+        onChange={(e) => updateData({ email: e.target.value })}
+        placeholder="you@company.com"
+        validator={validators.email}
+      />
+
+      <ValidatedInput
+        label="Password"
+        name="password"
+        type="password"
+        value={data.password || ''}
+        onChange={(e) => updateData({ password: e.target.value })}
+        placeholder="Min 8 chars, upper, lower, number, symbol"
+        validator={validators.password}
+      />
     </div>
   );
 };

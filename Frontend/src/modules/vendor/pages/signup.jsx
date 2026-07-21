@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { FiChevronRight, FiChevronLeft, FiCheck, FiBriefcase, FiTrendingUp, FiShield } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { themeColors } from '../../../theme';
+import { validators } from '../../../utils/validationUtils';
 import Logo from '../../../components/common/Logo';
 import LogoLoader from '../../../components/common/LogoLoader';
 import api from '../../../services/api';
@@ -55,6 +56,8 @@ const VendorSignup = () => {
   
   const [formData, setFormData] = useState({
     ownerName: '', mobile: '', email: '', password: '',
+    isPhoneVerified: false,
+    verificationToken: null,
     companyName: '', gstin: '', panNumber: '',
     models: []
   });
@@ -81,11 +84,16 @@ const VendorSignup = () => {
     const stepId = currentStepData.id;
     
     if (stepId === 'account') {
-      if (!formData.ownerName || !formData.mobile || !formData.email || !formData.password) {
-        return toast.error('Please fill all account details');
-      }
-      if (!formData.isPhoneVerified) {
-        return toast.error('Please verify your mobile number first');
+      const nameCheck = validators.name(formData.ownerName);
+      const mobileCheck = validators.mobile(formData.mobile);
+      const emailCheck = validators.email(formData.email);
+      const passCheck = validators.password(formData.password);
+      if (!nameCheck.isValid) return toast.error(nameCheck.message);
+      if (!mobileCheck.isValid) return toast.error(mobileCheck.message);
+      if (!emailCheck.isValid) return toast.error(emailCheck.message);
+      if (!passCheck.isValid) return toast.error(passCheck.message);
+      if (!formData.isPhoneVerified || !formData.verificationToken) {
+        return toast.error('Please verify your mobile number with OTP before continuing');
       }
     }
     
@@ -197,7 +205,7 @@ const VendorSignup = () => {
         
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-16">
-            <Logo className="h-10 w-auto brightness-0 invert" />
+            <Logo onDark className="h-9 w-9 min-h-[2.25rem] min-w-[2.25rem]" />
             <span className="text-2xl font-bold tracking-wide">WBI Partners</span>
           </div>
           
@@ -248,8 +256,10 @@ const VendorSignup = () => {
       <div className="flex-1 flex flex-col h-screen overflow-y-auto bg-[#F8FCFC]">
         {/* Mobile Header */}
         <div className="lg:hidden bg-white border-b border-gray-200 sticky top-0 z-50 p-4 flex items-center justify-between">
-          <Logo className="h-8 w-auto" />
-          <span className="text-sm font-bold text-[#0D8A72]">WBI Partners</span>
+          <div className="flex items-center gap-2">
+            <Logo className="h-8 w-auto" />
+            <span className="text-sm font-bold text-[#0D8A72]">WBI Partners</span>
+          </div>
         </div>
 
         <div className="flex-1 flex flex-col max-w-2xl w-full mx-auto p-6 lg:p-12 lg:justify-center">
@@ -287,8 +297,12 @@ const VendorSignup = () => {
               {currentStepIndex < activeSteps.length - 1 ? (
                 <button
                   onClick={handleNext}
-                  disabled={isLoading}
-                  className="px-8 py-3 rounded-xl font-bold flex items-center text-white transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                  disabled={
+                    isLoading ||
+                    (currentStepData.id === 'account' &&
+                      (!formData.isPhoneVerified || !formData.verificationToken))
+                  }
+                  className="px-8 py-3 rounded-xl font-bold flex items-center text-white transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5 disabled:opacity-50 disabled:transform-none disabled:shadow-none"
                   style={{ backgroundColor: brandColor }}
                 >
                   Next Step

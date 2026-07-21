@@ -17,6 +17,28 @@ const DynamicServiceRequest = () => {
   const [assignment, setAssignment] = useState(null);
   const [paying, setPaying] = useState(false);
 
+  const [signingMilestoneId, setSigningMilestoneId] = useState(null);
+
+  const approveCustomerMilestone = async (milestoneId) => {
+    if (!confirmation?.requestCode) return;
+    setSigningMilestoneId(milestoneId);
+    try {
+      const res = await api.post(
+        `/public/service-requests/${confirmation.requestCode}/milestones/${milestoneId}/customer-signoff`,
+        { approved: true }
+      );
+      if (res.data?.success) {
+        toast.success(res.data?.pending ? 'Signed off — release pending other gates' : 'Thank you — milestone approved');
+        const assignRes = await api.get(`/public/service-requests/${confirmation.requestCode}/assignment`);
+        if (assignRes.data?.success) setAssignment(assignRes.data.data);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not submit approval');
+    } finally {
+      setSigningMilestoneId(null);
+    }
+  };
+
   const assignmentPollEnabled =
     confirmation?.requestCode &&
     (!confirmation.paymentRequired || confirmation.paymentStatus === 'paid' || confirmation.paymentStatus === 'skipped' || confirmation.paymentStatus === 'not_required');
@@ -207,6 +229,29 @@ const DynamicServiceRequest = () => {
               <div key={step.key} className="flex items-center gap-2 text-sm">
                 <span className={`w-2 h-2 rounded-full ${step.done ? 'bg-emerald-500' : 'bg-gray-200'}`} />
                 <span className={step.done ? 'text-gray-800 font-medium' : 'text-gray-400'}>{step.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {assignment?.pendingCustomerMilestones?.length > 0 && (
+          <div className="w-full max-w-md text-left bg-white rounded-2xl border border-amber-100 p-4 mb-6 space-y-3">
+            <p className="text-xs font-bold text-amber-800 uppercase">Your approval needed</p>
+            <p className="text-xs text-gray-500">QA is complete. Approve milestones to release escrow to the vendor.</p>
+            {assignment.pendingCustomerMilestones.map((ms) => (
+              <div key={ms._id} className="flex items-center justify-between gap-2 border border-gray-100 rounded-xl p-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{ms.title}</p>
+                  <p className="text-[11px] text-gray-400">{ms.milestoneCode}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={signingMilestoneId === ms._id}
+                  onClick={() => approveCustomerMilestone(ms._id)}
+                  className="px-3 py-1.5 text-xs font-bold text-white rounded-lg disabled:opacity-60"
+                  style={{ backgroundColor: '#00a6a6' }}
+                >
+                  {signingMilestoneId === ms._id ? '…' : 'Approve'}
+                </button>
               </div>
             ))}
           </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ListChecks, CheckCircle2 } from 'lucide-react';
-import { fetchMilestones, updateMilestone, statusColors } from '../../../services/projectOpsService';
+import { ListChecks, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { fetchMilestones, updateMilestone, approveMilestoneQa, statusColors } from '../../../services/projectOpsService';
 import { useProjectOps } from '../context/ProjectOpsContext';
 import EmptyState from '../../BusinessIntake/components/EmptyState';
 import Pagination from '../../BusinessIntake/components/Pagination';
@@ -35,6 +35,36 @@ const MilestonesTasks = () => {
     catch (e) { alert(e.response?.data?.message || 'Failed'); }
   };
 
+  const runQaApprove = async (msId) => {
+    try {
+      const res = await approveMilestoneQa(msId);
+      const pending = res.data?.pending;
+      if (pending) {
+        alert(res.data?.data?.message || 'QA recorded — waiting for client sign-off before escrow release.');
+      }
+      load();
+    } catch (e) {
+      alert(e.response?.data?.message || 'QA approval failed');
+    }
+  };
+
+  const signoffBadge = (label, value) => {
+    const map = {
+      not_required: 'bg-gray-100 text-gray-500',
+      pending: 'bg-amber-50 text-amber-700',
+      approved: 'bg-emerald-50 text-emerald-700',
+      rejected: 'bg-red-50 text-red-700',
+      passed: 'bg-emerald-50 text-emerald-700',
+      failed: 'bg-red-50 text-red-700'
+    };
+    const cls = map[value] || map.pending;
+    return (
+      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${cls}`}>
+        {label}: {(value || '—').replace('_', ' ')}
+      </span>
+    );
+  };
+
   return (
     <>
       <div className="flex gap-1 mb-4 overflow-x-auto">
@@ -64,6 +94,21 @@ const MilestonesTasks = () => {
                     </div>
                     <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-md border h-fit ${sc}`}>{ms.status.replace('_', ' ')}</span>
                   </div>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {signoffBadge('QA', ms.qaStatus)}
+                    {ms.customerSignoff !== 'not_required' && signoffBadge('Customer', ms.customerSignoff)}
+                    {ms.b2bSignoff !== 'not_required' && signoffBadge('B2B', ms.b2bSignoff)}
+                  </div>
+                  {(ms.qaStatus === 'pending' || ms.qaStatus === 'in_review') &&
+                    (ms.status === 'completed' || ms.progress >= 100) && (
+                    <button
+                      type="button"
+                      onClick={() => runQaApprove(ms._id)}
+                      className="mb-3 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 rounded-lg"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" /> Pass QA & request release
+                    </button>
+                  )}
                   <div className="mb-3">
                     <div className="flex justify-between text-xs text-gray-500 mb-1"><span>Progress</span><span>{ms.progress}%</span></div>
                     <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">

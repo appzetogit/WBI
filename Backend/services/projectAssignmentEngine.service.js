@@ -246,6 +246,14 @@ const handleAssignmentFailure = async (opportunity, reason = 'assignment_failed'
   if (!opportunity) return;
   if (opportunity.status === 'awarded' || opportunity.status === 'cancelled') return;
 
+  try {
+    const { onAssignmentEscalation } = require('./enterpriseB2BOrchestrator.service');
+    const config = opportunity.assignment?.configSnapshot || {};
+    if (config.releaseToFreelancerOnVendorExhausted === false && reason !== 'no_vendors_matched') {
+      await onAssignmentEscalation(opportunity._id, reason);
+    }
+  } catch (_) {}
+
   opportunity.status = 'cancelled';
   opportunity.assignment.phase = 'expired';
   pushTimeline(opportunity, 'expired', 'Assignment could not be completed', { reason });

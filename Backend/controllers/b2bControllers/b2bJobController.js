@@ -581,11 +581,104 @@ const rejectQuote = async (req, res) => {
   }
 };
 
+const approveJobWork = async (req, res) => {
+  try {
+    const rawId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawId);
+    const { approved = true } = req.body || {};
+    const { approveB2BJobWork } = require('../../services/enterpriseB2BOrchestrator.service');
+    const result = await approveB2BJobWork(req.params.id, companyId, { party: 'b2b', approved });
+    if (!result.ok && result.status) {
+      return res.status(result.status).json({ success: false, message: result.message, data: result });
+    }
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    console.error('[approveJobWork]', error);
+    res.status(500).json({ success: false, message: 'Failed to record approval' });
+  }
+};
+
+const approveProjectMilestoneB2b = async (req, res) => {
+  try {
+    const rawId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawId);
+    const { projectId, milestoneId } = req.params;
+    const { approved = true } = req.body || {};
+
+    const EnterpriseProjectFlow = require('../../models/EnterpriseProjectFlow');
+    const flow = await EnterpriseProjectFlow.findOne({
+      vendorOpsProjectId: projectId,
+      b2bCompanyId: companyId
+    }).lean();
+    if (!flow) {
+      return res.status(404).json({ success: false, message: 'Project not linked to your company' });
+    }
+
+    const { onMilestoneB2bSignoff } = require('../../services/enterpriseB2BOrchestrator.service');
+    const result = await onMilestoneB2bSignoff({
+      projectId,
+      milestoneId,
+      approved: approved !== false
+    });
+    if (result?.pending || result?.code === 'APPROVAL_PENDING') {
+      return res.status(200).json({ success: true, pending: true, data: result });
+    }
+    if (result?.ok === false && result.status) {
+      return res.status(result.status).json({ success: false, message: result.message, data: result });
+    }
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    console.error('[approveProjectMilestoneB2b]', error);
+    res.status(500).json({ success: false, message: 'Failed to record milestone approval' });
+  }
+};
+
+const getJobEnterpriseFlow = async (req, res) => {
+  try {
+    const rawId = req.companyId || req.user.companyId || req.user.id;
+    const companyId = new mongoose.Types.ObjectId(rawId);
+    const job = await B2BJob.findOne({ _id: req.params.id, companyId }).lean();
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'Job not found' });
+    }
+    const { getFlowStatus } = require('../../services/enterpriseB2BOrchestrator.service');
+    const flow = await getFlowStatus({ b2bJobId: job._id });
+
+    let pendingB2bMilestones = [];
+    if (flow?.vendorOpsProjectId) {
+      const VendorOpsMilestone = require('../../models/VendorOpsMilestone');
+      pendingB2bMilestones = await VendorOpsMilestone.find({
+        projectId: flow.vendorOpsProjectId,
+        b2bSignoff: 'pending'
+      })
+        .select('_id title milestoneCode sequence qaStatus customerSignoff b2bSignoff status')
+        .sort({ sequence: 1 })
+        .lean();
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        flow,
+        jobStatus: job.status,
+        pendingB2bMilestones,
+        vendorOpsProjectId: flow?.vendorOpsProjectId || null
+      }
+    });
+  } catch (error) {
+    console.error('[getJobEnterpriseFlow]', error);
+    res.status(500).json({ success: false, message: 'Failed to load enterprise flow' });
+  }
+};
+
 module.exports = {
   getStats,
   getJobs,
   exportJobs,
   getJobDetails,
+  approveJobWork,
+  approveProjectMilestoneB2b,
+  getJobEnterpriseFlow,
   updateJob,
   cancelJob,
   getJobTimeline,

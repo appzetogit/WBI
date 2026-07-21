@@ -1,7 +1,8 @@
 export const brandConfig = {
   brandName: "WBI",
   tagline: "Service beyond boundaries",
-  logoPath: "/logo/WBILogo.jpg" // Using existing WBI logo we know exists from earlier code
+  logoPath: "/logo/WBILogo.jpg",
+  logoAltPath: "/logo/logo.webp"
 };
 
 export default brandConfig;

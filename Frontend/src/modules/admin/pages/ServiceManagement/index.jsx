@@ -548,6 +548,34 @@ const ServiceManagement = () => {
                         }
                       />
                     </label>
+                    <label className="text-xs font-semibold text-slate-600 block md:col-span-2">
+                      Payment & approval rules (JSON)
+                      <textarea
+                        className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-xs font-mono min-h-[100px]"
+                        value={JSON.stringify(
+                          {
+                            paymentRules: overviewForm.paymentRules || {},
+                            commissionRules: overviewForm.commissionRules || {},
+                            approvalFlow: overviewForm.approvalFlow || {}
+                          },
+                          null,
+                          2
+                        )}
+                        onChange={(e) => {
+                          try {
+                            const parsed = JSON.parse(e.target.value);
+                            setOverviewForm((p) => ({
+                              ...p,
+                              paymentRules: parsed.paymentRules || {},
+                              commissionRules: parsed.commissionRules || {},
+                              approvalFlow: parsed.approvalFlow || {}
+                            }));
+                          } catch {
+                            /* allow invalid JSON while typing */
+                          }
+                        }}
+                      />
+                    </label>
                   </div>
                   <button
                     type="button"

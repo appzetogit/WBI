@@ -34,6 +34,25 @@ const vendorOpsMilestoneSchema = new mongoose.Schema({
     index: true
   },
   progress: { type: Number, default: 0, min: 0, max: 100 },
+  paymentPercent: { type: Number, default: 0, min: 0, max: 100 },
+  escrowReleasedAmount: { type: Number, default: 0 },
+  qaStatus: {
+    type: String,
+    enum: ['pending', 'in_review', 'passed', 'failed'],
+    default: 'pending'
+  },
+  customerSignoff: {
+    type: String,
+    enum: ['not_required', 'pending', 'approved', 'rejected'],
+    default: 'not_required'
+  },
+  b2bSignoff: {
+    type: String,
+    enum: ['not_required', 'pending', 'approved', 'rejected'],
+    default: 'not_required'
+  },
+  customerSignoffAt: { type: Date, default: null },
+  b2bSignoffAt: { type: Date, default: null },
   tasks: [taskSchema],
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });

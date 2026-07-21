@@ -2,13 +2,16 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FiX, FiUser, FiMapPin, FiBriefcase, FiPhone, FiMail, 
-  FiClock, FiCheckCircle, FiAlertCircle, FiFileText, FiImage, FiMessageCircle
+  FiClock, FiCheckCircle, FiAlertCircle, FiFileText, FiImage, FiMessageCircle,
+  FiShield
 } from 'react-icons/fi';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import api from '../../../../../services/api';
 
 const JobDetailsDrawer = ({ jobId, onClose }) => {
   const [activeTab, setActiveTab] = useState('details');
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['b2bJobDetails', jobId],
@@ -29,6 +32,46 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
     },
     enabled: !!jobId && activeTab === 'timeline'
   });
+
+  const { data: enterpriseBundle, isLoading: flowLoading } = useQuery({
+    queryKey: ['b2bJobEnterpriseFlow', jobId],
+    queryFn: async () => {
+      if (!jobId) return null;
+      const res = await api.get(`/b2b/jobs/${jobId}/enterprise-flow`);
+      return res.data?.data;
+    },
+    enabled: !!jobId && (activeTab === 'closure' || activeTab === 'details')
+  });
+
+  const flow = enterpriseBundle?.flow;
+  const pendingB2bMilestones = enterpriseBundle?.pendingB2bMilestones || [];
+  const vendorOpsProjectId = enterpriseBundle?.vendorOpsProjectId;
+
+  const approveWorkMutation = useMutation({
+    mutationFn: () => api.post(`/b2b/jobs/${jobId}/approve-work`, { approved: true }),
+    onSuccess: (res) => {
+      toast.success(res.data?.data?.pending
+        ? 'Approved — awaiting other sign-offs'
+        : 'Work approved — escrow released');
+      queryClient.invalidateQueries(['b2bJobEnterpriseFlow', jobId]);
+      queryClient.invalidateQueries(['b2bJobDetails', jobId]);
+    },
+    onError: (e) => toast.error(e.response?.data?.message || 'Approval failed')
+  });
+
+  const approveMilestoneMutation = useMutation({
+    mutationFn: ({ projectId, milestoneId }) =>
+      api.post(`/b2b/jobs/projects/${projectId}/milestones/${milestoneId}/b2b-signoff`, { approved: true }),
+    onSuccess: () => {
+      toast.success('Milestone signed off');
+      queryClient.invalidateQueries(['b2bJobEnterpriseFlow', jobId]);
+    },
+    onError: (e) => toast.error(e.response?.data?.message || 'Milestone sign-off failed')
+  });
+
+  const showJobApprove =
+    flow?.jobSignoffs?.b2b === 'pending' &&
+    ['completed', 'awaiting_b2b_approval', 'awaiting_customer_approval'].includes(flow?.status);
 
   if (!jobId) return null;
 
@@ -82,7 +125,7 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
 
           {/* Navigation */}
           <div className="flex border-b border-gray-100 px-6 gap-6">
-            {['details', 'timeline', 'documents', 'support'].map((tab) => (
+            {['details', 'closure', 'timeline', 'documents', 'support'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -184,6 +227,96 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
                       )}
                     </div>
 
+                  </div>
+                )}
+
+                {activeTab === 'closure' && (
+                  <div className="space-y-4 animate-fade-in">
+                    {flowLoading ? (
+                      <div className="flex justify-center py-12">
+                        <motion.div className="animate-spin w-8 h-8 border-2 border-[#10AFA5] border-t-transparent rounded-full" />
+                      </div>
+                    ) : !flow ? (
+                      <p className="text-sm text-gray-500 text-center py-10">Enterprise escrow flow not started for this job yet.</p>
+                    ) : (
+                      <>
+                        <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+                          <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <FiShield className="text-[#10AFA5]" /> Escrow & sign-off
+                          </h3>
+                          <p className="text-xs text-gray-500 mb-2">Flow status: <span className="font-semibold text-gray-800">{flow.status?.replace(/_/g, ' ')}</span></p>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <p className="text-gray-500 text-xs">Held</p>
+                              <p className="font-bold">₹ {Number(flow.escrow?.heldAmount || 0).toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500 text-xs">Released</p>
+                              <p className="font-bold">₹ {Number(flow.escrow?.releasedAmount || 0).toLocaleString()}</p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            <span className="text-[10px] font-semibold px-2 py-1 rounded-md bg-white border">
+                              B2B: {flow.jobSignoffs?.b2b || '—'}
+                            </span>
+                            <span className="text-[10px] font-semibold px-2 py-1 rounded-md bg-white border">
+                              Customer: {flow.jobSignoffs?.customer || '—'}
+                            </span>
+                          </div>
+                          {showJobApprove && (
+                            <button
+                              type="button"
+                              disabled={approveWorkMutation.isPending}
+                              onClick={() => approveWorkMutation.mutate()}
+                              className="mt-4 w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-50"
+                            >
+                              Approve completed work
+                            </button>
+                          )}
+                        </div>
+                        {pendingB2bMilestones.length > 0 && vendorOpsProjectId && (
+                          <div className="space-y-3">
+                            <p className="text-xs font-bold text-gray-500 uppercase">Milestones awaiting your sign-off</p>
+                            {pendingB2bMilestones.map((ms) => (
+                              <div key={ms._id} className="border border-gray-100 rounded-xl p-4 flex justify-between gap-3 items-center">
+                                <div>
+                                  <p className="font-semibold text-sm">{ms.title}</p>
+                                  <p className="text-[11px] text-gray-400">{ms.milestoneCode}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={approveMilestoneMutation.isPending}
+                                  onClick={() =>
+                                    approveMilestoneMutation.mutate({
+                                      projectId: vendorOpsProjectId,
+                                      milestoneId: ms._id
+                                    })
+                                  }
+                                  className="px-3 py-1.5 text-xs font-bold text-white bg-[#10AFA5] rounded-lg shrink-0"
+                                >
+                                  Sign off
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {(flow.timeline || []).length > 0 && (
+                          <div className="border border-gray-100 rounded-xl p-4">
+                            <p className="text-xs font-bold text-gray-500 uppercase mb-2">Enterprise timeline</p>
+                            <ul className="space-y-2 max-h-48 overflow-y-auto">
+                              {[...(flow.timeline || [])].reverse().slice(0, 12).map((ev, i) => (
+                                <li key={`${ev.key}-${i}`} className="text-xs text-gray-600">
+                                  <span className="font-medium text-gray-800">{ev.label || ev.key}</span>
+                                  {ev.at && (
+                                    <span className="text-gray-400"> · {new Date(ev.at).toLocaleString()}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
 

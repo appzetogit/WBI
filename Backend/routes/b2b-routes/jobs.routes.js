@@ -19,9 +19,15 @@ router.post('/reassign', b2bJobController.reassignEngineer);
 router.get('/quotes/pending', b2bJobController.getPendingQuotes);
 router.post('/quotes/:quoteId/approve', b2bJobController.approveQuote);
 router.post('/quotes/:quoteId/reject', b2bJobController.rejectQuote);
+router.post(
+  '/projects/:projectId/milestones/:milestoneId/b2b-signoff',
+  b2bJobController.approveProjectMilestoneB2b
+);
 
 // Core CRUD and Job specific getters
 router.get('/', b2bJobController.getJobs);
+router.get('/:id/enterprise-flow', b2bJobController.getJobEnterpriseFlow);
+router.post('/:id/approve-work', b2bJobController.approveJobWork);
 router.get('/:id', b2bJobController.getJobDetails);
 router.patch('/:id', b2bJobController.updateJob);
 router.delete('/:id', b2bJobController.cancelJob);

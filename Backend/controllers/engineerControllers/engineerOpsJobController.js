@@ -103,9 +103,9 @@ const syncProjectProgress = async (projectId) => {
   await VendorOpsProject.updateOne({ _id: projectId }, { $set: patch });
 
   if (progress >= 100) {
-    const { releaseVendorEscrowIfProjectComplete } = require('../../services/serviceRequestPayment.service');
-    releaseVendorEscrowIfProjectComplete(projectId).catch((err) => {
-      console.warn('[syncProjectProgress] escrow release:', err.message);
+    const { autoFinalizeProjectEscrow } = require('../../services/enterpriseB2BOrchestrator.service');
+    autoFinalizeProjectEscrow(projectId).catch((err) => {
+      console.warn('[syncProjectProgress] escrow finalize:', err.message);
     });
   }
 };
@@ -304,6 +304,10 @@ exports.acceptOpsJob = async (req, res) => {
           }
         }
       );
+      try {
+        const { onEngineerAssigned } = require('../../services/enterpriseB2BOrchestrator.service');
+        await onEngineerAssigned(project.opportunityId, engineerId);
+      } catch (_) {}
     }
 
 

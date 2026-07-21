@@ -712,6 +712,53 @@ const getProjectJobs = async (req, res) => {
   }
 };
 
+const getProjectEnterpriseFlow = async (req, res) => {
+  try {
+    const vendorId = getVendorId(req);
+    const project = await VendorOpsProject.findOne({
+      _id: req.params.id,
+      vendorId: new mongoose.Types.ObjectId(vendorId)
+    }).lean();
+    if (!project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+    const { getFlowStatus } = require('../../services/enterpriseB2BOrchestrator.service');
+    const flow = await getFlowStatus({ projectId: project._id });
+    res.status(200).json({ success: true, data: flow });
+  } catch (error) {
+    console.error('getProjectEnterpriseFlow:', error);
+    res.status(500).json({ success: false, message: 'Failed to load project flow' });
+  }
+};
+
+const approveMilestoneQa = async (req, res) => {
+  try {
+    const vendorId = getVendorId(req);
+    const ms = await VendorOpsMilestone.findOne({
+      _id: req.params.id,
+      vendorId: new mongoose.Types.ObjectId(vendorId)
+    });
+    if (!ms) {
+      return res.status(404).json({ success: false, message: 'Milestone not found' });
+    }
+    const { onMilestoneQaApproved } = require('../../services/enterpriseB2BOrchestrator.service');
+    const result = await onMilestoneQaApproved({
+      projectId: ms.projectId,
+      milestoneId: ms._id
+    });
+    if (result?.pending || result?.code === 'APPROVAL_PENDING') {
+      return res.status(200).json({ success: true, pending: true, data: result });
+    }
+    if (result?.ok === false && result.status) {
+      return res.status(result.status).json({ success: false, message: result.message, data: result });
+    }
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    console.error('approveMilestoneQa:', error);
+    res.status(500).json({ success: false, message: 'QA approval failed' });
+  }
+};
+
 module.exports = {
   getCounts,
   getProjects,
@@ -729,5 +776,7 @@ module.exports = {
   getCalendar,
   listAssignableEngineers,
   assignEngineerToProject,
-  getProjectJobs
+  getProjectJobs,
+  getProjectEnterpriseFlow,
+  approveMilestoneQa
 };

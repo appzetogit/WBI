@@ -1,5 +1,7 @@
 const Opportunity = require('../../models/Opportunity');
 const ServiceRequest = require('../../models/ServiceRequest');
+const VendorOpsMilestone = require('../../models/VendorOpsMilestone');
+const EnterpriseProjectFlow = require('../../models/EnterpriseProjectFlow');
 const ProjectAssignmentConfig = require('../../models/ProjectAssignmentConfig');
 const {
   getPublicTimeline,
@@ -25,6 +27,25 @@ exports.getAssignmentByRequestCode = async (req, res) => {
 
     const paymentPending = sr.payment?.status === 'pending';
 
+    let pendingCustomerMilestones = [];
+    const oppIdForFlow = opportunity?._id || sr.opportunityId;
+    const flowOr = [{ serviceRequestId: sr._id }];
+    if (oppIdForFlow) flowOr.push({ opportunityId: oppIdForFlow });
+    const flow = await EnterpriseProjectFlow.findOne({ $or: flowOr })
+      .select('vendorOpsProjectId')
+      .lean();
+    const projectId = flow?.vendorOpsProjectId;
+    if (projectId) {
+      pendingCustomerMilestones = await VendorOpsMilestone.find({
+        projectId,
+        customerSignoff: 'pending',
+        qaStatus: 'passed'
+      })
+        .select('_id title milestoneCode sequence')
+        .sort({ sequence: 1 })
+        .lean();
+    }
+
     if (!opportunity) {
       const timeline = paymentPending
         ? [
@@ -44,7 +65,8 @@ exports.getAssignmentByRequestCode = async (req, res) => {
           timeline,
           message: paymentPending
             ? 'Complete payment to start vendor matching'
-            : 'Waiting for vendor matching'
+            : 'Waiting for vendor matching',
+          pendingCustomerMilestones
         }
       });
     }
@@ -61,7 +83,9 @@ exports.getAssignmentByRequestCode = async (req, res) => {
         phase: opportunity.assignment?.phase,
         requiredEngineers: opportunity.assignment?.requiredEngineers || 1,
         timeline: getPublicTimeline(opportunity),
-        events: opportunity.assignment?.timeline || []
+        events: opportunity.assignment?.timeline || [],
+        pendingCustomerMilestones,
+        vendorOpsProjectId: projectId || null
       }
     });
   } catch (error) {

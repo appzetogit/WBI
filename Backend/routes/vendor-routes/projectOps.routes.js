@@ -18,7 +18,9 @@ const {
   getCalendar,
   listAssignableEngineers,
   assignEngineerToProject,
-  getProjectJobs
+  getProjectJobs,
+  getProjectEnterpriseFlow,
+  approveMilestoneQa
 } = require('../../controllers/vendorControllers/projectOpsController');
 
 router.get('/counts', authenticate, getCounts);
@@ -29,6 +31,7 @@ router.get('/projects', authenticate, getProjects);
 router.post('/projects', authenticate, createProject);
 router.get('/projects/:id', authenticate, getProjectById);
 router.patch('/projects/:id', authenticate, updateProject);
+router.get('/projects/:id/enterprise-flow', authenticate, getProjectEnterpriseFlow);
 router.get('/projects/:id/jobs', authenticate, getProjectJobs);
 router.post('/projects/:id/assign-engineer', authenticate, assignEngineerToProject);
 
@@ -38,6 +41,7 @@ router.post('/sites/:id/check-out', authenticate, siteCheckOut);
 
 router.get('/milestones', authenticate, getMilestones);
 router.patch('/milestones/:id', authenticate, updateMilestone);
+router.post('/milestones/:id/qa-approve', authenticate, approveMilestoneQa);
 
 router.get('/dispatch', authenticate, getDispatches);
 router.post('/dispatch/:id/assign', authenticate, assignDispatch);

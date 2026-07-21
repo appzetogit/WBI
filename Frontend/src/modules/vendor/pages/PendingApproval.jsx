@@ -366,7 +366,7 @@ const PendingApproval = () => {
       <header className="bg-slate-900 border-b border-slate-800 text-white shadow-sm flex-none">
         <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Logo className="h-6 w-auto brightness-0 invert" />
+            <Logo onDark className="h-6 w-6" />
             <div className="w-px h-5 bg-slate-700"></div>
             <span className="text-sm font-semibold tracking-wide">Partner Lifecycle Management</span>
           </div>

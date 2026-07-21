@@ -16,6 +16,7 @@ const {
   persistAndEmit,
   emitOnboardingStatus
 } = require('../../services/vendorOnboarding.service');
+const { verifyVerificationToken } = require('../../utils/tokenService');
 
 async function resolveOnboardingVendor(req, res, { requireAuth = false } = {}) {
   const authId = req.user?.id || req.user?._id;
@@ -227,8 +228,14 @@ const submitApplication = async (req, res) => {
       if (!ownerName || !mobile) {
          return res.status(400).json({ success: false, message: 'Owner name and mobile are required' });
       }
-      if (!password || String(password).length < 6) {
-        return res.status(400).json({ success: false, message: 'Password is required (min 6 characters)' });
+      if (!req.body.isPhoneVerified || !req.body.verificationToken) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please verify your mobile number with OTP before continuing.'
+        });
+      }
+      if (!password || String(password).length < 8) {
+        return res.status(400).json({ success: false, message: 'Password is required (min 8 characters)' });
       }
       if (!email) {
         return res.status(400).json({ success: false, message: 'Email is required for login' });
@@ -236,6 +243,13 @@ const submitApplication = async (req, res) => {
 
       // Normalize phone to last 10 digits for consistent login matching
       const normalizedPhone = String(mobile).replace(/\D/g, '').slice(-10);
+      const verifiedPhone = verifyVerificationToken(req.body.verificationToken);
+      if (!verifiedPhone || String(verifiedPhone).replace(/\D/g, '').slice(-10) !== normalizedPhone) {
+        return res.status(400).json({
+          success: false,
+          message: 'Phone verification expired. Please verify OTP again on step 1.'
+        });
+      }
       const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
 
       // Check for existing vendor by phone or email to prevent E11000 errors
@@ -254,6 +268,7 @@ const submitApplication = async (req, res) => {
       vendor.name = ownerName;
       vendor.email = normalizedEmail;
       vendor.phone = normalizedPhone || mobile;
+      vendor.isPhoneVerified = true;
       vendor.businessName = companyName;
       vendor.gstin = gstin;
       vendor.pan = { number: panNumber, document: panUrl };

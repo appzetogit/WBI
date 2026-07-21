@@ -102,7 +102,11 @@ const activatePendingWalletJobs = async (companyId, app = null) => {
 
   try {
     const { queueJobMatching } = require('./b2bMatchingService');
+    const { bootstrapFlowFromB2BJob } = require('./enterpriseB2BOrchestrator.service');
     for (const job of pendingJobs) {
+      bootstrapFlowFromB2BJob(job._id).catch((e) => {
+        console.warn(`[Activate] flow bootstrap ${job._id}:`, e.message);
+      });
       queueJobMatching(job._id, app).catch((err) => {
         console.error(`[Activate] Matching queue failed for ${job._id}:`, err.message);
       });

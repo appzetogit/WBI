@@ -12,6 +12,10 @@ const createOpsProjectFromOpportunity = async (opportunity, vendorId, amount = 0
 
   // Prefer Project OS template milestones when linked by categoryCode
   let milestones = (config?.projectMilestones || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  milestones = milestones.map((m) => ({
+    ...m,
+    paymentPercent: Number(m.paymentPercent) || 0
+  }));
   try {
     const ProjectTemplate = require('../models/projectOS/ProjectTemplate');
     const tpl = await ProjectTemplate.findOne({
@@ -29,13 +33,23 @@ const createOpsProjectFromOpportunity = async (opportunity, vendorId, amount = 0
         milestones = mt.milestones.map((m, idx) => ({
           order: m.order ?? idx + 1,
           title: m.title || m.name,
-          defaultDays: m.defaultDays || m.durationDays || 1,
+          defaultDays: m.defaultDays || m.durationDays || m.slaDays || 1,
+          paymentPercent: Number(m.invoicePercentage) || Number(m.paymentPercent) || 0,
           proofTypes: m.proofTypes || []
         }));
       }
     }
   } catch {
     /* Project OS optional */
+  }
+
+  const paySum = milestones.reduce((s, m) => s + (Number(m.paymentPercent) || 0), 0);
+  if (paySum > 0 && Math.abs(paySum - 100) > 0.5) {
+    const scale = 100 / paySum;
+    milestones = milestones.map((m) => ({
+      ...m,
+      paymentPercent: Math.round((Number(m.paymentPercent) || 0) * scale)
+    }));
   }
 
   const clientName =
@@ -64,18 +78,22 @@ const createOpsProjectFromOpportunity = async (opportunity, vendorId, amount = 0
     opportunityId: opportunity._id || null
   });
 
+  const approvalFlow = config?.approvalFlow || {};
+  const { initMilestoneSignoffs } = require('../services/milestoneApproval.service');
+
   if (milestones.length) {
     let cursor = new Date(project.startDate || Date.now());
     for (let idx = 0; idx < milestones.length; idx++) {
       const m = milestones[idx];
       const days = Number(m.defaultDays) || 1;
       cursor = new Date(cursor.getTime() + days * 86400000);
-      await VendorOpsMilestone.create({
+      const ms = new VendorOpsMilestone({
         vendorId: project.vendorId,
         projectId: project._id,
         title: m.title,
         serviceCategoryCode: code,
         sequence: m.order || idx + 1,
+        paymentPercent: Number(m.paymentPercent) || 0,
         dueDate: new Date(cursor),
         status: 'pending',
         progress: 0,
@@ -86,7 +104,20 @@ const createOpsProjectFromOpportunity = async (opportunity, vendorId, amount = 0
           checklist: []
         }))
       });
+      initMilestoneSignoffs(ms, approvalFlow);
+      await ms.save();
     }
+  }
+
+  try {
+    const { onVendorOpsProjectCreated } = require('../services/enterpriseB2BOrchestrator.service');
+    await onVendorOpsProjectCreated({
+      opportunityId: opportunity._id,
+      projectId: project._id,
+      vendorId
+    });
+  } catch (orchErr) {
+    console.warn('[createOpsProjectFromOpportunity] enterprise flow hook:', orchErr.message);
   }
 
   return project;

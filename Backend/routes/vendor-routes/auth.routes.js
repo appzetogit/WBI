@@ -10,6 +10,8 @@ const {
 } = require('../../controllers/vendorControllers/vendorAuthController');
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isVendor } = require('../../middleware/roleMiddleware');
+const { otpLimiter } = require('../../middleware/rateLimiter');
+const idempotency = require('../../middleware/idempotency');
 
 // Validation rules
 const sendOTPValidation = [
@@ -39,8 +41,8 @@ const loginValidation = [
 ];
 
 // Routes
-router.post('/send-otp', sendOTPValidation, sendOTP);
-router.post('/verify-login', verifyLoginValidation, verifyLogin); // New Unified Entry
+router.post('/send-otp', idempotency, otpLimiter, sendOTPValidation, sendOTP);
+router.post('/verify-login', otpLimiter, verifyLoginValidation, verifyLogin); // New Unified Entry
 router.post('/register', registerValidation, register);
 router.post('/login', loginValidation, login);
 router.post('/refresh-token', require('../../controllers/vendorControllers/vendorAuthController').refreshToken);

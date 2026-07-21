@@ -176,7 +176,8 @@ const createOpportunityFromEnquiry = async ({
   enquiryModel = 'InstallationEnquiry',
   categoryCode: forcedCode = null,
   titlePrefix = null,
-  assignmentMeta = null
+  assignmentMeta = null,
+  opportunityType = 'client_request'
 }) => {
   if (!enquiry?._id) {
     return { opportunity: null, eligibleCount: 0, categoryCode: null };
@@ -233,7 +234,7 @@ const createOpportunityFromEnquiry = async ({
   const startDate = enquiry.preferredVisitDate || enquiry.expectedStartDate || null;
 
   const opportunity = new Opportunity({
-    type: 'client_request',
+    type: opportunityType,
     title: String(title).slice(0, 180),
     description: buildDescription(enquiry, enquiryType),
     categoryCode,
@@ -270,6 +271,8 @@ const createOpportunityFromEnquiry = async ({
       requiredEngineers,
       subCatCode: meta.subCatCode || '',
       serviceRequestId: meta.serviceRequestId || null,
+      b2bJobId: meta.b2bJobId || null,
+      b2bCompanyId: meta.b2bCompanyId || null,
       siteLocation: {
         city: enquiry.city || '',
         address: enquiry.siteAddress || enquiry.address || ''
@@ -291,6 +294,15 @@ const createOpportunityFromEnquiry = async ({
   opportunity.description += `\n\n[sourceEnquiry:${enquiryModel}:${enquiry._id}]`;
 
   await opportunity.save();
+
+  try {
+    const { bootstrapFlowFromOpportunity } = require('../services/enterpriseB2BOrchestrator.service');
+    await bootstrapFlowFromOpportunity(opportunity._id, {
+      serviceRequestId: meta.serviceRequestId
+    });
+  } catch (flowErr) {
+    console.warn('[createOpportunityFromEnquiry] enterprise flow bootstrap:', flowErr.message);
+  }
 
   if (assignmentMeta?.serviceRequestId) {
     await ServiceRequest.updateOne(
@@ -432,10 +444,65 @@ const queueBankingMarketplaceFromEnquiry = (enquiry, { enquiryModel, titleHint }
   });
 };
 
+/**
+ * B2B bulk / portal job → vendor marketplace opportunity (when assignmentMode = vendor_marketplace).
+ */
+const createOpportunityFromB2BJob = async (job) => {
+  if (!job?._id) return { opportunity: null, eligibleCount: 0, categoryCode: null };
+
+  const coords = job.coordinates?.coordinates || [];
+  const lng = coords[0];
+  const lat = coords[1];
+
+  const categoryCode = await resolveCategoryCode({
+    enquiryType: 'b2b',
+    equipmentType: [job.service, job.subService].filter(Boolean),
+    hints: [job.deviceId, job.siteId]
+  });
+
+  const budget = Number(job.charge) || 0;
+
+  return createOpportunityFromEnquiry({
+    enquiry: {
+      _id: job._id,
+      fullName: job.customerName,
+      phone: job.phone,
+      email: job.email || '',
+      city: job.city,
+      siteAddress: job.address,
+      companyName: '',
+      equipmentType: [job.service, job.subService].filter(Boolean),
+      urgency: job.priority === 'High' ? 'Urgent' : 'Normal',
+      preferredVisitDate: job.preferredDate,
+      additionalNotes: `B2B Job ${job.jobId}`,
+      budgetRange: budget ? `₹${budget}` : '',
+      customerPaidAmount: budget,
+      latitude: lat,
+      longitude: lng
+    },
+    enquiryType: 'b2b',
+    enquiryModel: 'B2BJob',
+    categoryCode,
+    titlePrefix: `${job.service} — ${job.city}`,
+    assignmentMeta: buildAssignmentMetaFromEnquiry(
+      {
+        city: job.city,
+        siteAddress: job.address,
+        latitude: lat,
+        longitude: lng,
+        requiredEngineers: 1
+      },
+      { b2bJobId: job._id, b2bCompanyId: job.companyId }
+    ),
+    opportunityType: 'bulk_requirement'
+  });
+};
+
 module.exports = {
   createOpportunityFromEnquiry,
   queueOpportunityFromEnquiry,
   queueBankingMarketplaceFromEnquiry,
+  createOpportunityFromB2BJob,
   buildAssignmentMetaFromEnquiry,
   resolveCategoryCode,
   findEligibleVendorIds,

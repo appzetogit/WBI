@@ -14,6 +14,8 @@ export const siteCheckOut = (id) => api.post(`${BASE}/sites/${id}/check-out`);
 
 export const fetchMilestones = (params = {}) => api.get(`${BASE}/milestones`, { params });
 export const updateMilestone = (id, data) => api.patch(`${BASE}/milestones/${id}`, data);
+export const approveMilestoneQa = (id) => api.post(`${BASE}/milestones/${id}/qa-approve`);
+export const fetchProjectEnterpriseFlow = (projectId) => api.get(`${BASE}/projects/${projectId}/enterprise-flow`);
 
 export const fetchDispatches = (params = {}) => api.get(`${BASE}/dispatch`, { params });
 export const assignDispatch = (id, data) => api.post(`${BASE}/dispatch/${id}/assign`, data);
