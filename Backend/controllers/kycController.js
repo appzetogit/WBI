@@ -15,11 +15,12 @@ function aadhaarOtpCacheKey(entityId) {
   return `kyc:aadhaar:otp:${entityId}`;
 }
 
-async function storeAadhaarOtpSession(entityId, aadhaarNumber, clientId) {
+async function storeAadhaarOtpSession(entityId, aadhaarNumber, clientId, flow = 'doc') {
   if (!entityId || !clientId) return;
   const key = aadhaarOtpCacheKey(entityId);
   const payload = {
     clientId: String(clientId),
+    flow: flow || 'doc',
     aadhaarLast4: aadhaarNumber ? String(aadhaarNumber).slice(-4) : null
   };
   aadhaarOtpMem.set(key, { ...payload, exp: Date.now() + AADHAAR_OTP_TTL_SEC * 1000 });
@@ -447,7 +448,7 @@ exports.generateAadhaarOtp = async (req, res) => {
     const result = await cgpeService.generateAadhaarOtp(aadhaarNumber);
 
     if (entityId) {
-      await storeAadhaarOtpSession(entityId, aadhaarNumber, result.data.clientId);
+      await storeAadhaarOtpSession(entityId, aadhaarNumber, result.data.clientId, result.data.flow);
       await logAudit(role, entityId, 'AADHAAR_OTP_GENERATED', 'aadhaar', 'cgpe', 'initiated', 'Aadhaar OTP generated successfully', req);
     }
     
@@ -534,12 +535,14 @@ exports.verifyAadhaar = async (req, res) => {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_VERIFY_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }
     let message = error.message || 'Aadhaar verification failed';
-    if (/invalid otp/i.test(message)) {
+    if (/invalid otp|expired aadhaar otp|validation error/i.test(message)) {
       message =
         'Invalid or expired Aadhaar OTP. Tap Get OTP again, use the latest UIDAI SMS (not phone signup OTP), and verify within a few minutes.';
     } else if (/session expired|session id missing|get otp again/i.test(message)) {
       message = 'OTP session expired. Tap Get OTP again and enter the new code.';
     }
+    // Strip noisy provider wrapper for UI
+    message = message.replace(/^Verification Failed:\s*/i, '').replace(/\s*\(Status:\s*\d+\)\s*$/i, '');
     res.status(400).json({ success: false, message });
   }
 };

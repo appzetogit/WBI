@@ -224,7 +224,7 @@ app.get('/health', (req, res) => {
       entityIdConfigured: Boolean(process.env.SMS_INDIA_HUB_DLT_ENTITY_ID)
     },
     kycAadhaarOtp: {
-      serverSessionCache: '2026-07-21-v4-doc-first',
+      serverSessionCache: '2026-07-22-v5-official-kyc-path',
       cgpeApiConfigured: Boolean(process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY)
     },
     otpBypass: {

@@ -226,19 +226,21 @@ const KYCVerificationStep = forwardRef(({
   };
 
   const handleGenerateAadhaarOtp = async (aadhaarNumber) => {
-    if (!aadhaarNumber || aadhaarNumber.length !== 12 || isNaN(aadhaarNumber)) {
+    const cleaned = String(aadhaarNumber || '').replace(/\D/g, '');
+    if (cleaned.length !== 12) {
       return toast.error('Valid 12-digit Aadhaar required');
     }
     try {
       setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'generating_otp' } }));
-      const res = await kycService.generateAadhaarOtp({ role, entityId, aadhaarNumber });
+      const res = await kycService.generateAadhaarOtp({ role, entityId, aadhaarNumber: cleaned });
       if (res.success) {
         toast.success(res.data?.message || 'OTP sent to Aadhaar linked mobile number');
         const clientId = res.data.clientId;
         sessionStorage.setItem(
           aadhaarSessionKey,
-          JSON.stringify({ clientId, aadhaarNumber })
+          JSON.stringify({ clientId, aadhaarNumber: cleaned, flow: res.data.flow || 'doc' })
         );
+        setAadhaarNumber(cleaned);
         setVerifications(p => ({ 
           ...p, 
           aadhaar: { ...p.aadhaar, status: 'pending', otpSent: true, clientId } 
@@ -251,16 +253,26 @@ const KYCVerificationStep = forwardRef(({
   };
 
   const handleVerifyAadhaar = async (clientId, otp, aadhaarNum) => {
-    if (!clientId) return toast.error('Session expired. Please tap Get OTP again.');
-    if (!otp || String(otp).trim().length < 4) return toast.error('Valid OTP is required');
+    let resolvedClientId = clientId;
+    if (!resolvedClientId) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(aadhaarSessionKey) || '{}');
+        resolvedClientId = saved.clientId;
+      } catch (_) { /* ignore */ }
+    }
+    if (!resolvedClientId) return toast.error('Session expired. Please tap Get OTP again.');
+    const otpClean = String(otp || '').replace(/\D/g, '').trim();
+    const aadhaarClean = String(aadhaarNum || '').replace(/\D/g, '');
+    if (otpClean.length < 4) return toast.error('Valid OTP is required');
+    if (aadhaarClean.length !== 12) return toast.error('Valid 12-digit Aadhaar is required');
     try {
       setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verifying' } }));
       const res = await kycService.verifyAadhaar({
         role,
         entityId,
-        clientId,
-        otp: String(otp).trim(),
-        aadhaarNumber: aadhaarNum
+        clientId: resolvedClientId,
+        otp: otpClean,
+        aadhaarNumber: aadhaarClean
       });
       if (res.success) {
         toast.success('Aadhaar verified successfully');

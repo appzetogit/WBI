@@ -142,40 +142,62 @@ class CgpeService {
     };
   }
 
+  /** Synthetic id when provider omitted requestId — not valid for OKYC verify */
+  isSyntheticDocSessionId(id) {
+    return /^doc_\d{4}_\d+$/.test(String(id || ''));
+  }
+
   async generateAadhaarOtp(aadhaarNumber) {
     const num = String(aadhaarNumber);
     const docBody = { merchantId: this.clientId, aadhaarNumber: num };
+    // Official CGPE docs: POST /api/kyc/aadhaar/generate-otp (then legacy /api/v1/*)
     const docGenerateEndpoints = [
+      '/api/kyc/aadhaar/generate-otp',
       '/api/v1/kyc/aadhaar/generate-otp',
       '/api/v1/verify/aadhaar/generate-otp'
     ];
 
+    let lastDocErr = null;
     for (const endpoint of docGenerateEndpoints) {
       try {
         const result = await this.makeRequest(endpoint, docBody);
-        const requestId = this.extractOkycSessionId(result) || result?.data?.requestId;
+        const requestId =
+          this.extractOkycSessionId(result) ||
+          result?.data?.requestId ||
+          result?.requestId ||
+          null;
+        if (!requestId) {
+          console.warn('[CGPE] generate-otp ok but no requestId on', endpoint, Object.keys(result?.data || {}));
+        }
+        const clientId = requestId || `doc_${num.slice(-4)}_${Date.now()}`;
+        console.log('[CGPE] Aadhaar OTP generated via', endpoint, 'requestId=', clientId);
         return {
           success: true,
           data: {
-            clientId: requestId || `doc_${num.slice(-4)}_${Date.now()}`,
+            clientId,
             flow: 'doc',
             message: result.message || result.data?.message || 'OTP sent successfully'
           },
-          requestId: requestId || `req_${Date.now()}`
+          requestId: clientId
         };
       } catch (docErr) {
-        /* try next doc endpoint */
+        lastDocErr = docErr;
+        console.warn('[CGPE] generate-otp failed on', endpoint, docErr.message);
       }
     }
 
     try {
-      const result = await this.makeRequest('/api/v1/verify/okyc/initiate', { aadhaarNumber: num });
+      const result = await this.makeRequest('/api/v1/verify/okyc/initiate', {
+        merchantId: this.clientId,
+        aadhaarNumber: num
+      });
       const sessionId = this.extractOkycSessionId(result);
       if (!sessionId) {
         const keys = Object.keys(result?.data || result || {});
         console.error('[CGPE] okyc/initiate missing session id keys:', keys);
         throw new Error('Aadhaar OTP sent but provider session id missing. Please try Get OTP again.');
       }
+      console.log('[CGPE] Aadhaar OTP generated via okyc/initiate session=', sessionId);
       return {
         success: true,
         data: {
@@ -183,15 +205,15 @@ class CgpeService {
           flow: 'okyc',
           message: result.message || result.data?.message || 'OTP sent successfully'
         },
-        requestId: result.data?.transactionId || result.reference_id || result.data?.referenceId || `req_${Date.now()}`
+        requestId: result.data?.transactionId || result.reference_id || result.data?.referenceId || sessionId
       };
     } catch (error) {
-      throw error;
+      throw lastDocErr || error;
     }
   }
 
   /**
-   * Verify Aadhaar OTP
+   * Verify Aadhaar OTP — doc flow (merchantId + aadhaar + otp [+ requestId]) then OKYC fallback
    */
   async verifyAadhaarOtp(sessionId, otp, aadhaarNumber) {
     try {
@@ -204,32 +226,49 @@ class CgpeService {
         throw new Error('Valid 12-digit Aadhaar number is required');
       }
 
+      const sid = String(sessionId ?? '').trim();
+      const hasRealRequestId =
+        sid && !this.isStaleFakeOkycSessionId(sid) && !this.isSyntheticDocSessionId(sid);
+
+      // Official docs body: merchantId + aadhaarNumber + otp. Also send requestId when we have one.
       const docPayload = {
         merchantId: this.clientId,
         aadhaarNumber: aadhaar,
-        otp: otpStr
+        otp: otpStr,
+        ...(hasRealRequestId
+          ? { requestId: sid, clientId: sid, referenceId: sid, reference_id: sid }
+          : {})
       };
       const docVerifyEndpoints = [
+        '/api/kyc/aadhaar/verify-otp',
         '/api/v1/kyc/aadhaar/verify-otp',
         '/api/v1/verify/aadhaar/verify-otp',
         '/api/v1/verify/aadhaar/submit-otp'
       ];
 
+      let lastDocErr = null;
       for (const endpoint of docVerifyEndpoints) {
         try {
           const result = await this.makeRequest(endpoint, docPayload);
+          console.log('[CGPE] Aadhaar OTP verified via', endpoint);
           return this.normalizeAadhaarVerifyResult(result, aadhaar);
         } catch (docErr) {
-          /* try next doc endpoint */
+          lastDocErr = docErr;
+          console.warn('[CGPE] verify-otp failed on', endpoint, docErr.message);
         }
       }
 
-      const sid = String(sessionId ?? '').trim();
-      if (!sid || this.isStaleFakeOkycSessionId(sid)) {
-        throw new Error('OTP session expired. Please tap Get OTP again and use the new code.');
+      if (!hasRealRequestId) {
+        const hint = lastDocErr?.message || 'Validation error';
+        throw new Error(
+          /validation error|invalid otp|otp/i.test(hint)
+            ? 'Invalid or expired Aadhaar OTP. Tap Get OTP again and enter the latest UIDAI SMS within 2–3 minutes.'
+            : hint
+        );
       }
 
       const okycPayload = {
+        merchantId: this.clientId,
         sessionId: sid,
         clientId: sid,
         reference_id: sid,
@@ -239,8 +278,19 @@ class CgpeService {
         aadhaarNumber: aadhaar
       };
 
-      const result = await this.makeRequest('/api/v1/verify/okyc/verify', okycPayload);
-      return this.normalizeAadhaarVerifyResult(result, aadhaar);
+      try {
+        const result = await this.makeRequest('/api/v1/verify/okyc/verify', okycPayload);
+        console.log('[CGPE] Aadhaar OTP verified via okyc/verify');
+        return this.normalizeAadhaarVerifyResult(result, aadhaar);
+      } catch (okycErr) {
+        const msg = okycErr.message || lastDocErr?.message || 'Aadhaar verification failed';
+        if (/validation error/i.test(msg) || /invalid otp/i.test(msg)) {
+          throw new Error(
+            'Invalid or expired Aadhaar OTP. Tap Get OTP again and enter the latest UIDAI SMS within 2–3 minutes.'
+          );
+        }
+        throw okycErr;
+      }
     } catch (error) {
       throw error;
     }
