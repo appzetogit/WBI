@@ -4,7 +4,7 @@ const Engineer = require('../../models/Engineer');
 const { findUserAcrossCollections } = require('../../utils/authHelper');
 const { generateOTP, hashOTP, storeOTP, verifyOTP, checkRateLimit } = require('../../utils/redisOtp.util');
 const { generateTokenPair, verifyRefreshToken, generateVerificationToken, verifyVerificationToken } = require('../../utils/tokenService');
-const { sendOTP: sendSMSOTP } = require('../../services/smsService');
+const { sendRegistrationOTP } = require('../../services/smsService');
 const cloudinaryService = require('../../services/cloudinaryService');
 const cgpeService = require('../../services/cgpeService');
 const { USER_ROLES, ENGINEER_STATUS } = require('../../utils/constants');
@@ -44,7 +44,7 @@ const sendOTP = async (req, res) => {
     await storeOTP(phone, otpHash);
 
     // 4. Send OTP via SMS (Fire and forget)
-    sendSMSOTP(phone, otp, 'engineer').then(smsResult => {
+    sendRegistrationOTP(phone, otp).then(smsResult => {
       if (!smsResult.success) {
         console.warn(`[OTP] SMS failed for ${phone}, but OTP stored`);
       }

@@ -2,7 +2,7 @@ const Worker = require('../../models/Worker');
 const { findUserAcrossCollections } = require('../../utils/authHelper');
 const { generateOTP, hashOTP, storeOTP, verifyOTP, checkRateLimit } = require('../../utils/redisOtp.util');
 const { generateTokenPair, verifyRefreshToken, generateVerificationToken, verifyVerificationToken } = require('../../utils/tokenService');
-const { sendOTP: sendSMSOTP } = require('../../services/smsService');
+const { sendRegistrationOTP } = require('../../services/smsService');
 const cloudinaryService = require('../../services/cloudinaryService');
 const { USER_ROLES, WORKER_STATUS } = require('../../utils/constants');
 const { validationResult } = require('express-validator');
@@ -41,7 +41,7 @@ const sendOTP = async (req, res) => {
     await storeOTP(phone, otpHash);
 
     // 4. Send OTP via SMS
-    sendSMSOTP(phone, otp, 'worker').then(smsResult => {
+    sendRegistrationOTP(phone, otp).then(smsResult => {
       if (!smsResult.success) {
         console.warn(`[OTP] SMS failed for worker ${phone}, but OTP stored`);
       }

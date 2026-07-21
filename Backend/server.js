@@ -31,6 +31,13 @@ const mongoSanitize = require('express-mongo-sanitize');
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '.env') });
 
+const smsApiKeySet = Boolean(process.env.SMS_INDIA_HUB_API_KEY);
+const smsSender = process.env.SMS_INDIA_HUB_SENDER_ID || '';
+const smsDlt = process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID || '';
+console.log(
+  `[boot] SMS OTP: apiKey=${smsApiKeySet ? 'set' : 'MISSING'}, sender=${smsSender || 'MISSING'}, dltTemplateId=${smsDlt ? 'set' : 'MISSING'} (file: ${path.join(__dirname, '.env')})`
+);
+
 // Connect to database
 connectDB();
 
