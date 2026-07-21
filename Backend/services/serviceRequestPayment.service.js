@@ -76,24 +76,6 @@ const buildMarketplacePayload = (request, schema, formData) => ({
 
 async function queueMarketplaceForServiceRequest(request, schema, formData) {
   if (request.payment?.marketplaceQueued) return { alreadyQueued: true };
-  // #region agent log
-  try {
-    const { agentDebugLog } = require('../utils/agentDebugLog');
-    agentDebugLog({
-      hypothesisId: 'E',
-      location: 'serviceRequestPayment.service.js:queueMarketplace',
-      message: 'Queueing marketplace for ServiceRequest',
-      data: {
-        requestId: String(request._id),
-        requestCode: request.requestCode,
-        categoryCode: schema.categoryCode,
-        subCatCode: schema.subCatCode,
-        paymentStatus: request.payment?.status || null,
-        city: request.contact?.city || ''
-      }
-    });
-  } catch (_) { /* ignore */ }
-  // #endregion
   queueOpportunityFromEnquiry(buildMarketplacePayload(request, schema, formData));
   await ServiceRequest.updateOne(
     { _id: request._id },

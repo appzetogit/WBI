@@ -51,6 +51,9 @@ const KYCVerificationStep = forwardRef(({
   const [verifications, setVerifications] = useState({});
   const [activeUploads, setActiveUploads] = useState({});
   const [uploadProgress, setUploadProgress] = useState({}); // { [documentType]: 0-100 }
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
+  const [aadhaarOtp, setAadhaarOtp] = useState('');
+  const aadhaarSessionKey = entityId ? `kyc_aadhaar_${entityId}` : 'kyc_aadhaar_draft';
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -146,6 +149,28 @@ const KYCVerificationStep = forwardRef(({
   }, [role, rulesOverride]);
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(aadhaarSessionKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (saved.aadhaarNumber) setAadhaarNumber(String(saved.aadhaarNumber));
+      if (saved.clientId) {
+        setVerifications((p) => ({
+          ...p,
+          aadhaar: {
+            ...p.aadhaar,
+            otpSent: true,
+            clientId: saved.clientId,
+            status: p.aadhaar?.status === 'verified' ? 'verified' : 'pending'
+          }
+        }));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [aadhaarSessionKey]);
+
+  useEffect(() => {
     if (!initialVerifications || typeof initialVerifications !== 'object') return;
     setVerifications((prev) => ({ ...initialVerifications, ...prev }));
   }, [initialVerifications]);
@@ -209,9 +234,14 @@ const KYCVerificationStep = forwardRef(({
       const res = await kycService.generateAadhaarOtp({ role, entityId, aadhaarNumber });
       if (res.success) {
         toast.success(res.data?.message || 'OTP sent to Aadhaar linked mobile number');
+        const clientId = res.data.clientId;
+        sessionStorage.setItem(
+          aadhaarSessionKey,
+          JSON.stringify({ clientId, aadhaarNumber })
+        );
         setVerifications(p => ({ 
           ...p, 
-          aadhaar: { ...p.aadhaar, status: 'pending', otpSent: true, clientId: res.data.clientId } 
+          aadhaar: { ...p.aadhaar, status: 'pending', otpSent: true, clientId } 
         }));
       }
     } catch (err) {
@@ -220,18 +250,28 @@ const KYCVerificationStep = forwardRef(({
     }
   };
 
-  const handleVerifyAadhaar = async (clientId, otp, aadhaarNumber) => {
-    if (!clientId || !otp || otp.length < 4) return toast.error('Valid OTP is required');
+  const handleVerifyAadhaar = async (clientId, otp, aadhaarNum) => {
+    if (!clientId) return toast.error('Session expired. Please tap Get OTP again.');
+    if (!otp || String(otp).trim().length < 4) return toast.error('Valid OTP is required');
     try {
       setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verifying' } }));
-      const res = await kycService.verifyAadhaar({ role, entityId, clientId, otp, aadhaarNumber });
+      const res = await kycService.verifyAadhaar({
+        role,
+        entityId,
+        clientId,
+        otp: String(otp).trim(),
+        aadhaarNumber: aadhaarNum
+      });
       if (res.success) {
         toast.success('Aadhaar verified successfully');
+        sessionStorage.removeItem(aadhaarSessionKey);
+        setAadhaarOtp('');
         setVerifications(p => ({ ...p, aadhaar: { status: 'verified', data: res.data } }));
       }
     } catch (err) {
-      toast.error(err.message || 'Aadhaar verification failed');
-      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message } }));
+      const msg = err?.message || 'Aadhaar verification failed';
+      toast.error(msg);
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: msg } }));
     }
   };
 
@@ -375,13 +415,18 @@ const KYCVerificationStep = forwardRef(({
                 <div className="mt-2">
                   {(rule.verificationMode === 'digilocker' || rule.documentType === 'aadhaar') && (
                     <div className="space-y-3">
-                      <input type="text" id="aadhaarInput" placeholder="Enter 12-digit Aadhaar Number" maxLength="12" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border" />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Enter 12-digit Aadhaar Number"
+                        maxLength="12"
+                        value={aadhaarNumber}
+                        onChange={(e) => setAadhaarNumber(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border"
+                      />
                       {!vState.otpSent ? (
                         <button 
-                          onClick={() => {
-                            const val = document.getElementById('aadhaarInput').value;
-                            handleGenerateAadhaarOtp(val);
-                          }}
+                          onClick={() => handleGenerateAadhaarOtp(aadhaarNumber)}
                           disabled={vState.status === 'generating_otp'}
                           className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
                         >
@@ -389,13 +434,17 @@ const KYCVerificationStep = forwardRef(({
                         </button>
                       ) : (
                         <>
-                          <input type="text" id="aadhaarOtp" placeholder="Enter OTP" maxLength="6" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border mt-2" />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="Enter OTP"
+                            maxLength="6"
+                            value={aadhaarOtp}
+                            onChange={(e) => setAadhaarOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border mt-2"
+                          />
                           <button 
-                            onClick={() => {
-                               const otp = document.getElementById('aadhaarOtp').value;
-                               const aadhaarNumber = document.getElementById('aadhaarInput').value;
-                               handleVerifyAadhaar(vState.clientId, otp, aadhaarNumber);
-                            }}
+                            onClick={() => handleVerifyAadhaar(vState.clientId, aadhaarOtp, aadhaarNumber)}
                             disabled={vState.status === 'verifying'}
                             className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
                           >

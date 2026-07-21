@@ -53,25 +53,6 @@ exports.createEnquiry = async (req, res) => {
       titleHint: serviceType || 'Banking service'
     });
 
-    // #region agent log
-    try {
-      const { agentDebugLog } = require('../utils/agentDebugLog');
-      agentDebugLog({
-        hypothesisId: 'A',
-        location: 'bankingEnquiry.controller.js:createEnquiry',
-        message: 'Banking enquiry saved — marketplace bridge queued',
-        data: {
-          enquiryId: String(enquiry._id),
-          serviceType,
-          city,
-          queuedOpportunity: true,
-          hasQueueCall: true
-        },
-        runId: 'post-fix'
-      });
-    } catch (_) { /* ignore */ }
-    // #endregion
-
     res.status(201).json({
       success: true,
       message: 'Banking enquiry submitted successfully',

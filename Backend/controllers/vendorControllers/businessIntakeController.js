@@ -147,25 +147,6 @@ const getOpportunities = async (req, res) => {
     const { filter, codes, matchCodes } = await buildOpportunityBaseFilter(vendorId);
     const vid = new mongoose.Types.ObjectId(vendorId);
 
-    // #region agent log
-    try {
-      const { agentDebugLog } = require('../../utils/agentDebugLog');
-      agentDebugLog({
-        hypothesisId: 'D',
-        location: 'businessIntakeController.js:getOpportunities',
-        message: 'Vendor opportunities query',
-        data: {
-          vendorId: String(vendorId),
-          codes,
-          matchCodes,
-          filterCategory: filter.categoryCode,
-          type: type || null,
-          status: status || null
-        }
-      });
-    } catch (_) { /* ignore */ }
-    // #endregion
-
     // Default to open unless bookmarking (show all bookmarked) or status explicitly set
     const isBookmarkQuery = bookmarked === 'true' || bookmarked === true;
     const resolvedStatus = status !== undefined ? status : (isBookmarkQuery ? '' : 'open');
@@ -272,29 +253,6 @@ const getOpportunities = async (req, res) => {
       { $group: { _id: '$type', count: { $sum: 1 } } }
     ]);
     const typeCounts = counts.reduce((acc, c) => ({ ...acc, [c._id]: c.count }), {});
-
-    // #region agent log
-    try {
-      const { agentDebugLog } = require('../../utils/agentDebugLog');
-      agentDebugLog({
-        hypothesisId: 'D',
-        location: 'businessIntakeController.js:getOpportunities:result',
-        message: 'Vendor opportunities result',
-        data: {
-          vendorId: String(vendorId),
-          total,
-          returned: enriched.length,
-          typeCounts,
-          sampleTitles: enriched.slice(0, 5).map((o) => ({
-            id: String(o._id),
-            code: o.opportunityCode,
-            cat: o.categoryCode,
-            title: o.title
-          }))
-        }
-      });
-    } catch (_) { /* ignore */ }
-    // #endregion
 
     res.status(200).json({
       success: true,

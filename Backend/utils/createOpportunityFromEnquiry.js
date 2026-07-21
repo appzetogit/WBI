@@ -196,25 +196,6 @@ const createOpportunityFromEnquiry = async ({
     ]
   }));
 
-  // #region agent log
-  try {
-    const { agentDebugLog } = require('./agentDebugLog');
-    agentDebugLog({
-      hypothesisId: 'B',
-      location: 'createOpportunityFromEnquiry.js:start',
-      message: 'Creating opportunity from enquiry',
-      data: {
-        enquiryId: String(enquiry._id),
-        enquiryType,
-        enquiryModel,
-        categoryCode: categoryCode || null,
-        city: enquiry.city || '',
-        serviceRequestId: meta.serviceRequestId ? String(meta.serviceRequestId) : null
-      }
-    });
-  } catch (_) { /* ignore */ }
-  // #endregion
-
   const categoryName = await resolveCategoryName(categoryCode);
   const paidFromCustomer = Number(enquiry.customerPaidAmount) || 0;
   const budget =
@@ -358,25 +339,6 @@ const createOpportunityFromEnquiry = async ({
     eligibleCount
   });
 
-  // #region agent log
-  try {
-    const { agentDebugLog } = require('./agentDebugLog');
-    agentDebugLog({
-      hypothesisId: 'B',
-      location: 'createOpportunityFromEnquiry.js:done',
-      message: 'Opportunity created + assignment result',
-      data: {
-        enquiryId: String(enquiry._id),
-        opportunityId: String(opportunity._id),
-        opportunityCode: opportunity.opportunityCode,
-        categoryCode,
-        eligibleCount,
-        eligibleVendorIds: (vendorIds || []).map(String)
-      }
-    });
-  } catch (_) { /* ignore */ }
-  // #endregion
-
   return {
     opportunity,
     eligibleCount,
@@ -391,17 +353,6 @@ const queueOpportunityFromEnquiry = (opts) => {
   Promise.resolve()
     .then(() => createOpportunityFromEnquiry(opts))
     .catch((err) => {
-      // #region agent log
-      try {
-        const { agentDebugLog } = require('./agentDebugLog');
-        agentDebugLog({
-          hypothesisId: 'F',
-          location: 'createOpportunityFromEnquiry.js:queueCatch',
-          message: 'queueOpportunityFromEnquiry failed',
-          data: { error: String(err && err.message || err), enquiryType: opts?.enquiryType || null }
-        });
-      } catch (_) { /* ignore */ }
-      // #endregion
       console.error('[queueOpportunityFromEnquiry]', err.message);
     });
 };
@@ -412,24 +363,6 @@ const queueOpportunityFromEnquiry = (opts) => {
 const queueBankingMarketplaceFromEnquiry = (enquiry, { enquiryModel, titleHint } = {}) => {
   if (!enquiry?._id) return;
   const hint = titleHint || enquiry.serviceType || 'Banking service';
-  // #region agent log
-  try {
-    const { agentDebugLog } = require('./agentDebugLog');
-    agentDebugLog({
-      hypothesisId: 'A',
-      location: 'createOpportunityFromEnquiry.js:queueBanking',
-      message: 'Queueing banking marketplace opportunity',
-      data: {
-        enquiryId: String(enquiry._id),
-        enquiryModel: enquiryModel || 'BankingEnquiry',
-        city: enquiry.city || '',
-        titleHint: hint,
-        categoryCode: 'C05'
-      },
-      runId: 'post-fix'
-    });
-  } catch (_) { /* ignore */ }
-  // #endregion
   queueOpportunityFromEnquiry({
     enquiry: {
       ...(typeof enquiry.toObject === 'function' ? enquiry.toObject() : enquiry),

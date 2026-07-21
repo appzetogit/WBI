@@ -221,6 +221,10 @@ app.get('/health', (req, res) => {
       senderId: smsSender,
       apiKeyConfigured: Boolean(process.env.SMS_INDIA_HUB_API_KEY),
       entityIdConfigured: Boolean(process.env.SMS_INDIA_HUB_DLT_ENTITY_ID)
+    },
+    kycAadhaarOtp: {
+      serverSessionCache: '2026-07-21-v4-doc-first',
+      cgpeApiConfigured: Boolean(process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY)
     }
   });
 });

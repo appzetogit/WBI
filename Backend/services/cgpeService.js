@@ -43,7 +43,8 @@ class CgpeService {
         'Content-Type': 'application/json',
         'x-merchant-id': this.clientId,
         'x-api-key': this.apiKey,
-        'x-secret-key': this.clientSecret || ''
+        'x-secret-key': this.clientSecret || '',
+        'x-api-secret': this.clientSecret || ''
       };
 
       const payload = {
@@ -94,16 +95,95 @@ class CgpeService {
   /**
    * Generate Aadhaar OTP
    */
+  extractOkycSessionId(result) {
+    const d = result?.data ?? {};
+    const candidates = [
+      d.sessionId,
+      d.clientId,
+      d.requestId,
+      d.referenceId,
+      d.reference_id,
+      d.transactionId,
+      result.sessionId,
+      result.clientId,
+      result.requestId,
+      result.reference_id
+    ];
+    for (const c of candidates) {
+      if (c == null || c === '') continue;
+      const id = String(c).trim();
+      if (id && !this.isStaleFakeOkycSessionId(id)) return id;
+    }
+    return null;
+  }
+
+  /** Legacy bug generated `client_<13-digit-ms>` with no provider tie-in */
+  isStaleFakeOkycSessionId(id) {
+    return /^client_\d{13}$/.test(String(id));
+  }
+
+  normalizeAadhaarVerifyResult(result, aadhaarNumber) {
+    const aadhaarData = result.data?.aadhaarData || result.data || result.result || {};
+    return {
+      success: true,
+      data: {
+        ...aadhaarData,
+        fullName: aadhaarData.fullName || aadhaarData.name,
+        aadhaarNumberMasked:
+          aadhaarData.aadhaarNumberMasked ||
+          (aadhaarNumber ? `XXXX-XXXX-${String(aadhaarNumber).slice(-4)}` : 'XXXX-XXXX-XXXX')
+      },
+      requestId:
+        result.data?.transactionId ||
+        result.transactionId ||
+        result.reference_id ||
+        result.data?.requestId ||
+        `req_${Date.now()}`
+    };
+  }
+
   async generateAadhaarOtp(aadhaarNumber) {
+    const num = String(aadhaarNumber);
+    const docBody = { merchantId: this.clientId, aadhaarNumber: num };
+    const docGenerateEndpoints = [
+      '/api/v1/kyc/aadhaar/generate-otp',
+      '/api/v1/verify/aadhaar/generate-otp'
+    ];
+
+    for (const endpoint of docGenerateEndpoints) {
+      try {
+        const result = await this.makeRequest(endpoint, docBody);
+        const requestId = this.extractOkycSessionId(result) || result?.data?.requestId;
+        return {
+          success: true,
+          data: {
+            clientId: requestId || `doc_${num.slice(-4)}_${Date.now()}`,
+            flow: 'doc',
+            message: result.message || result.data?.message || 'OTP sent successfully'
+          },
+          requestId: requestId || `req_${Date.now()}`
+        };
+      } catch (docErr) {
+        /* try next doc endpoint */
+      }
+    }
+
     try {
-      const result = await this.makeRequest('/api/v1/verify/okyc/initiate', { aadhaarNumber });
+      const result = await this.makeRequest('/api/v1/verify/okyc/initiate', { aadhaarNumber: num });
+      const sessionId = this.extractOkycSessionId(result);
+      if (!sessionId) {
+        const keys = Object.keys(result?.data || result || {});
+        console.error('[CGPE] okyc/initiate missing session id keys:', keys);
+        throw new Error('Aadhaar OTP sent but provider session id missing. Please try Get OTP again.');
+      }
       return {
         success: true,
         data: {
-          clientId: result.data?.sessionId || result.sessionId || `client_${Date.now()}`,
-          message: result.message || 'OTP sent successfully'
+          clientId: sessionId,
+          flow: 'okyc',
+          message: result.message || result.data?.message || 'OTP sent successfully'
         },
-        requestId: result.data?.transactionId || result.reference_id || `req_${Date.now()}`
+        requestId: result.data?.transactionId || result.reference_id || result.data?.referenceId || `req_${Date.now()}`
       };
     } catch (error) {
       throw error;
@@ -115,19 +195,52 @@ class CgpeService {
    */
   async verifyAadhaarOtp(sessionId, otp, aadhaarNumber) {
     try {
-      const result = await this.makeRequest('/api/v1/verify/okyc/verify', { sessionId, otp, aadhaarNumber });
-      
-      const aadhaarData = result.data?.aadhaarData || result.data || {};
-      
-      return {
-        success: true,
-        data: {
-          ...aadhaarData,
-          fullName: aadhaarData.name, // Normalizing name format for kycController
-          aadhaarNumberMasked: 'XXXX-XXXX-' + (aadhaarNumber || 'XXXX').slice(-4)
-        },
-        requestId: result.data?.transactionId || result.reference_id || `req_${Date.now()}`
+      const otpStr = String(otp ?? '').trim();
+      if (!otpStr) {
+        throw new Error('OTP is required');
+      }
+      const aadhaar = aadhaarNumber ? String(aadhaarNumber).trim() : null;
+      if (!aadhaar || !/^\d{12}$/.test(aadhaar)) {
+        throw new Error('Valid 12-digit Aadhaar number is required');
+      }
+
+      const docPayload = {
+        merchantId: this.clientId,
+        aadhaarNumber: aadhaar,
+        otp: otpStr
       };
+      const docVerifyEndpoints = [
+        '/api/v1/kyc/aadhaar/verify-otp',
+        '/api/v1/verify/aadhaar/verify-otp',
+        '/api/v1/verify/aadhaar/submit-otp'
+      ];
+
+      for (const endpoint of docVerifyEndpoints) {
+        try {
+          const result = await this.makeRequest(endpoint, docPayload);
+          return this.normalizeAadhaarVerifyResult(result, aadhaar);
+        } catch (docErr) {
+          /* try next doc endpoint */
+        }
+      }
+
+      const sid = String(sessionId ?? '').trim();
+      if (!sid || this.isStaleFakeOkycSessionId(sid)) {
+        throw new Error('OTP session expired. Please tap Get OTP again and use the new code.');
+      }
+
+      const okycPayload = {
+        sessionId: sid,
+        clientId: sid,
+        reference_id: sid,
+        referenceId: sid,
+        requestId: sid,
+        otp: otpStr,
+        aadhaarNumber: aadhaar
+      };
+
+      const result = await this.makeRequest('/api/v1/verify/okyc/verify', okycPayload);
+      return this.normalizeAadhaarVerifyResult(result, aadhaar);
     } catch (error) {
       throw error;
     }
@@ -331,6 +444,7 @@ class CgpeService {
         requestId: `req_adh_gen_${Date.now()}`,
         status: 'SUCCESS',
         data: {
+          sessionId: `client_${Date.now()}_${num}`,
           clientId: `client_${Date.now()}_${num}`,
           message: 'OTP sent successfully'
         }

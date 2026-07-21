@@ -4,8 +4,47 @@ const KYCVerification = require('../models/KYCVerification');
 const DigiLockerSession = require('../models/DigiLockerSession');
 const KYCAuditLog = require('../models/KYCAuditLog');
 const cgpeService = require('../services/cgpeService');
+const { setCache, getCache, delCache } = require('../services/redisService');
 const VerificationDocument = require('../models/VerificationDocument');
 const VendorKYC = require('../models/VendorKYC');
+
+const AADHAAR_OTP_TTL_SEC = 600;
+const aadhaarOtpMem = new Map();
+
+function aadhaarOtpCacheKey(entityId) {
+  return `kyc:aadhaar:otp:${entityId}`;
+}
+
+async function storeAadhaarOtpSession(entityId, aadhaarNumber, clientId) {
+  if (!entityId || !clientId) return;
+  const key = aadhaarOtpCacheKey(entityId);
+  const payload = {
+    clientId: String(clientId),
+    aadhaarLast4: aadhaarNumber ? String(aadhaarNumber).slice(-4) : null
+  };
+  aadhaarOtpMem.set(key, { ...payload, exp: Date.now() + AADHAAR_OTP_TTL_SEC * 1000 });
+  await setCache(key, payload, AADHAAR_OTP_TTL_SEC);
+}
+
+async function resolveAadhaarClientId(entityId, aadhaarNumber, clientIdFromClient) {
+  let cached = null;
+  if (entityId) {
+    const key = aadhaarOtpCacheKey(entityId);
+    const mem = aadhaarOtpMem.get(key);
+    if (mem && mem.exp > Date.now()) cached = mem.clientId;
+    else aadhaarOtpMem.delete(key);
+    if (!cached) {
+      const fromRedis = await getCache(key);
+      if (fromRedis?.clientId) cached = String(fromRedis.clientId);
+    }
+  }
+  const fromClient = clientIdFromClient ? String(clientIdFromClient).trim() : '';
+  if (fromClient && cgpeService.isStaleFakeOkycSessionId(fromClient)) {
+    return cached || null;
+  }
+  if (cached) return cached;
+  return fromClient || null;
+}
 
 // Helper to log audit
 const logAudit = async (role, entityId, action, documentType, provider, status, message, req) => {
@@ -406,8 +445,9 @@ exports.generateAadhaarOtp = async (req, res) => {
     }
     
     const result = await cgpeService.generateAadhaarOtp(aadhaarNumber);
-    
+
     if (entityId) {
+      await storeAadhaarOtpSession(entityId, aadhaarNumber, result.data.clientId);
       await logAudit(role, entityId, 'AADHAAR_OTP_GENERATED', 'aadhaar', 'cgpe', 'initiated', 'Aadhaar OTP generated successfully', req);
     }
     
@@ -430,8 +470,21 @@ exports.generateAadhaarOtp = async (req, res) => {
 exports.verifyAadhaar = async (req, res) => {
   try {
     const { role, entityId, clientId, otp, aadhaarNumber } = req.body;
-    if (!clientId || !otp) return res.status(400).json({ success: false, message: 'Client ID and OTP are required' });
-    
+    if (!otp || String(otp).trim().length < 4) {
+      return res.status(400).json({ success: false, message: 'Valid OTP is required' });
+    }
+    if (!aadhaarNumber || String(aadhaarNumber).length !== 12 || isNaN(aadhaarNumber)) {
+      return res.status(400).json({ success: false, message: 'Valid 12-digit Aadhaar number is required' });
+    }
+
+    const resolvedClientId = await resolveAadhaarClientId(entityId, aadhaarNumber, clientId);
+    if (!resolvedClientId) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP session expired. Please tap Get OTP again and use the new code.'
+      });
+    }
+
     if (entityId) {
       // Check cache to prevent duplicate calls
       const existing = await KYCVerification.findOne({ role, entityId, documentType: 'aadhaar' });
@@ -441,7 +494,12 @@ exports.verifyAadhaar = async (req, res) => {
       }
     }
     
-    const result = await cgpeService.verifyAadhaarOtp(clientId, otp, aadhaarNumber);
+    const result = await cgpeService.verifyAadhaarOtp(resolvedClientId, otp, aadhaarNumber);
+
+    if (entityId) {
+      await delCache(aadhaarOtpCacheKey(entityId));
+      aadhaarOtpMem.delete(aadhaarOtpCacheKey(entityId));
+    }
     
     if (entityId) {
       const kycRec = await KYCVerification.findOneAndUpdate(
@@ -475,7 +533,14 @@ exports.verifyAadhaar = async (req, res) => {
     if (req.body.entityId) {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_VERIFY_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }
-    res.status(400).json({ success: false, message: error.message || 'Aadhaar verification failed' });
+    let message = error.message || 'Aadhaar verification failed';
+    if (/invalid otp/i.test(message)) {
+      message =
+        'Invalid or expired Aadhaar OTP. Tap Get OTP again, use the latest UIDAI SMS (not phone signup OTP), and verify within a few minutes.';
+    } else if (/session expired|session id missing|get otp again/i.test(message)) {
+      message = 'OTP session expired. Tap Get OTP again and enter the new code.';
+    }
+    res.status(400).json({ success: false, message });
   }
 };
 

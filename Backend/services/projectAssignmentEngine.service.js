@@ -190,31 +190,6 @@ const buildVendorQueue = async (opportunity, config) => {
     .sort((a, b) => b.score - a.score)
     .slice(0, notifyCap);
 
-  // #region agent log
-  try {
-    const { agentDebugLog } = require('../utils/agentDebugLog');
-    agentDebugLog({
-      hypothesisId: 'C',
-      location: 'projectAssignmentEngine.service.js:buildVendorQueue',
-      message: 'Vendor queue build',
-      data: {
-        categoryCode,
-        city,
-        matchCodes: codes,
-        candidateCount: vendors.length,
-        scoredCount: scored.length,
-        top: scoredAll.slice(0, 8).map((r) => ({
-          id: String(r.vendorId),
-          name: r.businessName,
-          score: r.score,
-          coversCity: r.coversCity,
-          hasService: r.hasService
-        }))
-      }
-    });
-  } catch (_) { /* ignore */ }
-  // #endregion
-
   return scored.map((row, idx) => ({
     vendorId: row.vendorId,
     rank: idx + 1,
