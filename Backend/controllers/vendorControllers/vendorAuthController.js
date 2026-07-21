@@ -62,7 +62,7 @@ const sendOTP = async (req, res) => {
 
     // 2. Generate OTP
     console.time('sendOTP_generation');
-    const otp = generateOTP();
+    const otp = generateOTP(phone);
     const otpHash = hashOTP(otp);
     console.timeEnd('sendOTP_generation');
 

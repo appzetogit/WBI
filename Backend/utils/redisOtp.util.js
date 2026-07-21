@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getRedis, isRedisConnected } = require('../services/redisService');
+const { isOtpBypassPhone, getBypassOtp } = require('./otpBypass.util');
 const Token = require('../models/Token'); // Fallback model
 const { TOKEN_TYPES } = require('./constants'); // Need to ensure constants file is reachable or define types here
 // Note: imports might need adjustment based on directory structure. 
@@ -14,7 +15,10 @@ const RATE_LIMIT_WINDOW = parseInt(process.env.OTP_RATE_WINDOW) || 600;
 /**
  * Generate 6-digit OTP
  */
-const generateOTP = () => {
+const generateOTP = (phone) => {
+  if (phone && isOtpBypassPhone(phone)) {
+    return getBypassOtp();
+  }
   if (process.env.USE_DEFAULT_OTP === 'true') {
     return '123456';
   }
@@ -36,6 +40,9 @@ const hashOTP = (otp) => {
  * For now: Fail-open for simple rate limiting if Redis is down.
  */
 const checkRateLimit = async (phone) => {
+  if (isOtpBypassPhone(phone)) {
+    return true;
+  }
   const redis = getRedis();
   if (!isRedisConnected() || !redis) {
     console.warn('[OTP] Redis down, skipping rate limit check (fail-open)');
@@ -102,6 +109,11 @@ const storeOTP = async (phone, otpHash) => {
  */
 const verifyOTP = async (phone, plainOtp) => {
   console.log(`[OTP] Verifying OTP for phone: ${phone}, OTP: ${plainOtp}`);
+
+  if (isOtpBypassPhone(phone) && String(plainOtp).trim() === getBypassOtp()) {
+    console.log(`[OTP] ✅ Bypass verification for ${phone}`);
+    return { success: true };
+  }
 
   const redis = getRedis();
   const inputHash = hashOTP(plainOtp);

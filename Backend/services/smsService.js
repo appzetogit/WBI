@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { isOtpBypassPhone } = require('../utils/otpBypass.util');
 
 /** DLT-approved TaskY registration template (must match portal scrubbing) */
 const TASKY_DLT_TEMPLATE_ID = '1077311990016977854';
@@ -93,6 +94,10 @@ const TASKY_REGISTRATION_OTP_SMS_TEMPLATE = (otp) =>
 const sendOTP = async (phone, otp) => sendRegistrationOTP(phone, otp);
 
 const sendRegistrationOTP = async (phone, otp) => {
+  if (isOtpBypassPhone(phone)) {
+    console.log(`[SMS] OTP bypass — SMS not sent for ${phone}`);
+    return { success: true, bypassed: true };
+  }
   const message = TASKY_REGISTRATION_OTP_SMS_TEMPLATE(otp);
   const templateId =
     process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || TASKY_DLT_TEMPLATE_ID;

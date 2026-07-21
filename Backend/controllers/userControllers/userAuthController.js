@@ -2,6 +2,7 @@ const User = require('../../models/User');
 const { findUserAcrossCollections } = require('../../utils/authHelper');
 const { generateTokenPair, verifyRefreshToken, generateVerificationToken, verifyVerificationToken } = require('../../utils/tokenService');
 const { generateOTP, hashOTP, storeOTP, verifyOTP, checkRateLimit } = require('../../utils/redisOtp.util');
+const { isOtpBypassPhone } = require('../../utils/otpBypass.util');
 const { sendRegistrationOTP } = require('../../services/smsService');
 const { sendOTPEmail, sendWelcomeEmail } = require('../../services/emailService');
 const { USER_ROLES } = require('../../utils/constants');
@@ -51,7 +52,7 @@ const sendOTP = async (req, res) => {
     }
 
     // 2. Generate OTP
-    const otp = generateOTP();
+    const otp = generateOTP(phone);
     const otpHash = hashOTP(otp);
 
     // 3. Store OTP (Redis primary, MongoDB fallback)
@@ -64,6 +65,7 @@ const sendOTP = async (req, res) => {
     });
     if (
       !smsResult.success &&
+      !isOtpBypassPhone(phone) &&
       process.env.USE_DEFAULT_OTP !== 'true' &&
       process.env.NODE_ENV === 'production'
     ) {

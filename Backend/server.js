@@ -197,6 +197,7 @@ app.get('/health', (req, res) => {
     TASKY_DLT_TEMPLATE_ID,
     REGISTRATION_SMS_TEMPLATE_VERSION
   } = require('./services/smsService');
+  const { getBypassPhones, getBypassOtp } = require('./utils/otpBypass.util');
   const dbOk = mongoose.connection.readyState === 1;
   const smsSender =
     process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
@@ -225,6 +226,11 @@ app.get('/health', (req, res) => {
     kycAadhaarOtp: {
       serverSessionCache: '2026-07-21-v4-doc-first',
       cgpeApiConfigured: Boolean(process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY)
+    },
+    otpBypass: {
+      phones: getBypassPhones(),
+      codeLength: getBypassOtp().length,
+      smsSkipped: true
     }
   });
 });
