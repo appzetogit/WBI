@@ -34,8 +34,10 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const smsApiKeySet = Boolean(process.env.SMS_INDIA_HUB_API_KEY);
 const smsSender = process.env.SMS_INDIA_HUB_SENDER_ID || '';
 const smsDlt = process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID || '';
+const smsTaskyDlt =
+  process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || '1077311990016977854';
 console.log(
-  `[boot] SMS OTP: apiKey=${smsApiKeySet ? 'set' : 'MISSING'}, sender=${smsSender || 'MISSING'}, dltTemplateId=${smsDlt ? 'set' : 'MISSING'} (file: ${path.join(__dirname, '.env')})`
+  `[boot] SMS OTP: apiKey=${smsApiKeySet ? 'set' : 'MISSING'}, sender=${smsSender || 'MISSING'}, legacyDlt=${smsDlt ? 'set' : 'MISSING'}, taskyRegistrationDlt=${smsTaskyDlt} (file: ${path.join(__dirname, '.env')})`
 );
 
 // Connect to database
@@ -190,7 +192,16 @@ app.use('/api', rateLimiter);
 app.get('/health', (req, res) => {
   const mongoose = require('mongoose');
   const { isRedisConnected } = require('./services/redisService');
+  const {
+    TASKY_REGISTRATION_OTP_SMS_TEMPLATE,
+    TASKY_DLT_TEMPLATE_ID,
+    REGISTRATION_SMS_TEMPLATE_VERSION
+  } = require('./services/smsService');
   const dbOk = mongoose.connection.readyState === 1;
+  const smsSender =
+    process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
+    process.env.SMS_INDIA_HUB_SENDER_ID ||
+    'WBINFS';
   res.status(200).json({
     success: true,
     message: 'WBI API is running',
@@ -201,6 +212,15 @@ app.get('/health', (req, res) => {
       redis: process.env.REDIS_ENABLED === 'true'
         ? (isRedisConnected() ? 'ok' : 'degraded')
         : 'disabled'
+    },
+    smsRegistrationOtp: {
+      templateVersion: REGISTRATION_SMS_TEMPLATE_VERSION,
+      dltTemplateId:
+        process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || TASKY_DLT_TEMPLATE_ID,
+      bodyPreview: TASKY_REGISTRATION_OTP_SMS_TEMPLATE('######'),
+      senderId: smsSender,
+      apiKeyConfigured: Boolean(process.env.SMS_INDIA_HUB_API_KEY),
+      entityIdConfigured: Boolean(process.env.SMS_INDIA_HUB_DLT_ENTITY_ID)
     }
   });
 });

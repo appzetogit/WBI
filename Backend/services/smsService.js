@@ -1,15 +1,22 @@
 const axios = require('axios');
 
+/** DLT-approved TaskY registration template (must match portal scrubbing) */
+const TASKY_DLT_TEMPLATE_ID = '1077311990016977854';
+const TASKY_REGISTRATION_SENDER_ID = 'WBINFS';
+const REGISTRATION_SMS_TEMPLATE_VERSION = '2026-07-21-tazky-dlt';
+
 /**
  * Send SMS via SMS India Hub
  * @param {string} phone - Phone number
  * @param {string} message - Message content
- * @param {{ templateId?: string }} [options]
+ * @param {{ templateId?: string, senderId?: string, entityId?: string }} [options]
  * @returns {Promise<Object>} - Response data
  */
 const sendSMS = async (phone, message, options = {}) => {
   try {
-    if (!process.env.SMS_INDIA_HUB_API_KEY || !process.env.SMS_INDIA_HUB_SENDER_ID) {
+    const senderId =
+      options.senderId || process.env.SMS_INDIA_HUB_SENDER_ID;
+    if (!process.env.SMS_INDIA_HUB_API_KEY || !senderId) {
       console.warn('[SMS] SMS credentials missing in .env. SMS not sent.');
       console.log(`[SMS MOCK] To: ${phone}, Msg: ${message}`);
       return { success: false, message: 'SMS configuration missing' };
@@ -20,8 +27,11 @@ const sendSMS = async (phone, message, options = {}) => {
     const encodedMsg = encodeURIComponent(message);
     const templateId = options.templateId ?? process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID;
     const templateIdParam = templateId ? `&TemplateId=${templateId}` : '';
+    const entityId =
+      options.entityId || process.env.SMS_INDIA_HUB_DLT_ENTITY_ID || '';
+    const entityIdParam = entityId ? `&entityid=${encodeURIComponent(entityId)}` : '';
 
-    const finalUrl = `${baseUrl}?APIKey=${process.env.SMS_INDIA_HUB_API_KEY}&msisdn=${formattedPhone}&sid=${process.env.SMS_INDIA_HUB_SENDER_ID}&msg=${encodedMsg}&fl=0&gwid=2${templateIdParam}`;
+    const finalUrl = `${baseUrl}?APIKey=${process.env.SMS_INDIA_HUB_API_KEY}&msisdn=${formattedPhone}&sid=${senderId}&msg=${encodedMsg}&fl=0&gwid=2${templateIdParam}${entityIdParam}`;
 
     console.log('[SMS] Sending request to (HTTPS):', baseUrl);
     console.log('[SMS] Constructed URL (Masked):', finalUrl.replace(process.env.SMS_INDIA_HUB_API_KEY, '***'));
@@ -68,9 +78,14 @@ const sendSMS = async (phone, message, options = {}) => {
 const LEGACY_OTP_SMS_TEMPLATE = (otp) =>
   `Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is ${otp}.BGADEC`;
 
-/** Engineer & worker registration only — must match DLT template (##var## = otp) */
+/**
+ * Engineer/worker registration — MUST match DLT-approved template exactly (SMS scrubbing).
+ * Portal template (##var## = OTP): Welcome to the TazkY powered by WBI.Your OTP for registration is ##var##.Thank you!
+ * DLT Template Id: 1077311990016977854 | Sender: WBINFS
+ * Do not change spacing/casing until a new template is approved on DLT.
+ */
 const TASKY_REGISTRATION_OTP_SMS_TEMPLATE = (otp) =>
-  `Welcome to TaskY powered by WBI. Your registration OTP is ${otp}. Valid for 10 minutes. Do not share this OTP with anyone.`;
+  `Welcome to the TazkY powered by WBI.Your OTP for registration is ${otp}.Thank you!`;
 
 /**
  * Generic OTP SMS (legacy template) — user, vendor, B2B, etc.
@@ -91,11 +106,22 @@ const sendOTP = async (phone, otp) => {
 const sendRegistrationOTP = async (phone, otp) => {
   const message = TASKY_REGISTRATION_OTP_SMS_TEMPLATE(otp);
   const templateId =
-    process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY ||
-    process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID;
+    process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || TASKY_DLT_TEMPLATE_ID;
+  const senderId =
+    process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
+    process.env.SMS_INDIA_HUB_SENDER_ID ||
+    TASKY_REGISTRATION_SENDER_ID;
+  const bodyPreview = message.replace(String(otp), '######');
 
-  console.log(`[SMS] Attempting to send registration OTP (TaskY) to ${phone}`);
-  const result = await sendSMS(phone, message, { templateId });
+  console.log(
+    `[SMS] Attempting registration OTP (${REGISTRATION_SMS_TEMPLATE_VERSION}) to ${phone}`
+  );
+  console.log('[SMS][DLT] registration templateId=', templateId, 'sender=', senderId, 'body=', bodyPreview);
+  const result = await sendSMS(phone, message, {
+    templateId,
+    senderId,
+    entityId: process.env.SMS_INDIA_HUB_DLT_ENTITY_ID
+  });
   if (!result.success) {
     console.error(`[SMS] Failed to send registration OTP to ${phone}:`, result.error);
     console.error('[SMS] Check TaskY DLT template text/id, sender, API key, EC2 IP whitelist');
@@ -108,5 +134,7 @@ module.exports = {
   sendOTP,
   sendRegistrationOTP,
   LEGACY_OTP_SMS_TEMPLATE,
-  TASKY_REGISTRATION_OTP_SMS_TEMPLATE
+  TASKY_REGISTRATION_OTP_SMS_TEMPLATE,
+  TASKY_DLT_TEMPLATE_ID,
+  REGISTRATION_SMS_TEMPLATE_VERSION
 };
