@@ -533,12 +533,11 @@ const login = async (req, res) => {
 
     const { phone, password } = req.body;
 
-    // Dynamic role lookup from database
-    const searchResult = await findUserAcrossCollections(phone);
-    if (!searchResult) {
+    const searchResult = await findUserAcrossCollections(phone, 'engineer');
+    if (!searchResult || searchResult.role !== 'engineer') {
       return res.status(404).json({
         success: false,
-        message: 'Account not found. Please register first.'
+        message: 'Engineer account not found. Please register first.'
       });
     }
 
