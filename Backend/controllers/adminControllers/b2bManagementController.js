@@ -1,5 +1,9 @@
 const B2BCompany = require('../../models/B2BCompany');
 const B2BDocument = require('../../models/B2BDocument');
+const B2BBranch = require('../../models/B2BBranch');
+const B2BBankAccount = require('../../models/B2BBankAccount');
+const B2BCreditProfile = require('../../models/B2BCreditProfile');
+const B2BEnterpriseOnboarding = require('../../models/B2BEnterpriseOnboarding');
 const { createNotification } = require('../notificationControllers/notificationController');
 
 /**
@@ -227,6 +231,8 @@ const getCompanyById = async (req, res) => {
     const branches = await B2BBranch.find({ companyId });
     const documents = await B2BDocument.find({ companyId });
     const bankAccount = await B2BBankAccount.findOne({ companyId });
+    const creditProfile = await B2BCreditProfile.findOne({ companyId, deletedAt: null });
+    const onboarding = await B2BEnterpriseOnboarding.findOne({ companyId, deletedAt: null }).lean();
 
     return res.status(200).json({
       success: true,
@@ -234,7 +240,9 @@ const getCompanyById = async (req, res) => {
         ...company.toObject(),
         branches,
         documents,
-        bankAccount
+        bankAccount,
+        creditProfile,
+        onboarding
       }
     });
   } catch (error) {

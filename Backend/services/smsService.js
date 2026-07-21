@@ -81,13 +81,20 @@ const sendSMS = async (phone, message) => {
 };
 
 /**
+ * DLT registration OTP body — must match the approved template in SMS India Hub / DLT portal
+ * (placeholder ##var## in portal = actual OTP in the sent message).
+ * Sender ID: WBINFS | Example template id: 1077311990016977854
+ */
+const REGISTRATION_OTP_SMS_TEMPLATE = (otp) =>
+  `Welcome to TaskY powered by WBI. Your registration OTP is ${otp}. Valid for 10 minutes. Do not share this OTP with anyone.`;
+
+/**
  * Send OTP specific SMS
  * @param {string} phone - Phone number
  * @param {string} otp - OTP code
  */
 const sendOTP = async (phone, otp) => {
-  // DLT-compliant message format exactly as approved by the provider
-  const message = `Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is ${otp}.BGADEC`;
+  const message = REGISTRATION_OTP_SMS_TEMPLATE(otp);
 
   console.log(`[SMS] Attempting to send OTP to ${phone}`);
   console.log(`[SMS] Message: ${message}`);
@@ -103,5 +110,6 @@ const sendOTP = async (phone, otp) => {
 
 module.exports = {
   sendSMS,
-  sendOTP
+  sendOTP,
+  REGISTRATION_OTP_SMS_TEMPLATE
 };

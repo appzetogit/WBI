@@ -12,6 +12,7 @@ import PrefetchLink from '../../../../components/common/PrefetchLink';
 
 const navItems = [
   { name: 'Dashboard', path: '/b2b/dashboard', icon: FiHome },
+  { name: 'Enterprise Onboarding', path: '/b2b/onboarding', icon: FiFileText, onboardingOnly: true },
   { 
     name: 'Bulk Jobs', 
     path: '/b2b/bulk-jobs', 
@@ -68,6 +69,15 @@ const B2BLayout = () => {
     navigate('/b2b/login');
   };
 
+  const approved = companyData?.verificationStatus === 'approved';
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.path === '#logout') return true;
+    if (!approved) {
+      return item.onboardingOnly || item.path === '/b2b/company-profile';
+    }
+    return !item.onboardingOnly;
+  });
+
   return (
     <div className="flex h-screen bg-[#F0FDFA] overflow-hidden font-sans">
       
@@ -96,7 +106,7 @@ const B2BLayout = () => {
         {/* Sidebar Navigation */}
         <div className="flex-1 overflow-y-auto py-4 scrollbar-hide">
           <nav className="space-y-1 px-3">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               if (item.path === '#logout') {
                 return (
                   <button

@@ -354,6 +354,36 @@ class CgpeService {
       };
     }
     
+    if (endpoint.includes('gst')) {
+      const gstin = (data.gstin || '').toUpperCase();
+      if (gstin.endsWith('Z0')) {
+        throw new Error('GSTIN not found or inactive');
+      }
+      return {
+        success: true,
+        transactionId: `req_gst_${Date.now()}`,
+        status: 'SUCCESS',
+        result: {
+          legal_name: 'ACME ENTERPRISES PRIVATE LIMITED',
+          status: 'Active',
+          gstin
+        }
+      };
+    }
+
+    if (endpoint.includes('cin')) {
+      return {
+        success: true,
+        transactionId: `req_cin_${Date.now()}`,
+        status: 'SUCCESS',
+        result: {
+          company_name: 'ACME ENTERPRISES PRIVATE LIMITED',
+          status: 'Active',
+          cin: data.cin
+        }
+      };
+    }
+    
     if (endpoint.includes('pan')) {
       const num = (data.panNumber || 'ABCDE1234F').toUpperCase();
       if (num === 'ABCDE0000F') {

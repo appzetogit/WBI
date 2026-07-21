@@ -35,7 +35,17 @@ const compressImage = (file, { maxWidth = 1200, maxHeight = 1200, quality = 0.8 
   });
 };
 
-const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId, redirectUrl, onComplete, onBeforeDigiLockerInitiate }, ref) => {
+const KYCVerificationStep = forwardRef(({
+  role,
+  mobileNumber,
+  entityId,
+  draftId,
+  redirectUrl,
+  onComplete,
+  onBeforeDigiLockerInitiate,
+  rulesOverride = null,
+  initialVerifications = null
+}, ref) => {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [verifications, setVerifications] = useState({});
@@ -119,7 +129,12 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
   }, [role, entityId, stopCamera]);
 
   useEffect(() => {
-    loadRules();
+    if (Array.isArray(rulesOverride) && rulesOverride.length > 0) {
+      setRules(rulesOverride);
+      setLoading(false);
+    } else {
+      loadRules();
+    }
     
     // Check if returning from DigiLocker
     const urlParams = new URLSearchParams(window.location.search);
@@ -128,7 +143,18 @@ const KYCVerificationStep = forwardRef(({ role, mobileNumber, entityId, draftId,
       handleDigiLockerComplete(recordId);
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [role]);
+  }, [role, rulesOverride]);
+
+  useEffect(() => {
+    if (!initialVerifications || typeof initialVerifications !== 'object') return;
+    setVerifications((prev) => ({ ...initialVerifications, ...prev }));
+  }, [initialVerifications]);
+
+  useEffect(() => {
+    if (typeof onComplete === 'function') {
+      onComplete(verifications);
+    }
+  }, [verifications, onComplete]);
 
   const loadRules = async () => {
     try {

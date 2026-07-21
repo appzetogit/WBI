@@ -6,11 +6,13 @@ const b2bDocumentSchema = new mongoose.Schema({
     ref: 'B2BCompany', 
     required: true 
   },
-  documentType: { 
-    type: String, 
-    enum: ['gstCertificate', 'panCard', 'companyRegistrationCertificate', 'cancelledCheque', 'addressProof'], 
-    required: true 
+  documentType: {
+    type: String,
+    required: true,
+    trim: true,
+    lowercase: true
   },
+  documentLabel: { type: String, default: null },
   fileUrl: { type: String, required: true },
   fileKey: { type: String, default: null }, // e.g., Cloudinary public ID
   status: { 
@@ -20,7 +22,10 @@ const b2bDocumentSchema = new mongoose.Schema({
   },
   rejectionReason: { type: String, default: null },
   uploadedAt: { type: Date, default: Date.now },
-  verifiedAt: { type: Date, default: null }
+  verifiedAt: { type: Date, default: null },
+  expiresAt: { type: Date, default: null },
+  ocrStatus: { type: String, enum: ['none', 'pending', 'completed', 'failed'], default: 'none' },
+  ocrPayload: { type: mongoose.Schema.Types.Mixed, default: null }
 }, {
   timestamps: true
 });

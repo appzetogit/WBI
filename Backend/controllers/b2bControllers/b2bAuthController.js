@@ -190,6 +190,13 @@ const registerCompany = async (req, res) => {
 
     // 6. Notify admins of new registration
     try {
+      const { getOrCreateOnboardingForCompany } = require('../../services/b2bEnterpriseOnboarding.service');
+      await getOrCreateOnboardingForCompany(company._id);
+    } catch (err) {
+      console.error('B2B onboarding bootstrap error:', err.message);
+    }
+
+    try {
       const Admin = require('../../models/Admin');
       const { createNotification } = require('../notificationControllers/notificationController');
       const admins = await Admin.find({ isActive: true }).select('_id');
@@ -202,7 +209,7 @@ const registerCompany = async (req, res) => {
           relatedId: company._id,
           relatedType: 'b2b_company',
           data: { companyId: company._id, companyName: company.companyName },
-          pushData: { type: 'admin_alert', link: '/admin/b2b/companies' }
+          pushData: { type: 'admin_alert', link: '/admin/b2b/onboarding' }
         });
       }
     } catch (err) {
@@ -304,15 +311,7 @@ const loginCompany = async (req, res) => {
       });
     }
 
-    // 3. Check verification status
-    if (company.verificationStatus === 'pending') {
-      return res.status(403).json({
-        success: false,
-        verificationStatus: 'pending',
-        message: 'Your account is under admin review. Please try again later.'
-      });
-    }
-
+    // 3. Allow login while pending — enterprise onboarding completes before admin activation
     if (company.verificationStatus === 'rejected') {
       return res.status(403).json({
         success: false,

@@ -19,10 +19,11 @@ const authorizedPersonSchema = new mongoose.Schema({
 });
 
 const b2bCompanyDocumentSchema = new mongoose.Schema({
-  documentType: { 
-    type: String, 
+  documentType: {
+    type: String,
     required: true,
-    enum: ['gstCertificate', 'panCard', 'companyRegistrationCertificate', 'cancelledCheque', 'addressProof'] 
+    trim: true,
+    lowercase: true
   },
   fileUrl: { type: String, required: true },
   fileKey: { type: String, default: null },
@@ -38,6 +39,9 @@ const b2bCompanyDocumentSchema = new mongoose.Schema({
 
 const b2bCompanySchema = new mongoose.Schema({
   companyName: { type: String, required: [true, 'Company name is required'], trim: true },
+  brandName: { type: String, default: null, trim: true },
+  industryType: { type: String, default: null, trim: true },
+  tenantId: { type: String, default: null, index: true, sparse: true },
   gstNumber: { type: String, required: [true, 'GST number is required'], trim: true },
   panNumber: { type: String, required: [true, 'PAN number is required'], trim: true },
   tanNumber: { type: String, required: [true, 'TAN number is required'], trim: true },
@@ -71,9 +75,16 @@ const b2bCompanySchema = new mongoose.Schema({
     enum: ['pending', 'verified', 'approved', 'rejected'], 
     default: 'pending' 
   },
-  rejectionReason: { type: String, default: null }, // Global rejection reason if applicable
+  onboardingLifecycleStatus: {
+    type: String,
+    enum: ['draft', 'submitted', 'finance_review', 'compliance_review', 'operations_review', 'document_review', 'hold', 'active', 'rejected'],
+    default: 'draft',
+    index: true
+  },
+  rejectionReason: { type: String, default: null },
   isActive: { type: Boolean, default: true },
-  walletBalance: { type: Number, default: 0 }
+  walletBalance: { type: Number, default: 0 },
+  deletedAt: { type: Date, default: null }
 }, {
   timestamps: true
 });

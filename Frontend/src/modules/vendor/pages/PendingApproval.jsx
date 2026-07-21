@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  FiCheck, FiFileText, FiShield, 
-  FiDollarSign, FiBookOpen, FiTruck, FiPlay, 
-  FiLock, FiGlobe, FiCamera, FiArrowRight,
-  FiAlertCircle, FiCheckCircle
+import {
+  FiCheck, FiFileText, FiShield,
+  FiDollarSign, FiBookOpen, FiTruck, FiArrowRight,
+  FiAlertCircle
 } from 'react-icons/fi';
 import Logo from '../../../components/common/Logo';
 import api from '../../../services/api';
 import toast from 'react-hot-toast';
+import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 
 const PendingApproval = () => {
   const navigate = useNavigate();
@@ -17,16 +17,10 @@ const PendingApproval = () => {
   const [loading, setLoading] = useState(true);
   const [activeStep, setActiveStep] = useState(2);
 
-  // Phase 2 State: KYC
-  const [aadhaarNum, setAadhaarNum] = useState('');
-  const [kycVerifying, setKycVerifying] = useState(false);
-  const [panNum, setPanNum] = useState('');
-  const [gstNum, setGstNum] = useState('');
-  
-  // Webcam State
-  const [stream, setStream] = useState(null);
-  const [capturedImage, setCapturedImage] = useState(null);
-  const videoRef = useRef(null);
+  // Phase 2 State: KYC (synced via KYCVerificationStep + /onboarding/sync-kyc)
+  const [kycSyncing, setKycSyncing] = useState(false);
+  const [kycProgress, setKycProgress] = useState(null);
+  const [documentRequirements, setDocumentRequirements] = useState([]);
 
   // Phase 3 State: Bank
   const [bankName, setBankName] = useState('');
@@ -174,85 +168,92 @@ const PendingApproval = () => {
     fetchStatus();
   }, []);
 
+  const syncKycFromServer = async () => {
+    const vendorId = vendor?._id || vendor?.id || getStoredVendorId();
+    if (!vendorId) return;
+    setKycSyncing(true);
+    try {
+      const res = await api.post('/vendor/onboarding/sync-kyc', { vendorId });
+      if (res.data?.success) {
+        if (res.data.data) applyOnboardingPayload(res.data.data);
+        if (res.data.data?.kyc) setKycProgress(res.data.data.kyc);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not refresh KYC status');
+    } finally {
+      setKycSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeStep === 2) {
+      syncKycFromServer();
+    }
+  }, [activeStep]);
+
+  useEffect(() => {
+    const loadDocumentRequirements = async () => {
+      const vendorId = vendor?._id || vendor?.id || getStoredVendorId();
+      if (!vendorId || activeStep !== 2) return;
+      try {
+        const res = await api.get('/vendor/onboarding/document-requirements', {
+          params: { vendorId }
+        });
+        if (res.data?.success) {
+          setDocumentRequirements(res.data.requirements || []);
+        }
+      } catch (err) {
+        toast.error(err.response?.data?.message || 'Could not load document requirements');
+      }
+    };
+
+    loadDocumentRequirements();
+  }, [activeStep, vendor?._id, vendor?.id]);
+
   useEffect(() => {
     const onRealtime = (event) => applyOnboardingPayload(event.detail);
     window.addEventListener('vendorOnboardingUpdated', onRealtime);
     return () => window.removeEventListener('vendorOnboardingUpdated', onRealtime);
   }, []);
 
-  // Initialize WebCam when Step 2 is active
-  useEffect(() => {
-    let currentStream = null;
-    const kycDone = vendor?.kycStatus === 'verified';
-    if (activeStep === 2 && !kycDone) {
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then(s => {
-          currentStream = s;
-          setStream(s);
-        })
-        .catch(err => console.error("Webcam error:", err));
-    } else {
-      setStream(null);
-    }
-    return () => {
-      if (currentStream) {
-        currentStream.getTracks().forEach(t => t.stop());
-      }
-    };
-  }, [activeStep, vendor?.kycStatus]);
+  const kycRules = useMemo(() => (
+    (documentRequirements || []).map((req, index) => ({
+      role: 'vendor',
+      documentType: req.key,
+      label: req.label,
+      required: req.required !== false,
+      verificationMode: req.verificationMode || 'upload_only',
+      allowedMimeTypes: ['image/jpeg', 'image/png', 'application/pdf'],
+      maxFileSize: 10 * 1024 * 1024,
+      sortOrder: index + 1
+    }))
+  ), [documentRequirements]);
 
-  // Connect stream to video element
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-    }
-  }, [stream, activeStep]);
+  const initialKycVerifications = useMemo(() => {
+    const records = kycProgress?.records || [];
+    return records.reduce((acc, rec) => {
+      acc[rec.documentType] = {
+        status: rec.status,
+        data: {
+          provider: rec.provider,
+          verifiedAt: rec.verifiedAt,
+          updatedAt: rec.updatedAt
+        }
+      };
+      return acc;
+    }, {});
+  }, [kycProgress]);
 
-  const handleVerifyKyc = async () => {
-    if (!aadhaarNum || aadhaarNum.length !== 12) {
-      toast.error('Please enter a valid 12-digit Aadhaar number');
-      return;
-    }
-    
-    // Capture Image from Webcam
-    let imageData = null;
-    if (videoRef.current && stream) {
-      const video = videoRef.current;
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      // Mirror the image horizontally to match the preview
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      imageData = canvas.toDataURL('image/jpeg', 0.8);
-      setCapturedImage(imageData); // Freeze the feed
-    } else {
-      toast.error('Biometric feed is required. Please ensure your webcam is connected and allowed.');
-      return;
-    }
-
-    setKycVerifying(true);
-    try {
-      const res = await api.post('/vendor/verify-kyc', {
-        vendorId: vendor?._id || vendor?.id,
-        gstin: gstNum,
-        panNumber: panNum,
-        biometricImage: imageData
-      });
-      if (res.data.success) {
-        toast.success('Aadhaar and biometrics verified securely.');
-        if (res.data.data) applyOnboardingPayload(res.data.data);
-        else fetchStatus();
-      }
-    } catch (err) {
-      setCapturedImage(null);
-      toast.error(err.response?.data?.message || 'KYC verification failed');
-    } finally {
-      setKycVerifying(false);
-    }
-  };
+  const requiredMissingDocs = useMemo(() => {
+    const requiredKeys = (documentRequirements || [])
+      .filter((req) => req.required !== false)
+      .map((req) => req.key);
+    const statusMap = new Map((kycProgress?.records || []).map((rec) => [rec.documentType, rec.status]));
+    return requiredKeys.filter((key) => {
+      const status = statusMap.get(key);
+      return !['verified', 'uploaded', 'manual_review'].includes(status);
+    });
+  }, [documentRequirements, kycProgress]);
 
   const handleVerifyBank = async () => {
     if (!bankName || !accountNum || !ifscCode) {
@@ -454,100 +455,55 @@ const PendingApproval = () => {
             <div className="flex flex-col h-full animate-[fadeIn_0.3s_ease-out]">
               <div className="p-6 border-b border-slate-200 bg-slate-50/50 rounded-t-lg">
                 <h1 className="text-xl font-semibold text-slate-800">Compliance & KYC Verification</h1>
-                <p className="text-sm text-slate-500 mt-1">Government-backed identity verification via DigiLocker API.</p>
+                <p className="text-sm text-slate-500 mt-1">
+                  Complete Aadhaar, PAN, Selfie (face match), and Bank verification. Then sync to update your onboarding status.
+                </p>
               </div>
 
-              <div className="p-6 space-y-8">
-                {/* Section 1 */}
+              <div className="p-6 space-y-6">
                 <section>
-                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                    <FiFileText className="text-emerald-600" />
-                    <h3 className="text-sm font-semibold text-slate-800">Aadhaar Authentication</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">12-Digit Aadhaar Number <span className="text-red-500">*</span></label>
-                      <input 
-                        type="text" 
-                        maxLength={12}
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
-                        placeholder="XXXX XXXX XXXX"
-                        value={aadhaarNum}
-                        onChange={e => setAadhaarNum(e.target.value.replace(/[^0-9]/g, ''))}
-                      />
-                    </div>
-                    <div>
-                      <button
-                        onClick={handleVerifyKyc}
-                        disabled={kycVerifying || kycDone || aadhaarNum.length !== 12}
-                        className="w-full px-4 py-2 bg-emerald-600 text-white font-medium rounded-md text-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex justify-center items-center gap-2"
-                      >
-                        {kycVerifying ? (
-                          <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div> Processing...</>
-                        ) : (
-                          <>Authenticate with DigiLocker</>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </section>
-
-                {/* Section 2 */}
-                <section>
-                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                    <FiCamera className="text-emerald-600" />
-                    <h3 className="text-sm font-semibold text-slate-800">Biometric Face Match</h3>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-md p-2 flex flex-col items-center justify-center relative overflow-hidden h-48 max-w-sm mx-auto">
-                    {capturedImage ? (
-                      <img src={capturedImage} alt="Captured Biometric" className="object-cover w-full h-full rounded shadow-sm" />
-                    ) : stream ? (
-                      <video ref={videoRef} autoPlay playsInline muted className="object-cover w-full h-full rounded shadow-sm scale-x-[-1]" />
+                  <div className="bg-white border border-slate-200 rounded-lg p-4">
+                    {!vendor?._id ? (
+                      <div className="text-sm text-slate-500">Loading vendor details...</div>
                     ) : (
                       <>
-                        <div className="w-12 h-12 bg-white border border-slate-200 rounded-md flex items-center justify-center text-slate-600 mb-3 shadow-sm">
-                          <FiCamera className="w-5 h-5" />
+                        <KYCVerificationStep
+                          role="vendor"
+                          entityId={vendor._id}
+                          mobileNumber={vendor.phone}
+                          rulesOverride={kycRules}
+                          initialVerifications={initialKycVerifications}
+                        />
+
+                        <div className="mt-4 flex items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={syncKycFromServer}
+                            disabled={kycSyncing}
+                            className="px-5 py-2.5 bg-emerald-600 text-white font-medium rounded-md text-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                          >
+                            {kycSyncing ? 'Syncing KYC...' : 'Sync KYC status'}
+                          </button>
                         </div>
-                        <span className="text-sm font-semibold text-slate-700">Connecting Webcam...</span>
-                        <span className="text-xs text-slate-500 mt-1 text-center px-4">Please allow camera permissions to capture biometrics.</span>
+
+                        {kycProgress && (
+                          <div className="mt-4 space-y-2">
+                            <div className="text-xs text-slate-500">
+                              Current KYC score: <span className="font-semibold">{kycProgress.kycScore ?? '-'}</span>
+                            </div>
+                            {requiredMissingDocs.length > 0 ? (
+                              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                Missing required documents: {requiredMissingDocs.join(', ')}
+                              </div>
+                            ) : (
+                              <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                All required KYC documents are present. Sync status after any new upload or verification.
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </>
                     )}
-                    {kycVerifying && (
-                      <div className="absolute inset-0 bg-emerald-900/80 flex flex-col items-center justify-center text-white z-10 backdrop-blur-sm">
-                        <div className="w-10 h-10 border-4 border-emerald-400 border-t-white rounded-full animate-spin mb-3"></div>
-                        <span className="text-sm font-bold tracking-widest uppercase">Scanning Face...</span>
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                {/* Section 3 */}
-                <section>
-                  <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                    <FiLock className="text-emerald-600" />
-                    <h3 className="text-sm font-semibold text-slate-800">Tax Registration</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">GSTIN (Optional)</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm uppercase font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
-                        placeholder="ENTER GSTIN"
-                        value={gstNum}
-                        onChange={e => setGstNum(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">PAN Number</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-sm uppercase font-medium focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder-slate-400"
-                        placeholder="ENTER PAN"
-                        value={panNum}
-                        onChange={e => setPanNum(e.target.value)}
-                      />
-                    </div>
                   </div>
                 </section>
               </div>

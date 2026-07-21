@@ -10,6 +10,8 @@ const {
   updateProjectCapability,
   addPortfolio,
   getDocumentRequirements,
+  getKycSnapshot,
+  syncKycCompliance,
   submitApplication,
   verifyKyc,
   verifyBankPennyDrop,
@@ -37,6 +39,8 @@ router.patch('/onboarding/one-time-capability', updateOneTimeCapability);
 router.patch('/onboarding/project-capability', updateProjectCapability);
 router.post('/onboarding/portfolio', addPortfolio);
 router.get('/onboarding/document-requirements', getDocumentRequirements);
+router.get('/onboarding/kyc-snapshot', getKycSnapshot);
+router.post('/onboarding/sync-kyc', syncKycCompliance);
 // POST /onboarding/documents can be handled by /upload and updating the VendorDocument schema (not fully implemented in controller yet, but we'll leave placeholder)
 router.post('/onboarding/submit', submitApplication);
 

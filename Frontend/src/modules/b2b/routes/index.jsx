@@ -51,7 +51,7 @@ const Profile = lazyLoad(() => import('../pages/Profile'));
 const Settings = lazyLoad(() => import('../pages/Settings'));
 const Engineers = lazyLoad(() => import('../pages/Engineers'));
 const Users = lazyLoad(() => import('../pages/Users'));
-const AcceptInvite = lazyLoad(() => import('../pages/AcceptInvite'));
+const EnterpriseOnboarding = lazyLoad(() => import('../pages/EnterpriseOnboarding'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F0FDFA]" />
@@ -76,6 +76,7 @@ const B2BRoutes = () => {
 
             {/* Protected dashboard layout routes */}
             <Route element={<AnimatedPage><ProtectedRoute userType="b2b"><B2BLayout /></ProtectedRoute></AnimatedPage>}>
+              <Route path="/onboarding" element={<AnimatedPage><EnterpriseOnboarding /></AnimatedPage>} />
               <Route path="/dashboard" element={<AnimatedPage><Dashboard /></AnimatedPage>} />
               <Route path="/bulk-jobs" element={<AnimatedPage><BulkJobs /></AnimatedPage>} />
               <Route path="/bulk-jobs/upload" element={<AnimatedPage><BulkJobs /></AnimatedPage>} />

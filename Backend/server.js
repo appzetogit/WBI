@@ -78,6 +78,8 @@ if (compressionPkg) {
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
   'https://www.WBI.in',
   'https://WBI.in',
   'https://api.WBI.in',
@@ -352,6 +354,7 @@ app.use('/api/engineers/freelancer-pool', require('./routes/engineer-routes/free
 
 // B2B routes
 app.use('/api/b2b', require('./routes/b2b-routes/auth.routes'));
+app.use('/api/b2b/onboarding', require('./routes/b2b-routes/enterpriseOnboarding.routes'));
 app.use('/api/b2b/company-profile', require('./routes/b2b-routes/profile.routes'));
 app.use('/api/b2b/bulk-jobs', require('./routes/b2b-routes/bulkJobs.routes'));
 app.use('/api/b2b/jobs', require('./routes/b2b-routes/jobs.routes'));
@@ -364,6 +367,7 @@ app.use('/api/b2b/users', require('./routes/b2b-routes/users.routes'));
 // Admin Auth routes (mounted first to prevent generic /api/admin middleware interception)
 app.use('/api/admin/auth', require('./routes/admin-routes/adminAuth.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bManagement.routes'));
+app.use('/api/admin/b2b-onboarding', require('./routes/admin-routes/b2bEnterpriseOnboarding.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bBulkJobAdmin.routes'));
 app.use('/api/admin/b2b-wallets', require('./routes/admin-routes/b2bWalletAdmin.routes'));
 app.use('/api/admin/b2b/invoices', require('./routes/admin-routes/b2bInvoiceAdmin.routes'));

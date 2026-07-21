@@ -616,96 +616,160 @@ export const StepChooseModel = ({ data, updateData }) => {
 
 export const StepOneTimeServices = ({ data, updateData }) => {
   const [expandedCategory, setExpandedCategory] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [subServicesByCategoryId, setSubServicesByCategoryId] = useState({});
 
-  const categories = [
-    {
-      name: "Home Appliances (C06)",
-      services: ["AC Installation & Service", "Refrigerator Repair", "Washing Machine Repair", "Microwave Repair", "Geyser Repair", "Chimney & Hob Service", "Dishwasher Repair", "Air Cooler Service"]
-    },
-    {
-      name: "Mobile & Gadget Service (C09)",
-      services: ["Mobile Screen Repair", "Battery Replacement", "Software/Flashing", "Tablet Repair", "Smartwatch Repair", "Mobile Accessory Setup"]
-    },
-    {
-      name: "Electrical Services (C12)",
-      services: ["House Wiring", "Switchboard & MCB Repair", "Electrical Fault Finding", "Earthing Installation", "Ceiling Fan & Light Fitting"]
-    },
-    {
-      name: "Plumbing & Water Systems (C13)",
-      services: ["Pipe Leak Repair", "Water Tank Cleaning", "Bathroom Fitting Installation", "Borewell/Motor Pump Repair", "Drainage Cleaning", "Water Purifier & RO Service"]
-    },
-    {
-      name: "HVAC & Cold Storage (C14)",
-      services: ["Split/Window AC Service", "Central AC Maintenance", "Cold Storage Repair", "Chiller Maintenance", "Duct Cleaning"]
-    },
-    {
-      name: "Audio-Video & Entertainment (C17)",
-      services: ["Home Theatre Installation", "TV Mounting & Repair", "Projector & Screen Setup", "Sound System Installation", "DJ Equipment Setup"]
-    },
-    {
-      name: "Automobile & EV Services (C22)",
-      services: ["EV Charger Installation", "Car Electrical Repair", "Vehicle Battery Replacement", "GPS Tracker Installation"]
-    },
-    {
-      name: "Water Purifier & RO Systems (C24)",
-      services: ["RO Installation", "Filter Replacement", "RO Repair & AMC", "Water Softener Installation"]
+  // Store selected OneTimeService IDs (ObjectId strings). Backend currently only checks `.length`,
+  // so switching from hardcoded names → IDs is backward-safe for this flow.
+  const selectedServiceIds = data.oneTimeServices || [];
+
+  const toggle = (serviceId) => {
+    if (selectedServiceIds.includes(serviceId)) {
+      updateData({ oneTimeServices: selectedServiceIds.filter((s) => s !== serviceId) });
+    } else {
+      updateData({ oneTimeServices: [...selectedServiceIds, serviceId] });
     }
-  ];
-
-  const selected = data.oneTimeServices || [];
-  
-  const toggle = (srv) => {
-    if (selected.includes(srv)) updateData({ oneTimeServices: selected.filter(s => s !== srv) });
-    else updateData({ oneTimeServices: [...selected, srv] });
   };
-  
-  const getSelectedCount = (cat) => cat.services.filter(s => selected.includes(s)).length;
+
+  const getSelectedCount = (categoryId) => {
+    const subs = subServicesByCategoryId[categoryId] || [];
+    return subs.filter((s) => selectedServiceIds.includes(s.id)).length;
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const res = await api.get('/categories', {
+          params: { serviceType: 'one_time' }
+        });
+        if (cancelled) return;
+        setCategories(res.data?.data || []);
+      } catch (err) {
+        if (cancelled) return;
+        setLoadError(err.response?.data?.message || 'Failed to load one-time services');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!expandedCategory) return undefined;
+    if (subServicesByCategoryId[expandedCategory]) return undefined;
+
+    let cancelled = false;
+
+    const loadSubServices = async () => {
+      try {
+        const res = await api.get(`/categories/${expandedCategory}/sub-services`);
+        if (cancelled) return;
+        setSubServicesByCategoryId((prev) => ({
+          ...prev,
+          [expandedCategory]: res.data?.data || []
+        }));
+      } catch (err) {
+        // Non-fatal: user can keep trying expansions.
+        if (!cancelled) setLoadError(err.response?.data?.message || 'Failed to load services for category');
+      }
+    };
+
+    loadSubServices();
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedCategory, subServicesByCategoryId]);
 
   return (
     <div className="space-y-4 animate-fade-in flex flex-col h-full">
       <h3 className="text-xl font-bold">One-Time Services</h3>
       <p className="text-gray-500 text-sm mb-4">Select the quick services you provide.</p>
+
+      {loading && (
+        <div className="flex items-center justify-center gap-2 py-10 text-gray-500">
+          <FiLoader className="w-5 h-5 animate-spin" /> Loading service categories...
+        </div>
+      )}
+
+      {!loading && loadError && (
+        <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+          {loadError}
+        </div>
+      )}
       
-      <div className="flex-1 overflow-y-auto space-y-3 max-h-[50vh] pr-2">
-        {categories.map((cat, idx) => {
-          const isExpanded = expandedCategory === idx;
-          const selectedCount = getSelectedCount(cat);
+      {!loading && !loadError && (
+        <div className="flex-1 overflow-y-auto space-y-3 max-h-[50vh] pr-2">
+          {categories.map((cat) => {
+            const categoryId = String(cat._id);
+            const isExpanded = expandedCategory === categoryId;
+            const selectedCount = getSelectedCount(categoryId);
           
-          return (
-            <div key={idx} className="border rounded-xl bg-white overflow-hidden shadow-sm transition-all">
-              <div 
-                className={`flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-teal-50/50 border-b' : ''}`}
-                onClick={() => setExpandedCategory(isExpanded ? null : idx)}
-              >
-                <div className="flex items-center gap-3">
-                   <h4 className={`font-bold ${isExpanded || selectedCount > 0 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
-                     {cat.name}
-                   </h4>
-                   {selectedCount > 0 && (
-                     <span className="bg-[#0D8A72] text-white text-[10px] font-bold px-2.5 py-1 rounded-full">
-                       {selectedCount} Selected
-                     </span>
-                   )}
+            return (
+              <div key={categoryId} className="border rounded-xl bg-white overflow-hidden shadow-sm transition-all">
+                <div
+                  className={`flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-teal-50/50 border-b' : ''}`}
+                  onClick={() => setExpandedCategory(isExpanded ? null : categoryId)}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <h4 className={`font-bold truncate ${isExpanded || selectedCount > 0 ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
+                      {cat.name}
+                    </h4>
+                    {selectedCount > 0 && (
+                      <span className="bg-[#0D8A72] text-white text-[10px] font-bold px-2.5 py-1 rounded-full shrink-0">
+                        {selectedCount} Selected
+                      </span>
+                    )}
+                  </div>
+                  <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D8A72]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
                 </div>
-                <svg className={`w-5 h-5 transition-transform duration-200 ${isExpanded ? 'rotate-180 text-[#0D8A72]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+
+                {isExpanded && (
+                  <div className="p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
+                    {(subServicesByCategoryId[categoryId] || []).map((srv) => {
+                      const checked = selectedServiceIds.includes(srv.id);
+                      return (
+                        <label
+                          key={srv.id}
+                          className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors shadow-sm ${checked ? 'bg-teal-50/50 border-[#0D8A72]' : 'bg-white hover:border-[#0D8A72]/50'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggle(srv.id)}
+                            className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded"
+                          />
+                          <span className={`text-sm font-medium ${checked ? 'text-[#0D8A72]' : 'text-gray-700'}`}>
+                            {srv.title}
+                          </span>
+                        </label>
+                      );
+                    })}
+
+                    {/* If a category is expanded before sub-services are fetched, show a tiny placeholder */}
+                    {(!subServicesByCategoryId[categoryId] || subServicesByCategoryId[categoryId].length === 0) && (
+                      <div className="col-span-2 text-xs text-gray-500 flex items-center gap-2">
+                        <FiLoader className="w-4 h-4 animate-spin" /> Loading services...
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              
-              {isExpanded && (
-                <div className="p-4 bg-gray-50 grid grid-cols-1 md:grid-cols-2 gap-3 animate-fade-in">
-                  {cat.services.map(srv => (
-                    <label key={srv} className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors shadow-sm ${selected.includes(srv) ? 'bg-teal-50/50 border-[#0D8A72]' : 'bg-white hover:border-[#0D8A72]/50'}`}>
-                      <input type="checkbox" checked={selected.includes(srv)} onChange={() => toggle(srv)} className="mr-3 w-4 h-4 text-[#0D8A72] focus:ring-[#0D8A72] border-gray-300 rounded" />
-                      <span className={`text-sm font-medium ${selected.includes(srv) ? 'text-[#0D8A72]' : 'text-gray-700'}`}>{srv}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

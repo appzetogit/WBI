@@ -9,7 +9,7 @@ async function testSms() {
   const mobile = '916266925739'; 
   const otp = '123456';
   
-  const messageText = `Welcome to the Homecare powered by Appzeto.Your OTP for registration is ${otp}.BGADEC`;
+  const messageText = `Welcome to TaskY powered by WBI. Your registration OTP is ${otp}. Valid for 10 minutes. Do not share this OTP with anyone.`;
   
   const url = 'http://cloud.smsindiahub.in/api/mt/SendSMS'; 
   

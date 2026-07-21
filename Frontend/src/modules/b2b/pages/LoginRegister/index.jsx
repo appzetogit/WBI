@@ -313,7 +313,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
         }
 
         toast.success('Welcome back!');
-        navigate('/b2b/dashboard');
+        const dest = company?.verificationStatus === 'approved' ? '/b2b/dashboard' : '/b2b/onboarding';
+        navigate(dest);
       }
     } catch (err) {
       console.error('Login error details:', err.response);

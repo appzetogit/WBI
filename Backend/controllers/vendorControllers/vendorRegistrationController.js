@@ -17,6 +17,11 @@ const {
   emitOnboardingStatus
 } = require('../../services/vendorOnboarding.service');
 const { verifyVerificationToken } = require('../../utils/tokenService');
+const {
+  resolveDynamicDocumentRequirements,
+  buildKycSnapshot,
+  syncVendorComplianceFromKyc
+} = require('../../services/vendorOnboardingKyc.service');
 
 async function resolveOnboardingVendor(req, res, { requireAuth = false } = {}) {
   const authId = req.user?.id || req.user?._id;
@@ -189,16 +194,69 @@ const addPortfolio = async (req, res) => {
 const getDocumentRequirements = async (req, res) => {
   try {
     const vendorId = req.user?.id || req.query.vendorId;
-    const vendor = await Vendor.findById(vendorId);
-    
-    // Dynamic logic based on vendor models and business type
-    const requirements = ['PAN', 'BANK_STATEMENT'];
-    if (vendor.incorporationType !== 'Proprietorship') requirements.push('COMPANY_REGISTRATION');
-    if (vendor.vendorModels.includes('PROJECT')) {
-      requirements.push('GST', 'ITR', 'BALANCE_SHEET', 'PF_ESI_DECLARATION');
+    let models = String(req.query.models || '')
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean);
+    let incorporationType = req.query.incorporationType || 'Proprietorship';
+    let categoryCodes = String(req.query.codes || '')
+      .split(',')
+      .map((c) => c.trim().toUpperCase())
+      .filter(Boolean);
+
+    if (vendorId) {
+      const vendor = await Vendor.findById(vendorId).lean();
+      if (vendor) {
+        models = vendor.vendorModels || models;
+        incorporationType = vendor.incorporationType || incorporationType;
+        if (!categoryCodes.length) {
+          categoryCodes = (vendor.approvedServices || []).map((s) => s.categoryCode).filter(Boolean);
+        }
+      }
     }
-    
+
+    const requirements = await resolveDynamicDocumentRequirements({
+      categoryCodes,
+      models,
+      incorporationType
+    });
+
     res.status(200).json({ success: true, requirements });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const getKycSnapshot = async (req, res) => {
+  try {
+    const vendor = await resolveOnboardingVendor(req, res);
+    if (!vendor) return;
+
+    const snapshot = await buildKycSnapshot(vendor._id);
+    const status = buildOnboardingStatus(vendor);
+
+    res.status(200).json({
+      success: true,
+      data: { ...status, kyc: snapshot }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const syncKycCompliance = async (req, res) => {
+  try {
+    const vendor = await resolveOnboardingVendor(req, res);
+    if (!vendor) return;
+
+    const snapshot = await syncVendorComplianceFromKyc(vendor);
+    const data = await persistAndEmit(vendor);
+
+    res.status(200).json({
+      success: true,
+      message: 'Compliance status updated',
+      data: { ...data, kyc: snapshot }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -222,7 +280,9 @@ const submitApplication = async (req, res) => {
         portfolioTitle, portfolioClient, portfolioValue,
         panUrl, gstUrl, companyRegUrl, chequeUrl, pfDocumentUrl, esiDocumentUrl, workOrderUrl, digitalSLAAccepted,
         accountHolderName, accountNumber, ifscCode, upiId,
-        workingCity, latitude, longitude, bankStatus, aadhaarVerified
+        workingCity, latitude, longitude, bankStatus, aadhaarVerified,
+        serviceDocuments, brandName, website, companyDescription, registeredAddress,
+        yearEstablished, authorizedPerson
       } = req.body;
 
       if (!ownerName || !mobile) {
@@ -278,7 +338,21 @@ const submitApplication = async (req, res) => {
       vendor.workingCities = workingCity ? [workingCity] : [];
       vendor.serviceRadiusKm = serviceRadiusKm || 10;
       if (bankStatus === 'verified') vendor.bankStatus = 'verified';
-      if (aadhaarVerified) vendor.kycStatus = 'verified';
+      vendor.kycStatus = 'pending';
+
+      if (companyDescription) vendor.companyDescription = companyDescription;
+      if (website) vendor.website = website;
+      if (registeredAddress && vendor.address) {
+        vendor.address.addressLine1 = registeredAddress;
+      }
+      if (brandName && !vendor.companyDescription?.includes('Trade name:')) {
+        vendor.companyDescription = [vendor.companyDescription, `Trade name: ${brandName}`]
+          .filter(Boolean)
+          .join('\n');
+      }
+      if (authorizedPerson && typeof authorizedPerson === 'object') {
+        vendor.name = authorizedPerson.fullName || vendor.name;
+      }
 
       vendor.pfDocument = pfDocumentUrl || null;
       vendor.esiDocument = esiDocumentUrl || null;
@@ -323,6 +397,23 @@ const submitApplication = async (req, res) => {
       // Basic init
       vendor.onboarding = { status: 'SUBMITTED', progressPercentage: 100 };
       await vendor.save();
+
+      if (serviceDocuments && typeof serviceDocuments === 'object') {
+        const entries = Object.entries(serviceDocuments).filter(([, url]) => !!url);
+        for (const [docKey, documentUrl] of entries) {
+          await VendorDocument.findOneAndUpdate(
+            { vendorId: vendor._id, documentType: docKey },
+            {
+              title: docKey,
+              documentUrl,
+              documentType: docKey,
+              status: 'PENDING',
+              type: 'Onboarding'
+            },
+            { upsert: true }
+          );
+        }
+      }
 
       // Invalidate dynamic config cache so dashboard/profile pick up services immediately
       try {
@@ -453,12 +544,48 @@ const verifyKyc = async (req, res) => {
 
     const { gstin, panNumber } = req.body;
 
-    vendor.kycStatus = 'verified';
     if (gstin) vendor.gstin = gstin.toUpperCase();
     if (panNumber) vendor.pan = { ...vendor.pan, number: panNumber.toUpperCase() };
+    await vendor.save();
+
+    // Backward-compatible behavior:
+    // - Existing PendingApproval UI uses `/vendor/verify-kyc` without creating `KYCVerification` records.
+    // - New dynamic KYC flows create KYCVerification records and should be enforced.
+    const snapshot = await buildKycSnapshot(vendor._id);
+
+    if (!snapshot.flags.coreKycMet && snapshot.records.length === 0) {
+      // Legacy onboarding: keep the old "verifyKyc" semantics.
+      vendor.kycStatus = 'verified';
+      if (!vendor.compliance) vendor.compliance = {};
+      vendor.compliance.kycStatus = 'verified';
+      if (panNumber) vendor.compliance.panVerified = true;
+      if (gstin) vendor.compliance.gstVerified = true;
+      await vendor.save();
+
+      const data = await persistAndEmit(vendor);
+      return res.status(200).json({
+        success: true,
+        message: 'KYC documents verified successfully!',
+        data
+      });
+    }
+
+    const synced = await syncVendorComplianceFromKyc(vendor);
     const data = await persistAndEmit(vendor);
 
-    res.status(200).json({ success: true, message: 'KYC documents verified successfully!', data });
+    if (!synced.flags.coreKycMet) {
+      return res.status(400).json({
+        success: false,
+        message: 'Complete Aadhaar and PAN verification (CGPE) before continuing.',
+        data: { ...data, kyc: synced }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'KYC documents verified successfully!',
+      data: { ...data, kyc: synced }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -585,6 +712,27 @@ const activateAccount = async (req, res) => {
       });
     }
 
+    // Additional production-safe gates for project partners.
+    // These fields are required by the signup wizard, but we enforce them again server-side
+    // so activation never happens with incomplete compliance uploads.
+    const requiresProjectSetup =
+      Array.isArray(vendor.vendorModels) && vendor.vendorModels.includes('PROJECT');
+
+    if (requiresProjectSetup) {
+      if (!vendor.pfDocument || !vendor.esiDocument) {
+        return res.status(400).json({
+          success: false,
+          message: 'Upload PF & ESIC registration documents before activation (Project partner).'
+        });
+      }
+      if (!vendor.digitalSLAAccepted) {
+        return res.status(400).json({
+          success: false,
+          message: 'You must accept the Enterprise SLA & Liability Agreement before activation (Project partner).'
+        });
+      }
+    }
+
     if (vendor.workspaceProvisioning?.status === 'in_progress') {
       return res.status(409).json({
         success: false,
@@ -694,6 +842,8 @@ module.exports = {
   updateProjectCapability,
   addPortfolio,
   getDocumentRequirements,
+  getKycSnapshot,
+  syncKycCompliance,
   submitApplication,
   verifyKyc,
   verifyBankPennyDrop,
