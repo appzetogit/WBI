@@ -15,7 +15,8 @@ module.exports = {
   apps: [
     {
       name: 'wbi-backend',
-      script: 'server.js',
+      script: 'scripts/start-production.js',
+      cwd: __dirname,
       instances: 'max', // all CPU cores; override with instances: 2 on small boxes
       exec_mode: 'cluster',
       autorestart: true,

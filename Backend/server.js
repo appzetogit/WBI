@@ -8,7 +8,20 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const compression = require('compression');
+let compressionPkg;
+try {
+  compressionPkg = require('compression');
+} catch (bootErr) {
+  if (bootErr && bootErr.code === 'MODULE_NOT_FOUND') {
+    console.error(
+      '[boot] Package "compression" is not installed (server.js would crash at line 11).',
+      'Run: cd Backend && npm ci --omit=dev',
+      'Starting without gzip until dependencies are installed.'
+    );
+  } else {
+    throw bootErr;
+  }
+}
 const path = require('path');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
@@ -47,13 +60,19 @@ app.use(helmet({
 }));
 
 // Gzip responses (skip already-compressed payloads)
-app.use(compression({
-  threshold: 1024,
-  filter: (req, res) => {
-    if (req.headers['x-no-compression']) return false;
-    return compression.filter(req, res);
-  }
-}));
+if (compressionPkg) {
+  app.use(
+    compressionPkg({
+      threshold: 1024,
+      filter: (req, res) => {
+        if (req.headers['x-no-compression']) return false;
+        return compressionPkg.filter(req, res);
+      }
+    })
+  );
+} else {
+  app.use((req, res, next) => next());
+}
 
 // CORS configuration
 const allowedOrigins = [

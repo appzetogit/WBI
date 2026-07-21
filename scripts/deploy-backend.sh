@@ -21,6 +21,12 @@ else
   npm install --omit=dev --no-audit --no-fund
 fi
 
+echo "Verifying critical dependencies..."
+npm run check:deps
+
+echo "Verifying route modules..."
+npm run verify:routes
+
 if command -v pm2 >/dev/null 2>&1; then
   if pm2 describe wbi-backend >/dev/null 2>&1; then
     pm2 restart ecosystem.config.js --env production
