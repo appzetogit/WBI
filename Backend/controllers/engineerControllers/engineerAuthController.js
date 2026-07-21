@@ -254,9 +254,13 @@ const register = async (req, res) => {
     if (registrationDraftId) {
       draft = await EngineerRegistrationDraft.findById(registrationDraftId);
       if (!draft) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({ success: false, message: 'Invalid registration draft ID' });
       }
       if (draft.joiningFeeStatus !== 'paid' && draft.joiningFeeStatus !== 'skipped') {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({ success: false, message: 'Joining fee payment is not completed' });
       }
 
@@ -281,11 +285,45 @@ const register = async (req, res) => {
         vendorApprovalStatus = 'pending_approval';
       }
     } else if (joiningFeeEnabled) {
-      // Fee enabled but no paid draft → block free registration bypass
-      return res.status(400).json({
-        success: false,
-        message: 'Joining fee payment is required before registration'
-      });
+      draft = await EngineerRegistrationDraft.findOne({
+        mobile: phone,
+        joiningFeeStatus: { $in: ['paid', 'skipped'] }
+      })
+        .sort({ updatedAt: -1 })
+        .session(session);
+
+      if (!draft) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: 'Joining fee payment is required before registration. Complete payment on the fee step.'
+        });
+      }
+
+      if (draft.engineerType === 'vendor_engineer') {
+        const codeToCheck = normalizeVendorCode(draft.vendorCode || req.body.vendorCode);
+        if (!codeToCheck) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: 'Vendor company code is required for company engineers'
+          });
+        }
+        const vendor = await findVendorByActiveCode(codeToCheck);
+        if (!vendor) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid or revoked vendor company code. Ask your vendor for the latest code.'
+          });
+        }
+        vendorId = vendor._id;
+        linkedViaCode = vendor.uniqueCompanyCode;
+        vendorApprovalStatus = 'pending_approval';
+      }
     } else if ((req.body.engineerType || 'freelancer') === 'vendor_engineer') {
       // Fee disabled path — still require live code validation
       const codeToCheck = normalizeVendorCode(req.body.vendorCode);

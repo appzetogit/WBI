@@ -328,7 +328,7 @@ export const workerAuthService = {
   },
 
   getRegistrationConfig: async () => {
-    const response = await api.get('/forms/register-config?role=worker');
+    const response = await api.get('/workers/auth/config/registration');
     return response.data;
   },
 

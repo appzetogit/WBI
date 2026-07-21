@@ -2,7 +2,7 @@ const User = require('../../models/User');
 const { findUserAcrossCollections } = require('../../utils/authHelper');
 const { generateTokenPair, verifyRefreshToken, generateVerificationToken, verifyVerificationToken } = require('../../utils/tokenService');
 const { generateOTP, hashOTP, storeOTP, verifyOTP, checkRateLimit } = require('../../utils/redisOtp.util');
-const { sendOTP: sendSMSOTP } = require('../../services/smsService');
+const { sendRegistrationOTP } = require('../../services/smsService');
 const { sendOTPEmail, sendWelcomeEmail } = require('../../services/emailService');
 const { USER_ROLES } = require('../../utils/constants');
 const { validationResult } = require('express-validator');
@@ -57,12 +57,24 @@ const sendOTP = async (req, res) => {
     // 3. Store OTP (Redis primary, MongoDB fallback)
     await storeOTP(phone, otpHash);
 
-    // 4. Send OTP via SMS
-    sendSMSOTP(phone, otp, 'user').then(smsResult => {
-      if (!smsResult.success) {
-        console.warn(`[OTP] SMS failed for ${phone}, but OTP stored`);
-      }
-    }).catch(err => console.error(`[OTP] SMS error for ${phone}:`, err));
+    // 4. Send OTP via SMS (DLT-approved template — same as engineer/worker)
+    const smsResult = await sendRegistrationOTP(phone, otp).catch((err) => {
+      console.error(`[OTP] SMS error for ${phone}:`, err);
+      return { success: false };
+    });
+    if (
+      !smsResult.success &&
+      process.env.USE_DEFAULT_OTP !== 'true' &&
+      process.env.NODE_ENV === 'production'
+    ) {
+      return res.status(502).json({
+        success: false,
+        message: 'Unable to send OTP SMS. Please check your mobile number and try again.'
+      });
+    }
+    if (!smsResult.success) {
+      console.warn(`[OTP] SMS failed for ${phone}, but OTP stored`);
+    }
 
     // Log OTP in development mode only (NEVER in production)
     if (process.env.NODE_ENV === 'development' || process.env.USE_DEFAULT_OTP === 'true') {

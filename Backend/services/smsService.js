@@ -3,7 +3,7 @@ const axios = require('axios');
 /** DLT-approved TaskY registration template (must match portal scrubbing) */
 const TASKY_DLT_TEMPLATE_ID = '1077311990016977854';
 const TASKY_REGISTRATION_SENDER_ID = 'WBINFS';
-const REGISTRATION_SMS_TEMPLATE_VERSION = '2026-07-21-tazky-dlt';
+const REGISTRATION_SMS_TEMPLATE_VERSION = '2026-07-21-unified-dlt-otp';
 
 /**
  * Send SMS via SMS India Hub
@@ -74,12 +74,12 @@ const sendSMS = async (phone, message, options = {}) => {
   }
 };
 
-/** Default OTP (user, vendor, B2B, shared auth, login flows) — unchanged legacy DLT text */
+/** @deprecated DLT rejects this text — kept for reference only */
 const LEGACY_OTP_SMS_TEMPLATE = (otp) =>
   `Welcome to the WBIPVTLTD powered by Appzeto.Your OTP for registration is ${otp}.BGADEC`;
 
 /**
- * Engineer/worker registration — MUST match DLT-approved template exactly (SMS scrubbing).
+ * All platform OTP SMS (user, engineer, worker, vendor, shared auth) — MUST match DLT-approved template.
  * Portal template (##var## = OTP): Welcome to the TazkY powered by WBI.Your OTP for registration is ##var##.Thank you!
  * DLT Template Id: 1077311990016977854 | Sender: WBINFS
  * Do not change spacing/casing until a new template is approved on DLT.
@@ -88,21 +88,10 @@ const TASKY_REGISTRATION_OTP_SMS_TEMPLATE = (otp) =>
   `Welcome to the TazkY powered by WBI.Your OTP for registration is ${otp}.Thank you!`;
 
 /**
- * Generic OTP SMS (legacy template) — user, vendor, B2B, etc.
+ * Platform OTP SMS — uses DLT-approved TaskY/WBI template (same as registration).
  */
-const sendOTP = async (phone, otp) => {
-  const message = LEGACY_OTP_SMS_TEMPLATE(otp);
-  console.log(`[SMS] Attempting to send OTP (legacy) to ${phone}`);
-  const result = await sendSMS(phone, message);
-  if (!result.success) {
-    console.error(`[SMS] Failed to send OTP to ${phone}:`, result.error);
-  }
-  return result;
-};
+const sendOTP = async (phone, otp) => sendRegistrationOTP(phone, otp);
 
-/**
- * Engineer / worker registration OTP only (TaskY template + optional separate DLT id)
- */
 const sendRegistrationOTP = async (phone, otp) => {
   const message = TASKY_REGISTRATION_OTP_SMS_TEMPLATE(otp);
   const templateId =

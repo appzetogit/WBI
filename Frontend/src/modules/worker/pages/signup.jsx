@@ -10,6 +10,12 @@ import ValidatedInput from '../../../components/common/ValidatedInput';
 import { validators } from '../../../utils/validationUtils';
 import { z } from "zod";
 
+const generateObjectId = () => {
+  const timestamp = Math.floor(new Date().getTime() / 1000).toString(16);
+  const randomHex = 'xxxxxxxxxxxxxxxx'.replace(/[x]/g, () => Math.floor(Math.random() * 16).toString(16));
+  return (timestamp + randomHex).toLowerCase();
+};
+
 export default function WorkerSignup() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
@@ -19,6 +25,7 @@ export default function WorkerSignup() {
   const kycRef = React.useRef(null);
 
   const [formData, setFormData] = useState({
+    tempEntityId: generateObjectId(),
     name: '',
     phone: '',
     password: '',
@@ -115,7 +122,7 @@ export default function WorkerSignup() {
   };
 
   const validateStep = (step) => {
-    const stepData = config?.steps?.find(s => s.step === step);
+    const stepData = config?.steps?.find(s => s.stepNumber === step);
     if (stepData && stepData.fields) {
       for (const field of stepData.fields) {
         if (field.required && !formData[field.key]) {
@@ -132,7 +139,7 @@ export default function WorkerSignup() {
       }
     }
 
-    const configTotalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2);
+    const configTotalSteps = Math.max(...(config?.steps?.map(s => s.stepNumber) || [1]), 1);
     const totalSteps = configTotalSteps + 1; // +1 for KYC step
     const kycStep = totalSteps;
 
@@ -183,9 +190,17 @@ export default function WorkerSignup() {
       const payload = {
         ...formData,
         roleType: 'Worker',
+        role: 'worker',
         serviceCategories: categoryTitles,
         subServices: subServicesPayload,
+        address: {
+          ...(formData.address || {}),
+          city: formData.city || formData.address?.city || '',
+          pincode: formData.pincode || formData.address?.pincode || ''
+        }
       };
+      delete payload.tempEntityId;
+      delete payload.verifications;
 
       const response = await workerAuthService.register(payload);
       if (response.success) {
@@ -227,8 +242,8 @@ export default function WorkerSignup() {
       );
     }
 
-    const currentStepData = config?.steps?.find(s => s.step === currentStep);
-    const configTotalSteps = Math.max(...(config?.steps?.map(s => s.step) || [1]), 2); // At least 2 steps (fields + categories)
+    const currentStepData = config?.steps?.find(s => s.stepNumber === currentStep);
+    const configTotalSteps = Math.max(...(config?.steps?.map(s => s.stepNumber) || [1]), 1); // At least 2 steps (fields + categories)
     const totalSteps = configTotalSteps + 1; // +1 for KYC step
     const kycStep = totalSteps;
 
@@ -288,7 +303,7 @@ export default function WorkerSignup() {
                             <input 
                               name={field.key} 
                               value={formData[field.key] || ''} 
-                              onChange={(e) => setFormData(p => ({...p, [field.key]: e.target.value.replace(/\\D/g, '').slice(0, 10)}))} 
+                              onChange={(e) => setFormData(p => ({...p, [field.key]: e.target.value.replace(/\D/g, '').slice(0, 10)}))} 
                               type="tel" 
                               className="w-full bg-gray-50 border border-gray-100 rounded-r-2xl py-3.5 px-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-black/20 focus:border-black/30 transition-all" 
                               placeholder="10-digit number" 
@@ -388,6 +403,7 @@ export default function WorkerSignup() {
                   ref={kycRef}
                   role="worker" 
                   mobileNumber={formData.phone}
+                  entityId={formData.tempEntityId}
                   onComplete={(verifications) => setFormData(prev => ({ ...prev, verifications }))}
                 />
               </div>
