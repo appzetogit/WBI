@@ -83,13 +83,32 @@ const getAllEngineers = async (req, res) => {
 };
 
 /**
- * Get engineer details
+ * Temporary signed Cloudinary URL for private/authenticated verification assets
+ */
+const generateSignedUrl = (fileKey) => {
+  if (!fileKey) return '';
+  try {
+    const cloudinary = require('../../config/cloudinary');
+    return cloudinary.url(fileKey, {
+      resource_type: 'auto',
+      type: 'authenticated',
+      sign_url: true,
+      expires_at: Math.floor(Date.now() / 1000) + 3600
+    });
+  } catch (error) {
+    console.error('Failed to generate Cloudinary signed URL:', error);
+    return '';
+  }
+};
+
+/**
+ * Get engineer details (full registration profile + documents for admin review)
  */
 const getEngineerDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const engineer = await Engineer.findById(id).select('-password');
+    const engineer = await Engineer.findById(id).select('-password').lean();
 
     if (!engineer) {
       return res.status(404).json({
@@ -112,13 +131,40 @@ const getEngineerDetails = async (req, res) => {
               $cond: [{ $eq: ['$status', BOOKING_STATUS.COMPLETED] }, 1, 0]
             }
           },
-          // Assuming engineers might get paid or we just track job value
           totalJobValue: {
             $sum: '$finalAmount'
           }
         }
       }
     ]);
+
+    const VerificationDocument = require('../../models/VerificationDocument');
+    const KYCVerification = require('../../models/KYCVerification');
+
+    const [verificationDocs, kycRecords] = await Promise.all([
+      VerificationDocument.find({ ownerId: engineer._id }).sort({ documentType: 1, side: 1 }).lean(),
+      KYCVerification.find({ role: 'engineer', entityId: engineer._id }).lean()
+    ]);
+
+    const documents = verificationDocs.map((d) => ({
+      ...d,
+      signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
+      verifiedBy: d.verifiedBy || d.reviewedBy || null
+    }));
+
+    const cgpeStatus = {};
+    for (const rec of kycRecords) {
+      cgpeStatus[rec.documentType] = {
+        status: rec.status,
+        provider: rec.provider,
+        verificationMode: rec.verificationMode,
+        physicalUploadStatus: rec.physicalUploadStatus,
+        documentNumberMasked: rec.documentNumberMasked,
+        verifiedAt: rec.verifiedAt,
+        fileUrl: rec.fileUrl,
+        backFileUrl: rec.backFileUrl
+      };
+    }
 
     res.status(200).json({
       success: true,
@@ -128,7 +174,9 @@ const getEngineerDetails = async (req, res) => {
           totalJobs: 0,
           completedJobs: 0,
           totalJobValue: 0
-        }
+        },
+        documents,
+        cgpeStatus
       }
     });
   } catch (error) {
