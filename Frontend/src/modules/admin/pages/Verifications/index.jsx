@@ -917,6 +917,11 @@ const VerificationManagement = ({ initialRole = '' }) => {
                     ) : (
                       selectedRequest.documents.map(doc => {
                         const previewUrl = doc.signedPreviewUrl || doc.fileUrl;
+                        const hasPhysicalFile = doc.hasPhysicalFile !== false && Boolean(
+                          previewUrl &&
+                          previewUrl !== 'digilocker-fetch' &&
+                          (String(previewUrl).startsWith('http') || String(previewUrl).startsWith('data:') || String(previewUrl).startsWith('/'))
+                        );
                         const isPdf = String(previewUrl || '').toLowerCase().includes('.pdf');
                         return (
                         <div key={doc._id} className="border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
@@ -927,6 +932,9 @@ const VerificationManagement = ({ initialRole = '' }) => {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <h5 className="font-bold capitalize text-sm">{String(doc.documentType).replace(/_/g, ' ')}{doc.side && doc.side !== 'single' ? ` (${doc.side})` : ''}</h5>
                                 <span className="text-[10px] font-bold bg-slate-200 px-2 py-0.5 rounded text-slate-600">{doc.documentNumberMasked || 'No Doc Number'}</span>
+                                {!hasPhysicalFile ? (
+                                  <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded">Digital verify only</span>
+                                ) : null}
                                 {doc.mimeType ? <span className="text-[10px] text-slate-400">{doc.mimeType}</span> : null}
                               </div>
                               <p className="text-[11px] text-slate-400">
@@ -982,42 +990,58 @@ const VerificationManagement = ({ initialRole = '' }) => {
 
                           <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-[#F8FAFC] border border-slate-100 p-3 rounded-xl flex flex-col items-center justify-center relative min-h-64 group">
-                              {isPdf ? (
-                                <div className="text-slate-400 text-sm font-semibold">PDF Document</div>
+                              {hasPhysicalFile ? (
+                                <>
+                                  {isPdf ? (
+                                    <div className="text-slate-400 text-sm font-semibold">PDF Document</div>
+                                  ) : (
+                                    <img fetchPriority="low" loading="lazy" 
+                                      src={previewUrl} 
+                                      alt={doc.documentType} 
+                                      className="max-h-60 object-contain rounded shadow-sm bg-white" 
+                                      onError={(e) => { e.target.style.display = 'none'; }}
+                                    />
+                                  )}
+                                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => setPreview({ open: true, url: previewUrl, title: `${doc.documentType} ${doc.side || ''}` })}
+                                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                                    >
+                                      <FiMaximize2 /> Full Screen
+                                    </button>
+                                    <a 
+                                      href={previewUrl} 
+                                      download
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                                    >
+                                      <FiDownload /> Download
+                                    </a>
+                                    <a 
+                                      href={previewUrl} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer" 
+                                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                                    >
+                                      Open <FiExternalLink />
+                                    </a>
+                                  </div>
+                                </>
                               ) : (
-                                <img fetchPriority="low" loading="lazy" 
-                                  src={previewUrl} 
-                                  alt={doc.documentType} 
-                                  className="max-h-60 object-contain rounded shadow-sm bg-white" 
-                                  onError={(e) => { e.target.style.display = 'none'; }}
-                                />
+                                <div className="text-center px-4 max-w-sm">
+                                  <FiAlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-2" />
+                                  <p className="text-sm font-bold text-slate-700">No card image uploaded</p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    This ID was verified digitally via {doc.verificationMode || selectedRequest.cgpeStatus?.[doc.documentType]?.verificationMode || 'CGPE API / DigiLocker'}.
+                                    Physical Aadhaar/PAN photo was not uploaded at signup.
+                                  </p>
+                                  {doc.documentNumberMasked ? (
+                                    <p className="mt-3 text-sm font-mono font-semibold text-slate-800">{doc.documentNumberMasked}</p>
+                                  ) : null}
+                                </div>
                               )}
-                              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setPreview({ open: true, url: previewUrl, title: `${doc.documentType} ${doc.side || ''}` })}
-                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                                >
-                                  <FiMaximize2 /> Full Screen
-                                </button>
-                                <a 
-                                  href={previewUrl} 
-                                  download
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                                >
-                                  <FiDownload /> Download
-                                </a>
-                                <a 
-                                  href={previewUrl} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
-                                >
-                                  Open <FiExternalLink />
-                                </a>
-                              </div>
                             </div>
 
                             <div className="bg-[#0F172A] text-slate-300 p-4 rounded-xl border border-slate-800 flex flex-col min-h-64">
@@ -1052,7 +1076,8 @@ const VerificationManagement = ({ initialRole = '' }) => {
                             </div>
                           </div>
                         </div>
-                      );})
+                        );
+                      })
                     )}
                   </div>
                 </div>

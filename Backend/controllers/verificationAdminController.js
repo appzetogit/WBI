@@ -198,16 +198,51 @@ exports.getVerificationDetail = async (req, res) => {
       entityId: request.ownerId
     }).lean();
 
-    const enrichedDocs = docs
-      .map((d) => ({
+    const isRealFileUrl = (url) =>
+      Boolean(url) &&
+      url !== 'digilocker-fetch' &&
+      (String(url).startsWith('http') || String(url).startsWith('data:') || String(url).startsWith('/'));
+
+    const buildCgpePayload = (doc, kycRec) => {
+      if (doc?.cgpeResponse && typeof doc.cgpeResponse === 'object') return doc.cgpeResponse;
+      if (kycRec?.rawResponseEncrypted && typeof kycRec.rawResponseEncrypted === 'object') {
+        return kycRec.rawResponseEncrypted;
+      }
+      if (!kycRec) return null;
+      const payload = {};
+      if (kycRec.verifiedName || kycRec.extractedName) payload.name = kycRec.verifiedName || kycRec.extractedName;
+      if (kycRec.documentNumberMasked) payload.documentNumber = kycRec.documentNumberMasked;
+      if (kycRec.verificationMode) payload.verificationMode = kycRec.verificationMode;
+      if (kycRec.provider) payload.provider = kycRec.provider;
+      if (kycRec.status) payload.status = kycRec.status;
+      if (kycRec.providerTransactionId) payload.transactionId = kycRec.providerTransactionId;
+      if (kycRec.verifiedAt) payload.verifiedAt = kycRec.verifiedAt;
+      return Object.keys(payload).length ? payload : null;
+    };
+
+    const kycByType = {};
+    for (const rec of kycRecords) kycByType[rec.documentType] = rec;
+
+    const enrichedDocs = [];
+    for (const d of docs) {
+      const rawUrl = isRealFileUrl(d.fileUrl) ? d.fileUrl : null;
+      const signed = rawUrl && d.fileKey && d.fileKey !== 'digilocker-fetch'
+        ? (generateSignedUrl(d.fileKey) || rawUrl)
+        : rawUrl;
+      const hasPhysicalFile = Boolean(signed);
+      const kycRec = kycByType[d.documentType];
+
+      enrichedDocs.push({
         ...d,
-        signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
+        fileUrl: hasPhysicalFile ? (signed || d.fileUrl) : null,
+        signedPreviewUrl: hasPhysicalFile ? signed : null,
+        hasPhysicalFile,
+        verificationMode: kycRec?.verificationMode || d.verificationMode || null,
+        cgpeResponse: buildCgpePayload(d, kycRec),
+        documentNumberMasked: d.documentNumberMasked || kycRec?.documentNumberMasked || null,
         verifiedBy: d.verifiedBy || d.reviewedBy || null
-      }))
-      .filter((d) => {
-        const url = d.signedPreviewUrl || d.fileUrl;
-        return url && url !== 'digilocker-fetch';
       });
+    }
 
     // Also surface KYC physical uploads that may not be in VerificationDocument yet
     for (const rec of kycRecords) {
@@ -217,27 +252,48 @@ exports.getVerificationDetail = async (req, res) => {
       const hasBack = enrichedDocs.some(
         (d) => d.documentType === rec.documentType && d.side === 'back'
       );
-      if (rec.fileUrl && rec.fileUrl !== 'digilocker-fetch' && !hasFront) {
+      if (isRealFileUrl(rec.fileUrl) && !hasFront) {
         enrichedDocs.push({
           _id: `kyc-${rec._id}-front`,
           documentType: rec.documentType,
           side: 'front',
           fileUrl: rec.fileUrl,
           signedPreviewUrl: rec.fileUrl,
+          hasPhysicalFile: true,
           status: rec.physicalUploadStatus === 'uploaded' ? 'pending' : (rec.status || 'pending'),
           documentNumberMasked: rec.documentNumberMasked,
+          cgpeResponse: buildCgpePayload(null, rec),
           source: 'kyc'
         });
       }
-      if (rec.backFileUrl && !hasBack) {
+      if (isRealFileUrl(rec.backFileUrl) && !hasBack) {
         enrichedDocs.push({
           _id: `kyc-${rec._id}-back`,
           documentType: rec.documentType,
           side: 'back',
           fileUrl: rec.backFileUrl,
           signedPreviewUrl: rec.backFileUrl,
+          hasPhysicalFile: true,
           status: rec.physicalUploadStatus === 'uploaded' ? 'pending' : (rec.status || 'pending'),
+          cgpeResponse: buildCgpePayload(null, rec),
           source: 'kyc'
+        });
+      }
+
+      // Digital-only KYC (API/DigiLocker) with no VerificationDocument row
+      if (!hasFront && !isRealFileUrl(rec.fileUrl) && ['aadhaar', 'pan', 'bank'].includes(rec.documentType)) {
+        enrichedDocs.push({
+          _id: `kyc-digital-${rec._id}`,
+          documentType: rec.documentType,
+          side: 'single',
+          fileUrl: null,
+          signedPreviewUrl: null,
+          hasPhysicalFile: false,
+          status: rec.status === 'verified' ? 'verified' : (rec.status || 'pending'),
+          documentNumberMasked: rec.documentNumberMasked,
+          cgpeResponse: buildCgpePayload(null, rec),
+          verificationMode: rec.verificationMode,
+          source: 'kyc_digital'
         });
       }
     }
@@ -251,8 +307,8 @@ exports.getVerificationDetail = async (req, res) => {
         physicalUploadStatus: rec.physicalUploadStatus,
         documentNumberMasked: rec.documentNumberMasked,
         verifiedAt: rec.verifiedAt,
-        fileUrl: rec.fileUrl,
-        backFileUrl: rec.backFileUrl
+        fileUrl: isRealFileUrl(rec.fileUrl) ? rec.fileUrl : null,
+        backFileUrl: isRealFileUrl(rec.backFileUrl) ? rec.backFileUrl : null
       };
     }
 
