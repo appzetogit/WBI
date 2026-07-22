@@ -122,7 +122,12 @@ const EngineerCoupons = () => {
         applicableLocations: String(f.applicableLocations || '')
           .split(',')
           .map((s) => s.trim())
-          .filter(Boolean)
+          .filter(Boolean),
+        applicableRegistrationTypes: ['engineer_joining_fee'],
+        applicableUserTypes:
+          Array.isArray(f.applicableUserTypes) && f.applicableUserTypes.length
+            ? f.applicableUserTypes
+            : ['freelancer', 'vendor_engineer']
       };
       const res =
         couponModal.mode === 'edit'

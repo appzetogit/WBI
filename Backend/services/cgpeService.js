@@ -75,6 +75,13 @@ class CgpeService {
 
       const resData = error.response?.data || {};
       if (resData.message && String(resData.message).toLowerCase().includes('ip not allowed')) {
+        const isProd = process.env.NODE_ENV === 'production';
+        if (!isProd && process.env.CGPE_STRICT_IP !== 'true') {
+          console.warn(
+            `[CGPE] IP not whitelisted (${resData.error?.clientIP || 'unknown'}) — dev mock fallback for ${endpoint}`
+          );
+          return this.simulateSandboxResponse(endpoint, data);
+        }
         throw new Error(`CGPE API Error: Your server IP (${resData.error?.clientIP || 'unknown'}) is not whitelisted. Please add this IP in your CGPE merchant dashboard under IP Whitelist settings.`);
       }
       const detail = Array.isArray(resData.error)
@@ -165,6 +172,9 @@ class CgpeService {
     // verify.cgpey.com: /api/kyc/* = 404; docs.cgpey.com rejects these merchant keys.
     // Working path: OKYC initiate (delivers UIDAI OTP on production).
     try {
+      // #region agent log
+      fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',hypothesisId:'H2',location:'cgpeService.js:generateAadhaarOtp:beforeInitiate',message:'calling okyc/initiate',data:{aadhaarLen:num.length,useMock:process.env.USE_MOCK_KYC==='true'||!this.apiKey},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const result = await this.makeRequest('/api/v1/verify/okyc/initiate', { aadhaarNumber: num });
       // Prefer real sessionId — okyc/verify requires sessionId (not clientId alone)
       const sessionId =
@@ -174,6 +184,9 @@ class CgpeService {
       if (!sessionId) {
         const keys = Object.keys(result?.data || result || {});
         console.error('[CGPE] okyc/initiate missing session id keys:', keys);
+        // #region agent log
+        fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',hypothesisId:'H3',location:'cgpeService.js:generateAadhaarOtp:noSession',message:'missing sessionId after initiate',data:{responseKeys:keys.slice(0,12)},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         throw new Error('Aadhaar OTP sent but provider session id missing. Please try Get OTP again.');
       }
       console.log('[CGPE] Aadhaar OTP generated via okyc/initiate session=', sessionId);
@@ -187,6 +200,9 @@ class CgpeService {
         requestId: result.data?.transactionId || result.reference_id || result.data?.referenceId || sessionId
       };
     } catch (okycErr) {
+      // #region agent log
+      fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',hypothesisId:'H2',location:'cgpeService.js:generateAadhaarOtp:catch',message:'okyc initiate failed',data:{errMsg:String(okycErr?.message||'').slice(0,200)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       throw okycErr;
     }
   }

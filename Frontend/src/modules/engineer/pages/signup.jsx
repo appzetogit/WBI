@@ -220,7 +220,9 @@ export default function EngineerSignup() {
       const phoneVal = formData.phone || formData.mobile;
       const res = await engineerAuthService.getActiveRegistrationOffers({
         engineerType: formData.engineerType || 'freelancer',
-        mobile: phoneVal ? String(phoneVal).replace(/\D/g, '').slice(-10) : undefined
+        mobile: phoneVal ? String(phoneVal).replace(/\D/g, '').slice(-10) : undefined,
+        city: formData.city || undefined,
+        state: formData.state || undefined
       });
       if (res.success) {
         setRegistrationOffers(res.data);
@@ -228,11 +230,32 @@ export default function EngineerSignup() {
           setPaymentData(res.data.autoApplyPreview);
           setCouponCode(res.data.autoApplyPreview.couponCode || '');
         }
+      } else {
+        setRegistrationOffers({
+          baseAmount: config?.engineerConfig?.joiningFeeAmount,
+          showCouponInput: true,
+          couponsAvailable: false,
+          publicCoupons: []
+        });
       }
     } catch {
-      setRegistrationOffers(null);
+      setRegistrationOffers({
+        baseAmount: config?.engineerConfig?.joiningFeeAmount,
+        showCouponInput: true,
+        couponsAvailable: false,
+        publicCoupons: []
+      });
     }
-  }, [formData.engineerType, formData.phone, formData.mobile, paymentData, isPaymentSuccess]);
+  }, [
+    formData.engineerType,
+    formData.phone,
+    formData.mobile,
+    formData.city,
+    formData.state,
+    paymentData,
+    isPaymentSuccess,
+    config?.engineerConfig?.joiningFeeAmount
+  ]);
 
   useEffect(() => {
     if (currentStep === feeStep && config?.engineerConfig?.joiningFeeEnabled) {
@@ -616,16 +639,20 @@ export default function EngineerSignup() {
   };
 
   // --- Payment & Coupon Logic ---
-  const applyCoupon = async () => {
-    if (!couponCode) return;
+  const applyCoupon = async (codeOverride) => {
+    const code = String(codeOverride ?? couponCode ?? '').trim().toUpperCase();
+    if (!code) return;
+    if (codeOverride) setCouponCode(code);
     setIsVerifyingCoupon(true);
     try {
       const phoneVal = formData.phone || formData.mobile;
       const res = await engineerAuthService.validateCoupon({
-        code: couponCode,
+        code,
         engineerType: formData.engineerType,
         mobile: phoneVal,
-        phone: phoneVal
+        phone: phoneVal,
+        city: formData.city,
+        state: formData.state
       });
       if (res.success) {
         setPaymentData(res.data);
@@ -670,7 +697,9 @@ export default function EngineerSignup() {
         email: emailVal || undefined,
         engineerType: formData.engineerType,
         vendorCode: formData.vendorCode,
-        registrationDraftId: formData.registrationDraftId || undefined
+        registrationDraftId: formData.registrationDraftId || undefined,
+        city: formData.city,
+        state: formData.state
       });
 
       if (!res?.success) {
@@ -1247,7 +1276,9 @@ export default function EngineerSignup() {
                           </span>
                         </div>
                         
-                        {registrationOffers?.showCouponInput ? (
+                        {(registrationOffers?.showCouponInput ||
+                          registrationOffers?.couponsAvailable ||
+                          registrationOffers?.publicCoupons?.length > 0) ? (
                         <div className="mb-6">
                           <label className="block text-xs font-bold text-gray-600 mb-2 uppercase tracking-wide">Have a coupon code?</label>
                           <div className="flex gap-2">
@@ -1256,7 +1287,7 @@ export default function EngineerSignup() {
                               <input type="text" value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())} placeholder="ENTER CODE" className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-10 pr-4 font-bold tracking-wide focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5]" disabled={isVerifyingCoupon || !!paymentData} />
                             </div>
                             {!paymentData ? (
-                              <button type="button" onClick={applyCoupon} disabled={isVerifyingCoupon || !couponCode} className="px-6 bg-gray-900 text-white font-bold rounded-xl hover:bg-black disabled:opacity-50 transition-colors">
+                              <button type="button" onClick={() => applyCoupon()} disabled={isVerifyingCoupon || !couponCode} className="px-6 bg-gray-900 text-white font-bold rounded-xl hover:bg-black disabled:opacity-50 transition-colors">
                                 Apply
                               </button>
                             ) : (
@@ -1266,9 +1297,22 @@ export default function EngineerSignup() {
                             )}
                           </div>
                           {registrationOffers?.publicCoupons?.length > 0 && (
-                            <p className="text-xs text-gray-500 mt-2">
-                              Available: {registrationOffers.publicCoupons.map((c) => c.code).join(', ')}
-                            </p>
+                            <div className="flex flex-wrap gap-2 mt-3">
+                              {registrationOffers.publicCoupons.map((c) => (
+                                <button
+                                  key={c.code}
+                                  type="button"
+                                  disabled={isVerifyingCoupon || !!paymentData}
+                                  onClick={() => applyCoupon(c.code)}
+                                  className="text-xs font-bold px-3 py-1.5 rounded-lg border border-[#4F46E5]/30 text-[#4F46E5] bg-[#4F46E5]/5 hover:bg-[#4F46E5]/10 disabled:opacity-50"
+                                >
+                                  {c.code}
+                                  {c.discountType === 'percentage'
+                                    ? ` · ${c.discountValue}% off`
+                                    : ` · ₹${c.discountValue} off`}
+                                </button>
+                              ))}
+                            </div>
                           )}
                         </div>
                         ) : null}

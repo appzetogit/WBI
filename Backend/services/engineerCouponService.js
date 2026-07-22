@@ -191,6 +191,17 @@ async function listApplicableCoupons(ctx) {
   return applicable;
 }
 
+/** Any scheduled coupon for engineer joining fee (for showing coupon UI / private codes). */
+async function hasAnyActiveRegistrationCoupons(registrationType = REGISTRATION_TYPE) {
+  const now = new Date();
+  const coupons = await EngineerCoupon.find({ isActive: true })
+    .select('validFrom validTill applicableRegistrationTypes')
+    .lean();
+  return coupons.some(
+    (c) => isWithinSchedule(c, now) && matchesRegistrationType(c, registrationType)
+  );
+}
+
 async function getActiveOffersContext({
   engineerType = 'freelancer',
   mobile = null,
@@ -232,14 +243,15 @@ async function getActiveOffersContext({
   }
 
   const couponsAvailable = applicable.length > 0 || !!banner;
+  const anyRegistrationCoupons = await hasAnyActiveRegistrationCoupons(registrationType);
 
   return {
     baseAmount,
     banner,
     publicCoupons,
     autoApplyPreview,
-    couponsAvailable,
-    showCouponInput: applicable.length > 0
+    couponsAvailable: couponsAvailable || anyRegistrationCoupons,
+    showCouponInput: applicable.length > 0 || anyRegistrationCoupons
   };
 }
 

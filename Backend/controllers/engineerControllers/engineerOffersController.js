@@ -27,7 +27,7 @@ exports.getActiveOffers = async (req, res) => {
         publicCoupons: ctx.publicCoupons,
         autoApplyPreview: ctx.autoApplyPreview,
         couponsAvailable: ctx.couponsAvailable,
-        showCouponInput: ctx.showCouponInput && ctx.couponsAvailable
+        showCouponInput: ctx.showCouponInput
       }
     });
   } catch (error) {
