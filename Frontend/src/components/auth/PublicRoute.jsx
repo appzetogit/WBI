@@ -122,7 +122,7 @@ const PublicRoute = ({ children, userType = 'user', redirectTo = null }) => {
     // Determine redirect path
     const defaultRedirects = {
       user: '/user/dashboard',
-      vendor: '/vendor/dashboard',
+      vendor: '/vendor',
       worker: '/worker/dashboard',
       engineer: '/engineer/dashboard',
       admin: '/admin/dashboard',

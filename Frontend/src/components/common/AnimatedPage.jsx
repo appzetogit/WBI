@@ -2,19 +2,23 @@ import React from 'react';
 import { motion } from 'framer-motion';
 
 const pageVariants = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1, transition: { duration: 0.15, ease: 'easeOut' } },
-  exit: { opacity: 0, transition: { duration: 0.1, ease: 'easeIn' } }
+  initial: { opacity: 1 },
+  animate: { opacity: 1, transition: { duration: 0.12, ease: 'easeOut' } },
+  exit: { opacity: 1, transition: { duration: 0.08, ease: 'easeIn' } }
 };
 
+/**
+ * Page wrapper without opacity:0 entry — AnimatePresence+opacity:0 caused
+ * production blank screens when exit/enter got stuck.
+ */
 const AnimatedPage = ({ children, className = '' }) => {
   return (
     <motion.div
-      initial="initial"
+      initial={false}
       animate="animate"
-      exit="exit"
       variants={pageVariants}
-      className={className}
+      className={className || undefined}
+      style={{ minHeight: '100%' }}
     >
       {children}
     </motion.div>

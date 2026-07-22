@@ -6,16 +6,17 @@ class ErrorBoundary extends React.Component {
     this.state = { hasError: false, error: null, errorInfo: null };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError() {
     return { hasError: true };
   }
 
   componentDidCatch(error, errorInfo) {
     console.error('Vendor App Error:', error, errorInfo);
-    const isChunkLoadError = error?.name === 'ChunkLoadError' || 
-                             error?.message?.includes('Failed to fetch dynamically imported module') ||
-                             error?.message?.includes('Importing a module script failed');
-                             
+    const isChunkLoadError =
+      error?.name === 'ChunkLoadError' ||
+      error?.message?.includes('Failed to fetch dynamically imported module') ||
+      error?.message?.includes('Importing a module script failed');
+
     if (isChunkLoadError) {
       const hasReloaded = sessionStorage.getItem('chunk_load_reloaded');
       if (!hasReloaded) {
@@ -25,51 +26,49 @@ class ErrorBoundary extends React.Component {
       }
     }
 
-    this.setState({
-      error,
-      errorInfo,
-    });
+    this.setState({ error, errorInfo });
   }
 
   render() {
     if (this.state.hasError) {
+      const message = this.state.error?.message || 'Unexpected rendering error';
       return (
-        <div className="flex items-center justify-center min-h-screen" style={{ background: 'linear-gradient(135deg, #FCD34D 0%, #FDE68A 50%, #FFFFFF 100%)' }}>
-          <div className="flex flex-col items-center gap-4 p-6 max-w-md mx-auto">
-            <div className="text-6xl">⚠️</div>
-            <h2 className="text-2xl font-bold text-gray-800 text-center">Something went wrong</h2>
-            <p className="text-gray-600 text-center">
-              The vendor app encountered an error. Please try refreshing the page.
+        <div className="flex items-center justify-center min-h-screen bg-white p-6">
+          <div className="flex flex-col items-center gap-4 max-w-md mx-auto text-center">
+            <img src="/logo/WBILogo.jpg" alt="WBI" className="w-16 h-16 rounded-2xl shadow" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+            <h2 className="text-2xl font-bold text-gray-800">Vendor Portal failed to load</h2>
+            <p className="text-gray-600 text-sm">
+              Please refresh. If this keeps happening, clear site cache and try again.
             </p>
-            <button
-              onClick={() => {
-                this.setState({ hasError: false, error: null, errorInfo: null });
-              }}
-              className="px-6 py-3 rounded-xl font-semibold text-white transition-all duration-300"
-              style={{
-                background: '#00a6a6',
-                boxShadow: '0 4px 12px rgba(0, 166, 166, 0.3)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 166, 166, 0.4)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 166, 166, 0.3)';
-              }}
-            >
-              Refresh Page
-            </button>
-            {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="mt-4 p-4 bg-red-50 rounded-lg max-w-full overflow-auto">
-                <summary className="cursor-pointer font-semibold text-red-800 mb-2">Error Details (Dev Only)</summary>
-                <pre className="text-xs text-red-700 whitespace-pre-wrap">
-                  {this.state.error.toString()}
-                  {this.state.errorInfo?.componentStack}
-                </pre>
-              </details>
-            )}
+            <p className="text-xs text-gray-400 break-all">{message}</p>
+            <div className="flex flex-wrap gap-3 justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  sessionStorage.removeItem('chunk_load_reloaded');
+                  window.location.reload();
+                }}
+                className="px-6 py-3 rounded-xl font-semibold text-white"
+                style={{ background: '#0D8A72' }}
+              >
+                Refresh Page
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    ['vendorAccessToken', 'vendorRefreshToken', 'vendorData'].forEach((k) => {
+                      localStorage.removeItem(k);
+                      sessionStorage.removeItem(k);
+                    });
+                  } catch { /* ignore */ }
+                  window.location.href = '/vendor/login';
+                }}
+                className="px-6 py-3 rounded-xl font-semibold border border-gray-300 text-gray-700"
+              >
+                Go to Login
+              </button>
+            </div>
           </div>
         </div>
       );

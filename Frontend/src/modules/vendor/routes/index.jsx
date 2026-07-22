@@ -1,15 +1,45 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AnimatePresence } from 'framer-motion';
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import AnimatedPage from '../../../components/common/AnimatedPage';
-import VendorLayout from '../components/layout/VendorLayout';
 import DigitalVendorLayout from '../components/layout/DigitalVendorLayout';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import ProtectedRoute from '../../../components/auth/ProtectedRoute';
 import PublicRoute from '../../../components/auth/PublicRoute';
-import CashLimitModal from '../components/common/CashLimitModal'; // Import
-import GlobalBookingAlert from '../components/common/GlobalBookingAlert';
-// import useAppNotifications from '../../../hooks/useAppNotifications.jsx'; // Handled globally
+import Logo from '../../../components/common/Logo';
+
+/** Paths that must never be treated as a dynamic service slug */
+const RESERVED_VENDOR_SEGMENTS = new Set([
+  'login',
+  'signup',
+  'forgot-password',
+  'pending-approval',
+  'dashboard',
+  'digital-solution',
+  'project-os',
+  'dynamic',
+  'projects',
+  'engineers',
+  'work-orders',
+  'earnings',
+  'settings',
+  'notifications',
+  'reviews',
+  'support',
+  'wallet',
+  'profile',
+  'jobs',
+  'workers'
+]);
+
+const ServiceSlugRoute = ({ children }) => {
+  const { serviceSlug } = useParams();
+  const slug = String(serviceSlug || '').toLowerCase();
+  if (RESERVED_VENDOR_SEGMENTS.has(slug)) {
+    // Reserved segments must never open DynamicVendorLayout (avoids blank portals)
+    return <Navigate to="/vendor" replace />;
+  }
+  return children;
+};
 
 // Lazy load wrapper with retry for Vite chunk/HMR failures
 const lazyLoad = (importFunc) => {
@@ -50,9 +80,11 @@ const lazyLoad = (importFunc) => {
   });
 };
 
+// Critical auth pages: eager-load so /vendor/login never hangs on blank Suspense
+import Login from '../pages/login';
+import Signup from '../pages/signup';
+
 // Lazy load vendor pages for code splitting
-const Login = lazyLoad(() => import('../pages/login'));
-const Signup = lazyLoad(() => import('../pages/signup'));
 const ForgotPassword = lazyLoad(() => import('../pages/ForgotPassword'));
 const PendingApproval = lazyLoad(() => import('../pages/PendingApproval'));
 const Dashboard = lazyLoad(() => import('../pages/Dashboard'));
@@ -109,7 +141,11 @@ const Compliance = lazyLoad(() => import('../pages/Compliance/Compliance'));
 const Support = lazyLoad(() => import('../pages/Support/Support'));
 
 const LoadingFallback = () => (
-  <div className="min-h-screen bg-[#F8FCFC]" />
+  <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-4 px-4">
+    <Logo className="h-12 w-auto" />
+    <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#0D8A72] border-t-transparent" />
+    <p className="text-sm font-medium text-gray-600">Loading Vendor Portal…</p>
+  </div>
 );
 
 const VendorRoutes = () => {
@@ -117,16 +153,15 @@ const VendorRoutes = () => {
   return (
     <ErrorBoundary>
       <Suspense fallback={<LoadingFallback />}>
-          <AnimatePresence mode="sync">
-            <Routes location={location || undefined}>
-            {/* Public routes */}
+            <Routes location={location}>
+            {/* Public routes — declared before :serviceSlug so they always win */}
             <Route path="login" element={<AnimatedPage><PublicRoute userType="vendor"><Login /></PublicRoute></AnimatedPage>} />
             <Route path="signup" element={<AnimatedPage><PublicRoute userType="vendor"><Signup /></PublicRoute></AnimatedPage>} />
             <Route path="forgot-password" element={<AnimatedPage><PublicRoute userType="vendor"><ForgotPassword /></PublicRoute></AnimatedPage>} />
             <Route path="pending-approval" element={<AnimatedPage><PendingApproval /></AnimatedPage>} />
 
             {/* Base Redirect — resolve registered service slug from API */}
-            <Route path="/" element={<VendorHomeRedirect suffix="dashboard" />} />
+            <Route path="/" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />
 
             {/* Digital Solution specific routes (Main Vendor Layout now) */}
             <Route element={<ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute>}>
@@ -173,8 +208,28 @@ const VendorRoutes = () => {
             {/* Legacy /vendor/dynamic/* → service-slug portal */}
             <Route path="dynamic/*" element={<ProtectedRoute userType="vendor"><LegacyDynamicRedirect /></ProtectedRoute>} />
 
+            {/* Flat legacy aliases — MUST be before :serviceSlug or "dashboard" is swallowed as a slug */}
+            <Route path="dashboard" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />
+            <Route path="projects" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="projects" /></ProtectedRoute>} />
+            <Route path="engineers" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="workforce" /></ProtectedRoute>} />
+            <Route path="work-orders" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="projects" /></ProtectedRoute>} />
+            <Route path="earnings" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="finance" /></ProtectedRoute>} />
+            <Route path="settings" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="settings" /></ProtectedRoute>} />
+            <Route path="notifications" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="notifications" /></ProtectedRoute>} />
+            <Route path="reviews" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="performance" /></ProtectedRoute>} />
+            <Route path="support" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="support" /></ProtectedRoute>} />
+
             {/* ── Service-specific portal: /vendor/:serviceSlug/... ─────── */}
-            <Route path=":serviceSlug" element={<ProtectedRoute userType="vendor"><DynamicVendorLayout /></ProtectedRoute>}>
+            <Route
+              path=":serviceSlug"
+              element={
+                <ProtectedRoute userType="vendor">
+                  <ServiceSlugRoute>
+                    <DynamicVendorLayout />
+                  </ServiceSlugRoute>
+                </ProtectedRoute>
+              }
+            >
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
               <Route path="business-intake/*" element={<AnimatedPage><BusinessIntake /></AnimatedPage>} />
@@ -191,19 +246,8 @@ const VendorRoutes = () => {
               <Route path="settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
             </Route>
 
-            {/* Fallbacks for old flat routes */}
-            <Route path="dashboard" element={<VendorHomeRedirect suffix="dashboard" />} />
-            <Route path="projects" element={<VendorHomeRedirect suffix="projects" />} />
-            <Route path="engineers" element={<VendorHomeRedirect suffix="workforce" />} />
-            <Route path="work-orders" element={<VendorHomeRedirect suffix="projects" />} />
-            <Route path="earnings" element={<VendorHomeRedirect suffix="finance" />} />
-            <Route path="settings" element={<VendorHomeRedirect suffix="settings" />} />
-            <Route path="notifications" element={<VendorHomeRedirect suffix="notifications" />} />
-            <Route path="reviews" element={<VendorHomeRedirect suffix="performance" />} />
-            <Route path="support" element={<VendorHomeRedirect suffix="support" />} />
-            <Route path="*" element={<VendorHomeRedirect suffix="dashboard" />} />
+            <Route path="*" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />
           </Routes>
-            </AnimatePresence>
       </Suspense>
     </ErrorBoundary>
   );

@@ -14,6 +14,21 @@ import ErrorBoundary from './components/common/ErrorBoundary';
 
 const libraries = ['places', 'geometry'];
 
+function GoogleMapsBootstrap({ children }) {
+  const mapsKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!mapsKey) return children;
+  return <GoogleMapsLoader mapsKey={mapsKey}>{children}</GoogleMapsLoader>;
+}
+
+function GoogleMapsLoader({ mapsKey, children }) {
+  useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: mapsKey,
+    libraries
+  });
+  return children;
+}
+
 // Configure a global QueryClient with aggressive caching for speed
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,12 +43,6 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
-    libraries
-  });
-
   // Initialize push notifications on app load
   useEffect(() => {
     // Check if user has any active token before loading notification services
@@ -84,23 +93,25 @@ function App() {
         <SocketProvider>
           <CityProvider>
             <CartProvider>
-              <div className="App">
-                <ErrorBoundary>
-                  <AppRoutes />
-                  <LocationPermissionChecker />
-                  <SonnerToaster richColors position="bottom-right" closeButton />
-                  <Toaster
-                    position="top-center"
-                    reverseOrder={false}
-                    toastOptions={{
-                      duration: 2000,
-                      style: { background: '#333', color: '#fff', borderRadius: '10px', padding: '12px 20px' },
-                      success: { duration: 1000, style: { background: '#10B981' } },
-                      error: { duration: 2000, style: { background: '#EF4444' } },
-                    }}
-                  />
-                </ErrorBoundary>
-              </div>
+              <GoogleMapsBootstrap>
+                <div className="App">
+                  <ErrorBoundary>
+                    <AppRoutes />
+                    <LocationPermissionChecker />
+                    <SonnerToaster richColors position="bottom-right" closeButton />
+                    <Toaster
+                      position="top-center"
+                      reverseOrder={false}
+                      toastOptions={{
+                        duration: 2000,
+                        style: { background: '#333', color: '#fff', borderRadius: '10px', padding: '12px 20px' },
+                        success: { duration: 1000, style: { background: '#10B981' } },
+                        error: { duration: 2000, style: { background: '#EF4444' } },
+                      }}
+                    />
+                  </ErrorBoundary>
+                </div>
+              </GoogleMapsBootstrap>
             </CartProvider>
           </CityProvider>
         </SocketProvider>
