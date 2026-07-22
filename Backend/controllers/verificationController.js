@@ -300,14 +300,17 @@ exports.verifyAadhaar = async (req, res) => {
   };
 
   try {
-    const { clientId, otp } = req.body;
+    const { clientId, otp, aadhaarNumber } = req.body;
     if (!clientId || !otp) {
       return res.status(400).json({ success: false, message: 'Client ID and OTP are required' });
     }
+    if (!aadhaarNumber || String(aadhaarNumber).length !== 12 || isNaN(aadhaarNumber)) {
+      return res.status(400).json({ success: false, message: 'Valid 12-digit Aadhaar number is required' });
+    }
 
-    logData.requestPayload = { clientId, otpProvided: true };
+    logData.requestPayload = { clientId, otpProvided: true, aadhaarLast4: String(aadhaarNumber).slice(-4) };
 
-    const cgpeResult = await cgpeService.verifyAadhaarOtp(clientId, otp);
+    const cgpeResult = await cgpeService.verifyAadhaarOtp(clientId, otp, aadhaarNumber);
 
     logData.responsePayload = cgpeResult;
     logData.status = 'success';

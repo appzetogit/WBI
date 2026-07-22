@@ -22,8 +22,12 @@ class CgpeService {
 
   /**
    * Helper to make POST requests to CGPE API
+   * @param {string} endpoint
+   * @param {object} data
+   * @param {{ headerMode?: 'default' | 'kyc-doc' }} [options]
+   *   kyc-doc = official Aadhaar OTP docs (x-api-key + x-api-secret only)
    */
-  async makeRequest(endpoint, data) {
+  async makeRequest(endpoint, data, options = {}) {
     // Strict Validation
     if (endpoint.includes('aadhaar') && data.aadhaarNumber) {
       if (!/^\d{12}$/.test(data.aadhaarNumber)) {
@@ -43,52 +47,60 @@ class CgpeService {
     }
 
     try {
-      // Create HTTPS agent to handle TLS compatibility issues (ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR)
       const httpsAgent = new https.Agent({
-        rejectUnauthorized: true, // Keep SSL verification enabled for security
-        minVersion: 'TLSv1.2',   // Force minimum TLS 1.2 to avoid legacy TLS errors
+        rejectUnauthorized: true,
+        minVersion: 'TLSv1.2',
         maxVersion: 'TLSv1.3'
       });
 
-      const headers = {
-        'Content-Type': 'application/json',
-        'x-merchant-id': this.clientId,
-        'x-api-key': this.apiKey,
-        'x-secret-key': this.clientSecret || '',
-        'x-api-secret': this.clientSecret || ''
-      };
+      const headerMode = options.headerMode || 'default';
+      // Official KYC OTP docs: x-api-key + x-api-secret only (merchantId in body)
+      // DigiLocker / default: also send x-merchant-id + x-secret-key
+      const headers =
+        headerMode === 'kyc-doc'
+          ? {
+              'Content-Type': 'application/json',
+              'x-api-key': this.apiKey,
+              'x-api-secret': this.clientSecret || ''
+            }
+          : {
+              'Content-Type': 'application/json',
+              'x-merchant-id': this.clientId,
+              'x-api-key': this.apiKey,
+              'x-secret-key': this.clientSecret || '',
+              'x-api-secret': this.clientSecret || ''
+            };
 
-      const payload = {
-        ...data
-      };
-
-      const response = await axios.post(`${this.baseUrl}${endpoint}`, payload, { headers, httpsAgent });
+      const response = await axios.post(`${this.baseUrl}${endpoint}`, { ...data }, { headers, httpsAgent });
       
-      // Explicitly check for API-level failures even if HTTP status is 200 OK
       if (response.data && (response.data.status === 'FAILED' || response.data.success === false)) {
         const errorMsg = response.data.message || response.data.error || 'Verification failed at provider end';
         throw new Error(errorMsg);
       }
 
       // #region agent log
-      agentLog('A', 'cgpeService.js:makeRequest:ok', 'CGPE request OK', { endpoint, httpStatus: response.status, hasData: !!response.data });
+      agentLog('A', 'cgpeService.js:makeRequest:ok', 'CGPE request OK', { endpoint, headerMode, httpStatus: response.status, hasData: !!response.data });
       // #endregion
 
       return response.data;
     } catch (error) {
-      // Log full CGPE error response for debugging on production
       console.error('[CGPE_SERVICE_ERROR] Full response:', JSON.stringify(error.response?.data || error.message));
       console.error('[CGPE_SERVICE_ERROR] Status:', error.response?.status);
       console.error('[CGPE_SERVICE_ERROR] Endpoint:', endpoint);
 
       const resData = error.response?.data || {};
-      // Surface IP restriction error clearly
-      if (resData.message && resData.message.toLowerCase().includes('ip not allowed')) {
+      if (resData.message && String(resData.message).toLowerCase().includes('ip not allowed')) {
         throw new Error(`CGPE API Error: Your server IP (${resData.error?.clientIP || 'unknown'}) is not whitelisted. Please add this IP in your CGPE merchant dashboard under IP Whitelist settings.`);
       }
-      const errorMessage = resData.message || resData.error || error.message || 'Verification failed due to invalid details or provider error.';
+      const detail = Array.isArray(resData.error)
+        ? resData.error.filter(Boolean).join('; ')
+        : (typeof resData.error === 'string' ? resData.error : '');
+      const errorMessage =
+        [resData.message, detail].filter(Boolean).join(': ') ||
+        error.message ||
+        'Verification failed due to invalid details or provider error.';
       // #region agent log
-      agentLog('A', 'cgpeService.js:makeRequest:err', 'CGPE request failed', { endpoint, httpStatus: error.response?.status || null, providerMsg: String(errorMessage).slice(0, 120), baseUrl: this.baseUrl });
+      agentLog('A', 'cgpeService.js:makeRequest:err', 'CGPE request failed', { endpoint, headerMode: options.headerMode || 'default', httpStatus: error.response?.status || null, providerMsg: String(errorMessage).slice(0, 160), validationErrors: Array.isArray(resData.error) ? resData.error.slice(0, 5) : undefined, baseUrl: this.baseUrl });
       // #endregion
       throw new Error(`Verification Failed: ${errorMessage} (Status: ${error.response?.status || 'Unknown'})`);
     }
@@ -169,24 +181,35 @@ class CgpeService {
     const num = String(aadhaarNumber);
     const isMock = process.env.USE_MOCK_KYC === 'true' || !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
     // #region agent log
-    agentLog('D', 'cgpeService.js:generateAadhaarOtp:start', 'generateAadhaarOtp start', { baseUrl: this.baseUrl, isMock, aadhaarLast4: num.slice(-4), merchantConfigured: !!this.clientId, runId: 'post-fix' });
+    agentLog('D', 'cgpeService.js:generateAadhaarOtp:start', 'generateAadhaarOtp start', { baseUrl: this.baseUrl, isMock, aadhaarLast4: num.slice(-4), merchantConfigured: !!this.clientId, runId: 'aadhaar-verify' });
     // #endregion
 
-    // Primary: OKYC on verify.cgpey.com (doc /api/kyc/* and /api/v1/*/aadhaar/generate-otp return 404)
+    // verify.cgpey.com: /api/kyc/* = 404; docs.cgpey.com rejects these merchant keys.
+    // Working path: OKYC initiate (delivers UIDAI OTP on production).
     try {
       const result = await this.makeRequest('/api/v1/verify/okyc/initiate', { aadhaarNumber: num });
-      const sessionId = this.extractOkycSessionId(result);
+      // Prefer real sessionId — okyc/verify requires sessionId (not clientId alone)
+      const sessionId =
+        (result?.data?.sessionId && String(result.data.sessionId).trim()) ||
+        (result?.sessionId && String(result.sessionId).trim()) ||
+        this.extractOkycSessionId(result);
       if (!sessionId) {
         const keys = Object.keys(result?.data || result || {});
         console.error('[CGPE] okyc/initiate missing session id keys:', keys);
         // #region agent log
-        agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycNoSession', 'okyc initiate missing session', { keys, runId: 'post-fix' });
+        agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycNoSession', 'okyc initiate missing session', { keys, runId: 'aadhaar-verify' });
         // #endregion
         throw new Error('Aadhaar OTP sent but provider session id missing. Please try Get OTP again.');
       }
       console.log('[CGPE] Aadhaar OTP generated via okyc/initiate session=', sessionId);
       // #region agent log
-      agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycOk', 'okyc initiate succeeded', { flow: 'okyc', hasSession: true, runId: 'post-fix' });
+      agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycOk', 'okyc initiate succeeded', {
+        flow: 'okyc',
+        hasSession: true,
+        sessionPreview: String(sessionId).slice(0, 8) + '…',
+        dataKeys: Object.keys(result?.data || {}),
+        runId: 'aadhaar-verify'
+      });
       // #endregion
       return {
         success: true,
@@ -199,14 +222,16 @@ class CgpeService {
       };
     } catch (okycErr) {
       // #region agent log
-      agentLog('E', 'cgpeService.js:generateAadhaarOtp:okycFail', 'okyc initiate failed', { err: String(okycErr?.message || '').slice(0, 160), runId: 'post-fix' });
+      agentLog('E', 'cgpeService.js:generateAadhaarOtp:okycFail', 'okyc initiate failed', { err: String(okycErr?.message || '').slice(0, 160), runId: 'aadhaar-verify' });
       // #endregion
       throw okycErr;
     }
   }
 
   /**
-   * Verify Aadhaar OTP — OKYC primary (matches generate via okyc/initiate)
+   * Verify Aadhaar OTP via CGPE OKYC.
+   * Runtime-proven required body: { sessionId, otp, aadhaarNumber }
+   * Endpoint: POST /api/v1/verify/okyc/verify (other guessed paths return 404)
    */
   async verifyAadhaarOtp(sessionId, otp, aadhaarNumber) {
     try {
@@ -224,35 +249,43 @@ class CgpeService {
         throw new Error('OTP session expired. Please tap Get OTP again and use the new code.');
       }
 
-      // OKYC verify — same session from okyc/initiate (do not call dead /api/kyc/* paths)
-      const okycPayload = {
-        sessionId: sid,
-        clientId: sid,
-        reference_id: sid,
-        referenceId: sid,
-        requestId: sid,
-        otp: otpStr,
-        aadhaarNumber: aadhaar
-      };
+      const payload = { sessionId: sid, otp: otpStr, aadhaarNumber: aadhaar };
+      // #region agent log
+      agentLog('V1', 'cgpeService.js:verifyAadhaarOtp:call', 'okyc verify exact payload', {
+        endpoint: '/api/v1/verify/okyc/verify',
+        hasSessionId: !!sid,
+        otpLen: otpStr.length,
+        aadhaarLast4: aadhaar.slice(-4),
+        runId: 'aadhaar-verify'
+      });
+      // #endregion
 
       try {
-        const result = await this.makeRequest('/api/v1/verify/okyc/verify', okycPayload);
+        const result = await this.makeRequest('/api/v1/verify/okyc/verify', payload);
         // #region agent log
-        agentLog('B', 'cgpeService.js:verifyAadhaarOtp:okycOk', 'okyc verify succeeded', { runId: 'post-fix' });
+        agentLog('V1', 'cgpeService.js:verifyAadhaarOtp:okycOk', 'okyc verify ok', { runId: 'post-fix' });
         // #endregion
-        console.log('[CGPE] Aadhaar OTP verified via okyc/verify');
         return this.normalizeAadhaarVerifyResult(result, aadhaar);
-      } catch (okycErr) {
+      } catch (err) {
+        const msg = String(err.message || '');
         // #region agent log
-        agentLog('E', 'cgpeService.js:verifyAadhaarOtp:okycFail', 'okyc verify failed', { err: String(okycErr?.message || '').slice(0, 160), runId: 'post-fix' });
+        agentLog('V1', 'cgpeService.js:verifyAadhaarOtp:fail', 'okyc verify failed', { err: msg.slice(0, 180), runId: 'aadhaar-verify' });
         // #endregion
-        const msg = okycErr.message || 'Aadhaar verification failed';
-        if (/validation error/i.test(msg) || /invalid otp/i.test(msg) || /route not found/i.test(msg)) {
-          throw new Error(
+        if (/invalid otp|otp expired|incorrect otp/i.test(msg)) {
+          const e = new Error(
             'Invalid or expired Aadhaar OTP. Tap Get OTP again and enter the latest UIDAI SMS within 2–3 minutes.'
           );
+          e.providerMessage = msg;
+          throw e;
         }
-        throw okycErr;
+        if (/sessionId.*required|aadhaarNumber.*required|validation error/i.test(msg)) {
+          const e = new Error(
+            'Aadhaar OTP verification rejected by provider (missing session fields). Tap Get OTP again, or use DigiLocker.'
+          );
+          e.providerMessage = msg;
+          throw e;
+        }
+        throw err;
       }
     } catch (error) {
       throw error;

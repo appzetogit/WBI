@@ -544,16 +544,25 @@ exports.verifyAadhaar = async (req, res) => {
     if (req.body.entityId) {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_VERIFY_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',runId:'aadhaar-verify',hypothesisId:'V1',location:'kycController.js:verifyAadhaar:catch',message:'verify returning 400',data:{msg:String(error?.message||'').slice(0,180),provider:String(error?.providerMessage||'').slice(0,120),hasClientId:!!req.body?.clientId,otpLen:String(req.body?.otp||'').length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     let message = error.message || 'Aadhaar verification failed';
-    if (/invalid otp|expired aadhaar otp|validation error/i.test(message)) {
+    // Only remap true OTP failures — never remap Route not found / validation wrapper
+    if (/^invalid or expired aadhaar otp/i.test(message) || /^invalid otp/i.test(message)) {
       message =
         'Invalid or expired Aadhaar OTP. Tap Get OTP again, use the latest UIDAI SMS (not phone signup OTP), and verify within a few minutes.';
     } else if (/session expired|session id missing|get otp again/i.test(message)) {
       message = 'OTP session expired. Tap Get OTP again and enter the new code.';
     }
-    // Strip noisy provider wrapper for UI
     message = message.replace(/^Verification Failed:\s*/i, '').replace(/\s*\(Status:\s*\d+\)\s*$/i, '');
-    res.status(400).json({ success: false, message });
+    res.status(400).json({
+      success: false,
+      message,
+      providerMessage: error.providerMessage
+        ? String(error.providerMessage).replace(/^Verification Failed:\s*/i, '').slice(0, 200)
+        : undefined
+    });
   }
 };
 
