@@ -450,8 +450,14 @@ export const engineerAuthService = {
     return response.data;
   },
 
-  validateCoupon: async (code) => {
-    const response = await api.post('/engineer/coupon/validate', { code });
+  validateCoupon: async (payload) => {
+    const body = typeof payload === 'string' ? { code: payload } : payload;
+    const response = await api.post('/engineer/coupon/validate', body);
+    return response.data;
+  },
+
+  getActiveRegistrationOffers: async (params = {}) => {
+    const response = await api.get('/engineer/offers/active', { params });
     return response.data;
   },
 

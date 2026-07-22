@@ -470,9 +470,6 @@ exports.generateAadhaarOtp = async (req, res) => {
     });
   } catch (error) {
     console.error('[KYC] generateAadhaarOtp Error:', error);
-    // #region agent log
-    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',runId:'pre-fix',hypothesisId:'E',location:'kycController.js:generateAadhaarOtp:catch',message:'controller returning 400',data:{msg:String(error?.message||'').slice(0,160),hasEntityId:!!req.body?.entityId},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (req.body.entityId) {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_OTP_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }
@@ -546,9 +543,6 @@ exports.verifyAadhaar = async (req, res) => {
     if (req.body.entityId) {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_VERIFY_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }
-    // #region agent log
-    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',runId:'aadhaar-verify',hypothesisId:'V1',location:'kycController.js:verifyAadhaar:catch',message:'verify returning 400',data:{msg:String(error?.message||'').slice(0,180),provider:String(error?.providerMessage||'').slice(0,120),hasClientId:!!req.body?.clientId,otpLen:String(req.body?.otp||'').length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     let message = error.message || 'Aadhaar verification failed';
     const providerRaw = String(error?.providerMessage || error.message || '');
     if (/not allowed|validation error/i.test(providerRaw) && !/invalid otp/i.test(providerRaw)) {

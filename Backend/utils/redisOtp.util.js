@@ -9,8 +9,8 @@ const { TOKEN_TYPES } = require('./constants'); // Need to ensure constants file
 // Constants if not imported
 const OTP_EXPIRY = parseInt(process.env.OTP_EXPIRY_SECONDS) || 300;
 const MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS) || 3;
-const RATE_LIMIT_COUNT = parseInt(process.env.OTP_RATE_LIMIT) || 100; // Increased for testing
-const RATE_LIMIT_WINDOW = parseInt(process.env.OTP_RATE_WINDOW) || 600;
+const RATE_LIMIT_COUNT = parseInt(process.env.OTP_RATE_LIMIT, 10) || 5;
+const RATE_LIMIT_WINDOW = parseInt(process.env.OTP_RATE_WINDOW, 10) || 3600;
 
 /**
  * Generate 6-digit OTP
@@ -45,7 +45,11 @@ const checkRateLimit = async (phone) => {
   }
   const redis = getRedis();
   if (!isRedisConnected() || !redis) {
-    console.warn('[OTP] Redis down, skipping rate limit check (fail-open)');
+    if (process.env.NODE_ENV === 'production' && process.env.REDIS_ENABLED === 'true') {
+      console.error('[OTP] Redis down — blocking OTP (fail-closed in production)');
+      return false;
+    }
+    console.warn('[OTP] Redis down, skipping rate limit check (dev fail-open)');
     return true;
   }
 
@@ -58,7 +62,7 @@ const checkRateLimit = async (phone) => {
     return current <= RATE_LIMIT_COUNT;
   } catch (err) {
     console.error('[OTP] Rate limit error:', err);
-    return true; // Fail open
+    return process.env.NODE_ENV !== 'production';
   }
 };
 

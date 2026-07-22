@@ -1,5 +1,4 @@
 const EngineerTool = require('../../models/EngineerTool');
-const EngineerCoupon = require('../../models/EngineerCoupon');
 const EngineerRegistrationConfig = require('../../models/EngineerRegistrationConfig');
 
 // --- Engineer Tools Management ---
@@ -44,48 +43,6 @@ const deleteTool = async (req, res) => {
   }
 };
 
-// --- Engineer Coupons Management ---
-
-const getCoupons = async (req, res) => {
-  try {
-    const coupons = await EngineerCoupon.find().sort({ createdAt: -1 });
-    res.status(200).json({ success: true, data: coupons });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to fetch coupons' });
-  }
-};
-
-const createCoupon = async (req, res) => {
-  try {
-    const coupon = await EngineerCoupon.create(req.body);
-    res.status(201).json({ success: true, data: coupon });
-  } catch (error) {
-    if (error.code === 11000) return res.status(400).json({ success: false, message: 'Coupon code already exists' });
-    res.status(500).json({ success: false, message: 'Failed to create coupon' });
-  }
-};
-
-const updateCoupon = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const coupon = await EngineerCoupon.findByIdAndUpdate(id, req.body, { new: true });
-    if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' });
-    res.status(200).json({ success: true, data: coupon });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to update coupon' });
-  }
-};
-
-const deleteCoupon = async (req, res) => {
-  try {
-    const { id } = req.params;
-    await EngineerCoupon.findByIdAndDelete(id);
-    res.status(200).json({ success: true, message: 'Coupon deleted' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Failed to delete coupon' });
-  }
-};
-
 // --- Engineer Registration Config Management ---
 
 const getConfig = async (req, res) => {
@@ -116,6 +73,5 @@ const updateConfig = async (req, res) => {
 
 module.exports = {
   getTools, createTool, updateTool, deleteTool,
-  getCoupons, createCoupon, updateCoupon, deleteCoupon,
   getConfig, updateConfig
 };

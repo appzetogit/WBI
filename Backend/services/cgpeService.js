@@ -1,16 +1,5 @@
 const axios = require('axios');
 const https = require('https');
-const fs = require('fs');
-const path = require('path');
-
-// #region agent log
-const DEBUG_LOG_PATH = path.join(__dirname, '..', '..', '.cursor', 'debug-7d825b.log');
-function agentLog(hypothesisId, location, message, data = {}) {
-  const payload = { sessionId: '7d825b', runId: 'pre-fix', hypothesisId, location, message, data, timestamp: Date.now() };
-  try { fs.appendFileSync(DEBUG_LOG_PATH, JSON.stringify(payload) + '\n'); } catch (_) { /* ignore */ }
-  fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d825b' }, body: JSON.stringify(payload) }).catch(() => {});
-}
-// #endregion
 
 class CgpeService {
   constructor() {
@@ -78,10 +67,6 @@ class CgpeService {
         throw new Error(errorMsg);
       }
 
-      // #region agent log
-      agentLog('A', 'cgpeService.js:makeRequest:ok', 'CGPE request OK', { endpoint, headerMode, httpStatus: response.status, hasData: !!response.data });
-      // #endregion
-
       return response.data;
     } catch (error) {
       console.error('[CGPE_SERVICE_ERROR] Full response:', JSON.stringify(error.response?.data || error.message));
@@ -99,9 +84,6 @@ class CgpeService {
         [resData.message, detail].filter(Boolean).join(': ') ||
         error.message ||
         'Verification failed due to invalid details or provider error.';
-      // #region agent log
-      agentLog('A', 'cgpeService.js:makeRequest:err', 'CGPE request failed', { endpoint, headerMode: options.headerMode || 'default', httpStatus: error.response?.status || null, providerMsg: String(errorMessage).slice(0, 160), validationErrors: Array.isArray(resData.error) ? resData.error.slice(0, 5) : undefined, baseUrl: this.baseUrl });
-      // #endregion
       throw new Error(`Verification Failed: ${errorMessage} (Status: ${error.response?.status || 'Unknown'})`);
     }
   }
@@ -179,10 +161,6 @@ class CgpeService {
 
   async generateAadhaarOtp(aadhaarNumber) {
     const num = String(aadhaarNumber);
-    const isMock = process.env.USE_MOCK_KYC === 'true' || !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
-    // #region agent log
-    agentLog('D', 'cgpeService.js:generateAadhaarOtp:start', 'generateAadhaarOtp start', { baseUrl: this.baseUrl, isMock, aadhaarLast4: num.slice(-4), merchantConfigured: !!this.clientId, runId: 'aadhaar-verify' });
-    // #endregion
 
     // verify.cgpey.com: /api/kyc/* = 404; docs.cgpey.com rejects these merchant keys.
     // Working path: OKYC initiate (delivers UIDAI OTP on production).
@@ -196,21 +174,9 @@ class CgpeService {
       if (!sessionId) {
         const keys = Object.keys(result?.data || result || {});
         console.error('[CGPE] okyc/initiate missing session id keys:', keys);
-        // #region agent log
-        agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycNoSession', 'okyc initiate missing session', { keys, runId: 'aadhaar-verify' });
-        // #endregion
         throw new Error('Aadhaar OTP sent but provider session id missing. Please try Get OTP again.');
       }
       console.log('[CGPE] Aadhaar OTP generated via okyc/initiate session=', sessionId);
-      // #region agent log
-      agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycOk', 'okyc initiate succeeded', {
-        flow: 'okyc',
-        hasSession: true,
-        sessionPreview: String(sessionId).slice(0, 8) + '…',
-        dataKeys: Object.keys(result?.data || {}),
-        runId: 'aadhaar-verify'
-      });
-      // #endregion
       return {
         success: true,
         data: {
@@ -221,9 +187,6 @@ class CgpeService {
         requestId: result.data?.transactionId || result.reference_id || result.data?.referenceId || sessionId
       };
     } catch (okycErr) {
-      // #region agent log
-      agentLog('E', 'cgpeService.js:generateAadhaarOtp:okycFail', 'okyc initiate failed', { err: String(okycErr?.message || '').slice(0, 160), runId: 'aadhaar-verify' });
-      // #endregion
       throw okycErr;
     }
   }
@@ -250,27 +213,12 @@ class CgpeService {
       }
 
       const payload = { sessionId: sid, otp: otpStr, aadhaarNumber: aadhaar };
-      // #region agent log
-      agentLog('V1', 'cgpeService.js:verifyAadhaarOtp:call', 'okyc verify exact payload', {
-        endpoint: '/api/v1/verify/okyc/verify',
-        hasSessionId: !!sid,
-        otpLen: otpStr.length,
-        aadhaarLast4: aadhaar.slice(-4),
-        runId: 'aadhaar-verify'
-      });
-      // #endregion
 
       try {
         const result = await this.makeRequest('/api/v1/verify/okyc/verify', payload);
-        // #region agent log
-        agentLog('V1', 'cgpeService.js:verifyAadhaarOtp:okycOk', 'okyc verify ok', { runId: 'post-fix' });
-        // #endregion
         return this.normalizeAadhaarVerifyResult(result, aadhaar);
       } catch (err) {
         const msg = String(err.message || '');
-        // #region agent log
-        agentLog('V1', 'cgpeService.js:verifyAadhaarOtp:fail', 'okyc verify failed', { err: msg.slice(0, 180), runId: 'aadhaar-verify' });
-        // #endregion
         if (/invalid otp|otp expired|incorrect otp/i.test(msg)) {
           const e = new Error(
             'Invalid or expired Aadhaar OTP. Tap Get OTP again and enter the latest UIDAI SMS within 2–3 minutes.'
@@ -369,9 +317,6 @@ class CgpeService {
    * Headers: x-merchant-id, x-api-key, x-secret-key
    */
   async initiateDigiLocker(mobileNumber, redirectUrl) {
-    // #region agent log
-    agentLog('DL1', 'cgpeService.js:initiateDigiLocker', 'digilocker initiate', { hasMobile: !!mobileNumber, hasRedirect: !!redirectUrl, runId: 'post-fix' });
-    // #endregion
     const result = await this.makeRequest('/api/v1/digilocker/initiate', {
       mobileNumber: String(mobileNumber || '').trim(),
       redirectUrl: String(redirectUrl || '').trim()
@@ -380,14 +325,8 @@ class CgpeService {
     const authUrl = d.authUrl || d.authorizationUrl || d.url || null;
     const recordId = d.recordId || d.transactionId || null;
     if (!authUrl || !recordId) {
-      // #region agent log
-      agentLog('DL1', 'cgpeService.js:initiateDigiLocker:badResp', 'missing authUrl/recordId', { keys: Object.keys(d), runId: 'post-fix' });
-      // #endregion
       throw new Error('DigiLocker initiate failed: authUrl or recordId missing from provider');
     }
-    // #region agent log
-    agentLog('DL1', 'cgpeService.js:initiateDigiLocker:ok', 'digilocker initiate ok', { hasAuthUrl: true, hasRecordId: true, runId: 'post-fix' });
-    // #endregion
     return {
       success: true,
       data: {
@@ -405,9 +344,6 @@ class CgpeService {
    * Callback for DigiLocker OAuth Code — no auth headers (per CGPE docs)
    */
   async callbackDigiLocker(code, state, codeVerifier, recordId) {
-    // #region agent log
-    agentLog('DL2', 'cgpeService.js:callbackDigiLocker', 'digilocker callback', { hasCode: !!code, hasState: !!state, hasVerifier: !!codeVerifier, hasRecordId: !!recordId, runId: 'post-fix' });
-    // #endregion
     const response = await axios.post(
       `${this.baseUrl}/api/v1/digilocker/callback`,
       {
@@ -428,9 +364,6 @@ class CgpeService {
    * Complete DigiLocker OAuth Flow — returns verified Aadhaar KYC
    */
   async completeDigiLocker(recordId) {
-    // #region agent log
-    agentLog('DL3', 'cgpeService.js:completeDigiLocker', 'digilocker complete', { hasRecordId: !!recordId, runId: 'post-fix' });
-    // #endregion
     const result = await this.makeRequest('/api/v1/digilocker/complete', {
       recordId: String(recordId || '').trim()
     });

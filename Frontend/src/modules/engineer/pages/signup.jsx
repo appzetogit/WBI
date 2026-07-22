@@ -90,6 +90,7 @@ export default function EngineerSignup() {
   const [dynamicSteps, setDynamicSteps] = useState([]);
   const [paymentData, setPaymentData] = useState(null);
   const [couponCode, setCouponCode] = useState('');
+  const [registrationOffers, setRegistrationOffers] = useState(null);
   const [isVerifyingCoupon, setIsVerifyingCoupon] = useState(false);
   const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
   // 'selfieUrl' | 'introVideoUrl' | null — tracks which field is uploading
@@ -213,6 +214,31 @@ export default function EngineerSignup() {
   const servicesStep = configMaxStep + 1;
   const additionalDetailsStep = configMaxStep + 2;
   const feeStep = configMaxStep + 3;
+
+  const loadRegistrationOffers = useCallback(async () => {
+    try {
+      const phoneVal = formData.phone || formData.mobile;
+      const res = await engineerAuthService.getActiveRegistrationOffers({
+        engineerType: formData.engineerType || 'freelancer',
+        mobile: phoneVal ? String(phoneVal).replace(/\D/g, '').slice(-10) : undefined
+      });
+      if (res.success) {
+        setRegistrationOffers(res.data);
+        if (res.data?.autoApplyPreview && !paymentData && !isPaymentSuccess) {
+          setPaymentData(res.data.autoApplyPreview);
+          setCouponCode(res.data.autoApplyPreview.couponCode || '');
+        }
+      }
+    } catch {
+      setRegistrationOffers(null);
+    }
+  }, [formData.engineerType, formData.phone, formData.mobile, paymentData, isPaymentSuccess]);
+
+  useEffect(() => {
+    if (currentStep === feeStep && config?.engineerConfig?.joiningFeeEnabled) {
+      loadRegistrationOffers();
+    }
+  }, [currentStep, feeStep, config?.engineerConfig?.joiningFeeEnabled, loadRegistrationOffers]);
   const submitStep = configMaxStep + 4;
   const totalSteps = submitStep;
 
@@ -594,7 +620,13 @@ export default function EngineerSignup() {
     if (!couponCode) return;
     setIsVerifyingCoupon(true);
     try {
-      const res = await engineerAuthService.validateCoupon(couponCode);
+      const phoneVal = formData.phone || formData.mobile;
+      const res = await engineerAuthService.validateCoupon({
+        code: couponCode,
+        engineerType: formData.engineerType,
+        mobile: phoneVal,
+        phone: phoneVal
+      });
       if (res.success) {
         setPaymentData(res.data);
         toast.success(`Coupon applied! You saved ₹${res.data.discountAmount}`);
@@ -1192,19 +1224,36 @@ export default function EngineerSignup() {
                 
                 {config?.engineerConfig?.joiningFeeEnabled ? (
                   <div className="bg-white border rounded-2xl p-6 shadow-sm">
+                    {registrationOffers?.banner && (
+                      <div
+                        className="rounded-xl p-4 mb-5"
+                        style={{
+                          backgroundColor: registrationOffers.banner.backgroundColor || '#4F46E5',
+                          color: registrationOffers.banner.textColor || '#fff'
+                        }}
+                      >
+                        <div className="font-bold text-base">{registrationOffers.banner.title}</div>
+                        {registrationOffers.banner.subtitle && (
+                          <p className="text-sm opacity-90 mt-1">{registrationOffers.banner.subtitle}</p>
+                        )}
+                      </div>
+                    )}
                     {!isPaymentSuccess ? (
                       <>
                         <div className="flex items-center justify-between border-b pb-4 mb-4">
                           <span className="font-semibold text-gray-700">Registration Fee</span>
-                          <span className="text-lg font-bold">₹{config.engineerConfig.joiningFeeAmount}</span>
+                          <span className="text-lg font-bold">
+                            ₹{registrationOffers?.baseAmount ?? config.engineerConfig.joiningFeeAmount}
+                          </span>
                         </div>
                         
+                        {registrationOffers?.showCouponInput ? (
                         <div className="mb-6">
                           <label className="block text-xs font-bold text-gray-600 mb-2 uppercase tracking-wide">Have a coupon code?</label>
                           <div className="flex gap-2">
                             <div className="relative flex-1">
                               <FiTag className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                              <input type="text" value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())} placeholder="ENTER CODE" className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-10 pr-4 font-bold tracking-wide focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5]" disabled={isVerifyingCoupon || paymentData} />
+                              <input type="text" value={couponCode} onChange={(e) => setCouponCode(e.target.value.toUpperCase())} placeholder="ENTER CODE" className="w-full bg-gray-50 border border-gray-200 rounded-xl py-3 pl-10 pr-4 font-bold tracking-wide focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/20 focus:border-[#4F46E5]" disabled={isVerifyingCoupon || !!paymentData} />
                             </div>
                             {!paymentData ? (
                               <button type="button" onClick={applyCoupon} disabled={isVerifyingCoupon || !couponCode} className="px-6 bg-gray-900 text-white font-bold rounded-xl hover:bg-black disabled:opacity-50 transition-colors">
@@ -1216,7 +1265,13 @@ export default function EngineerSignup() {
                               </button>
                             )}
                           </div>
+                          {registrationOffers?.publicCoupons?.length > 0 && (
+                            <p className="text-xs text-gray-500 mt-2">
+                              Available: {registrationOffers.publicCoupons.map((c) => c.code).join(', ')}
+                            </p>
+                          )}
                         </div>
+                        ) : null}
 
                         {paymentData && (
                           <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 text-sm">
@@ -1236,7 +1291,7 @@ export default function EngineerSignup() {
                         )}
 
                         <button type="button" onClick={initPayment} disabled={isSubmitting} className="w-full py-4 bg-[#4F46E5] text-white rounded-xl font-bold shadow-lg shadow-[#4F46E5]/30 hover:bg-[#4338ca] active:scale-[0.98] transition-all disabled:opacity-70">
-                          {isSubmitting ? 'Processing...' : `Pay ₹${paymentData ? paymentData.finalAmount : config.engineerConfig.joiningFeeAmount} via Razorpay`}
+                          {isSubmitting ? 'Processing...' : `Pay ₹${paymentData ? paymentData.finalAmount : (registrationOffers?.baseAmount ?? config.engineerConfig.joiningFeeAmount)} via Razorpay`}
                         </button>
                       </>
                     ) : (

@@ -9,6 +9,8 @@ const {
 } = require('../../controllers/adminControllers/adminAuthController');
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isAdmin } = require('../../middleware/roleMiddleware');
+const rateLimiter = require('../../middleware/rateLimiter');
+const { loginLimiter } = rateLimiter;
 
 // Validation rules
 const loginValidation = [
@@ -17,7 +19,7 @@ const loginValidation = [
 ];
 
 // Routes
-router.post('/login', loginValidation, login);
+router.post('/login', loginLimiter, loginValidation, login);
 router.post('/logout', authenticate, isAdmin, logout);
 router.put('/profile', authenticate, isAdmin, updateProfile);
 router.get('/profile', authenticate, isAdmin, getProfile);

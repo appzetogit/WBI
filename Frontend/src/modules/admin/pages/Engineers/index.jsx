@@ -8,6 +8,7 @@ import EngineerJobs from './EngineerJobs';
 import EngineerAnalytics from './EngineerAnalytics';
 import EngineerPayments from './EngineerPayments';
 import EngineerVerifications from './EngineerVerifications';
+import EngineerCoupons from './EngineerCoupons';
 import AdminHubTabs from '../../components/layout/AdminHubTabs';
 
 const ENGINEER_TABS = [
@@ -15,6 +16,7 @@ const ENGINEER_TABS = [
   { to: 'jobs', label: 'Jobs' },
   { to: 'analytics', label: 'Analytics' },
   { to: 'payments', label: 'Payments' },
+  { to: 'coupons', label: 'Coupons & Offers' },
   { to: 'verifications', label: 'Verification' }
 ];
 
@@ -37,6 +39,7 @@ const Engineers = () => {
           <Route path="jobs" element={<EngineerJobs />} />
           <Route path="analytics" element={<EngineerAnalytics />} />
           <Route path="payments" element={<EngineerPayments />} />
+          <Route path="coupons" element={<EngineerCoupons />} />
           <Route path="verifications" element={<EngineerVerifications />} />
         </Routes>
       </motion.div>

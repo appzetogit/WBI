@@ -1,23 +1,21 @@
 const crypto = require('crypto');
-const EngineerCoupon = require('../../models/EngineerCoupon');
 const EngineerRegistrationConfig = require('../../models/EngineerRegistrationConfig');
 const EngineerRegistrationDraft = require('../../models/EngineerRegistrationDraft');
 const EngineerPayment = require('../../models/EngineerPayment');
 const razorpayService = require('../../services/razorpayService');
-
-const markCouponUsed = async (couponCode) => {
-  if (!couponCode) return;
-  await EngineerCoupon.findOneAndUpdate(
-    { code: String(couponCode).toUpperCase(), isActive: true },
-    { $inc: { usedCount: 1 } }
-  );
-};
+const {
+  validateCouponForRegistration,
+  getJoiningFeeBaseAmount,
+  redeemCouponOnPaid,
+  REGISTRATION_TYPE
+} = require('../../services/engineerCouponService');
 
 const markDraftAndPaymentPaid = async ({
   draft,
   orderId,
   paymentId,
-  signature = null
+  signature = null,
+  req = null
 }) => {
   const wasUnpaid = draft.joiningFeeStatus !== 'paid';
 
@@ -63,78 +61,18 @@ const markDraftAndPaymentPaid = async ({
 
   // Increment coupon only on first successful transition to paid
   if (wasUnpaid && draft.couponCode) {
-    await markCouponUsed(draft.couponCode);
+    await redeemCouponOnPaid(draft, { orderId, paymentId, req });
   }
 
   return payment;
 };
 
 /**
- * Validate a coupon code during registration
+ * @deprecated Use engineerOffersController.validateCoupon — kept for route compatibility
  */
 const validateCoupon = async (req, res) => {
-  try {
-    const { code } = req.body;
-
-    if (!code) {
-      return res.status(400).json({ success: false, message: 'Coupon code is required' });
-    }
-
-    const coupon = await EngineerCoupon.findOne({ code: code.toUpperCase(), isActive: true });
-
-    if (!coupon) {
-      return res.status(404).json({ success: false, message: 'Invalid or inactive coupon code' });
-    }
-
-    const now = new Date();
-    if (coupon.validFrom && now < coupon.validFrom) {
-      return res.status(400).json({ success: false, message: 'Coupon is not yet valid' });
-    }
-    if (coupon.validTill && now > coupon.validTill) {
-      return res.status(400).json({ success: false, message: 'Coupon has expired' });
-    }
-
-    if (coupon.usageLimit > 0 && coupon.usedCount >= coupon.usageLimit) {
-      return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
-    }
-
-    const config = await EngineerRegistrationConfig.findOne();
-    const joiningFeeAmount = config?.joiningFeeAmount || 249;
-
-    if (joiningFeeAmount < coupon.minAmount) {
-      return res.status(400).json({ success: false, message: `Coupon requires a minimum amount of ${coupon.minAmount}` });
-    }
-
-    let discountAmount = 0;
-    if (coupon.discountType === 'flat') {
-      discountAmount = coupon.discountValue;
-    } else if (coupon.discountType === 'percentage') {
-      discountAmount = (joiningFeeAmount * coupon.discountValue) / 100;
-      if (coupon.maxDiscount > 0 && discountAmount > coupon.maxDiscount) {
-        discountAmount = coupon.maxDiscount;
-      }
-    }
-
-    if (discountAmount > joiningFeeAmount) {
-      discountAmount = joiningFeeAmount;
-    }
-
-    const finalAmount = joiningFeeAmount - discountAmount;
-
-    res.status(200).json({
-      success: true,
-      message: 'Coupon applied successfully',
-      data: {
-        originalAmount: joiningFeeAmount,
-        discountAmount,
-        finalAmount,
-        couponCode: coupon.code
-      }
-    });
-  } catch (error) {
-    console.error('Validate coupon error:', error);
-    res.status(500).json({ success: false, message: 'Failed to validate coupon' });
-  }
+  const engineerOffersController = require('./engineerOffersController');
+  return engineerOffersController.validateCoupon(req, res);
 };
 
 /**
@@ -247,41 +185,35 @@ const createJoiningFeeOrder = async (req, res) => {
       skipFee = true;
     }
 
-    const joiningFeeAmount = config?.joiningFeeAmount || 249;
+    const joiningFeeAmount = await getJoiningFeeBaseAmount();
     let discountAmount = 0;
     let finalAmount = skipFee ? 0 : joiningFeeAmount;
+    let appliedCouponCode = '';
 
     if (couponCode && !skipFee) {
-      const coupon = await EngineerCoupon.findOne({ code: couponCode.toUpperCase(), isActive: true });
-      if (!coupon) {
-        return res.status(404).json({ success: false, message: 'Coupon not found' });
+      const validation = await validateCouponForRegistration({
+        code: couponCode,
+        engineerType: type,
+        mobile: finalMobile,
+        registrationType: REGISTRATION_TYPE,
+        location: {
+          city: req.body.city || draft.city,
+          state: req.body.state || draft.state
+        },
+        baseAmount: joiningFeeAmount
+      });
+      if (!validation.ok) {
+        return res.status(validation.status || 400).json({ success: false, message: validation.message });
       }
-
-      const now = new Date();
-      const isValid = (!coupon.validFrom || now >= coupon.validFrom) &&
-        (!coupon.validTill || now <= coupon.validTill) &&
-        (coupon.usageLimit === 0 || coupon.usedCount < coupon.usageLimit);
-
-      if (!isValid || joiningFeeAmount < coupon.minAmount) {
-        return res.status(400).json({ success: false, message: 'Invalid or expired coupon provided' });
-      }
-
-      if (coupon.discountType === 'flat') {
-        discountAmount = coupon.discountValue;
-      } else if (coupon.discountType === 'percentage') {
-        discountAmount = (joiningFeeAmount * coupon.discountValue) / 100;
-        if (coupon.maxDiscount > 0 && discountAmount > coupon.maxDiscount) {
-          discountAmount = coupon.maxDiscount;
-        }
-      }
-      if (discountAmount > joiningFeeAmount) discountAmount = joiningFeeAmount;
-      finalAmount = joiningFeeAmount - discountAmount;
+      discountAmount = validation.data.discountAmount;
+      finalAmount = validation.data.finalAmount;
+      appliedCouponCode = validation.data.couponCode;
     }
 
     draft.joiningFeeAmount = joiningFeeAmount;
     draft.joiningFeeDiscount = discountAmount;
     draft.joiningFeeFinalAmount = finalAmount;
-    draft.couponCode = couponCode || '';
+    draft.couponCode = appliedCouponCode || couponCode || '';
 
     if (finalAmount <= 0) {
       draft.joiningFeeStatus = 'skipped';
@@ -303,7 +235,9 @@ const createJoiningFeeOrder = async (req, res) => {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
 
-      if (couponCode) await markCouponUsed(couponCode);
+      if (appliedCouponCode || couponCode) {
+        await redeemCouponOnPaid(draft, { orderId: `skipped_${draft._id}`, req });
+      }
 
       return res.status(200).json({
         success: true,
@@ -335,11 +269,12 @@ const createJoiningFeeOrder = async (req, res) => {
             ['captured', 'authorized'].includes(p.status)
           );
           if (captured?.id) {
-            await markDraftAndPaymentPaid({
-              draft,
-              orderId: rzOrder.id,
-              paymentId: captured.id
-            });
+        await markDraftAndPaymentPaid({
+          draft,
+          orderId: rzOrder.id,
+          paymentId: captured.id,
+          req
+        });
             return res.status(200).json({
               success: true,
               paymentRequired: false,
@@ -533,7 +468,8 @@ const verifyJoiningFeePayment = async (req, res) => {
       draft,
       orderId: razorpay_order_id,
       paymentId: razorpay_payment_id,
-      signature: razorpay_signature
+      signature: razorpay_signature,
+      req
     });
 
     res.status(200).json({
@@ -613,7 +549,8 @@ const joiningFeeWebhook = async (req, res) => {
         await markDraftAndPaymentPaid({
           draft,
           orderId,
-          paymentId
+          paymentId,
+          req
         });
       }
     }

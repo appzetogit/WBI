@@ -1,9 +1,10 @@
 const rateLimit = require('express-rate-limit');
 
+const isProd = process.env.NODE_ENV === 'production';
+
 /**
- * Build a Redis-backed store when Redis is enabled; otherwise undefined
- * (express-rate-limit falls back to in-memory — fine for single-process/dev).
- * passOnStoreError keeps traffic flowing if Redis blips under PM2 cluster load.
+ * Redis-backed store when REDIS_ENABLED=true.
+ * In production, do not fail open on Redis errors (enterprise counters must be shared).
  */
 const createRedisStore = (prefix) => {
   if (process.env.REDIS_ENABLED !== 'true') return undefined;
@@ -31,25 +32,37 @@ const createRedisStore = (prefix) => {
 const baseOpts = {
   standardHeaders: true,
   legacyHeaders: false,
-  passOnStoreError: true
+  passOnStoreError: !isProd
 };
 
-/**
- * General rate limiter (applied globally in server.js)
- * Default 300 req/min/IP — override via RATE_LIMIT_* env
- */
+/** General API — default 100 req/min/IP (Phase 9) */
 const rateLimiter = rateLimit({
   ...baseOpts,
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000,
-  max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 300,
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
   message: { success: false, message: 'Too many requests from this IP, please try again later.' },
   store: createRedisStore('global')
 });
 
-/**
- * Verification limiter — PAN / Aadhaar / Bank / Selfie / DigiLocker
- * Max 5 requests per 15 minutes per IP
- */
+/** Admin APIs — 200 req/min/IP */
+const adminApiLimiter = rateLimit({
+  ...baseOpts,
+  windowMs: 60 * 1000,
+  max: parseInt(process.env.ADMIN_RATE_LIMIT_MAX, 10) || 200,
+  message: { success: false, message: 'Too many admin requests. Please slow down.' },
+  store: createRedisStore('admin'),
+  skip: (req) => req.path.startsWith('/auth')
+});
+
+/** Login — 10 req/min/IP */
+const loginLimiter = rateLimit({
+  ...baseOpts,
+  windowMs: 60 * 1000,
+  max: parseInt(process.env.LOGIN_RATE_LIMIT_MAX, 10) || 10,
+  message: { success: false, message: 'Too many login attempts. Please try again in a minute.' },
+  store: createRedisStore('login')
+});
+
 const verificationLimiter = rateLimit({
   ...baseOpts,
   windowMs: 15 * 60 * 1000,
@@ -59,22 +72,15 @@ const verificationLimiter = rateLimit({
   store: createRedisStore('verify')
 });
 
-/**
- * OTP limiter — Send OTP endpoint
- * Max 3 requests per 10 minutes per IP (prevents OTP spam)
- */
+/** OTP HTTP — 5 req/hour/IP (Phase 9) */
 const otpLimiter = rateLimit({
   ...baseOpts,
-  windowMs: 10 * 60 * 1000,
-  max: 3,
-  message: { success: false, message: 'Too many OTP requests. Please wait 10 minutes before requesting again.' },
+  windowMs: parseInt(process.env.OTP_RATE_LIMIT_WINDOW_MS, 10) || 60 * 60 * 1000,
+  max: parseInt(process.env.OTP_HTTP_RATE_LIMIT_MAX, 10) || 5,
+  message: { success: false, message: 'Too many OTP requests. Please try again later.' },
   store: createRedisStore('otp')
 });
 
-/**
- * Joining fee / payment order creation limiter
- * Max 5 payment order creations per 10 minutes per IP
- */
 const paymentLimiter = rateLimit({
   ...baseOpts,
   windowMs: 10 * 60 * 1000,
@@ -83,10 +89,6 @@ const paymentLimiter = rateLimit({
   store: createRedisStore('pay')
 });
 
-/**
- * Payment verify limiter (separate from create-order)
- * Prevents verify being blocked after user retries create-order
- */
 const paymentVerifyLimiter = rateLimit({
   ...baseOpts,
   windowMs: 10 * 60 * 1000,
@@ -95,22 +97,15 @@ const paymentVerifyLimiter = rateLimit({
   store: createRedisStore('pay-verify')
 });
 
-/**
- * Registration / signup limiter
- * Max 5 registration attempts per 30 minutes per IP
- */
+/** Registration — 5 req/min/IP (Phase 9) */
 const registrationLimiter = rateLimit({
   ...baseOpts,
-  windowMs: 30 * 60 * 1000,
-  max: 5,
-  message: { success: false, message: 'Too many registration attempts from this device. Please try again in 30 minutes.' },
+  windowMs: 60 * 1000,
+  max: parseInt(process.env.REGISTRATION_RATE_LIMIT_MAX, 10) || 5,
+  message: { success: false, message: 'Too many registration attempts from this device. Please try again shortly.' },
   store: createRedisStore('register')
 });
 
-/**
- * Strict API limiter for sensitive endpoints (PAN, Aadhaar lookup, login)
- * Max 3 requests per 10 seconds — prevents rapid-fire duplicate clicks
- */
 const strictApiLimiter = rateLimit({
   ...baseOpts,
   windowMs: 10 * 1000,
@@ -119,10 +114,6 @@ const strictApiLimiter = rateLimit({
   store: createRedisStore('strict')
 });
 
-/**
- * Public vendor company code validation (brute-force target)
- * IP soft cap — fine-grained IP+session failed-attempt check is in the controller
- */
 const vendorCodeValidateLimiter = rateLimit({
   ...baseOpts,
   windowMs: 10 * 60 * 1000,
@@ -135,10 +126,6 @@ const vendorCodeValidateLimiter = rateLimit({
   store: createRedisStore('vendor-code')
 });
 
-/**
- * Authenticated engineer read/list APIs (dashboard, jobs, B2B, ops)
- * Soft cap per IP so a stuck client cannot hammer Mongo under cluster mode
- */
 const engineerApiLimiter = rateLimit({
   ...baseOpts,
   windowMs: parseInt(process.env.ENGINEER_API_RATE_WINDOW_MS, 10) || 60 * 1000,
@@ -147,9 +134,6 @@ const engineerApiLimiter = rateLimit({
   store: createRedisStore('eng-api')
 });
 
-/**
- * Engineer OTP resend / sensitive job mutations
- */
 const engineerActionLimiter = rateLimit({
   ...baseOpts,
   windowMs: 60 * 1000,
@@ -158,7 +142,6 @@ const engineerActionLimiter = rateLimit({
   store: createRedisStore('eng-action')
 });
 
-// Attach all limiters to main export for convenience
 rateLimiter.verificationLimiter = verificationLimiter;
 rateLimiter.otpLimiter = otpLimiter;
 rateLimiter.paymentLimiter = paymentLimiter;
@@ -168,5 +151,7 @@ rateLimiter.strictApiLimiter = strictApiLimiter;
 rateLimiter.vendorCodeValidateLimiter = vendorCodeValidateLimiter;
 rateLimiter.engineerApiLimiter = engineerApiLimiter;
 rateLimiter.engineerActionLimiter = engineerActionLimiter;
+rateLimiter.loginLimiter = loginLimiter;
+rateLimiter.adminApiLimiter = adminApiLimiter;
 
 module.exports = rateLimiter;

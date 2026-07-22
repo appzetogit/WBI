@@ -26,6 +26,7 @@ const path = require('path');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const rateLimiter = require('./middleware/rateLimiter');
+const requestContext = require('./middleware/requestContext');
 const mongoSanitize = require('express-mongo-sanitize');
 
 // Load environment variables
@@ -53,6 +54,7 @@ require('./queues/registrationQueue');
 // Initialize Express app
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (Nginx/ALB) for express-rate-limit
+app.use(requestContext);
 
 // Security middleware
 app.use(helmet({
@@ -149,31 +151,32 @@ app.use(mongoSanitize());
 // app.use(express.json({ limit: "20mb" })); // REMOVED redundant
 // app.use(express.urlencoded({ extended: true, limit: "20mb" })); // REMOVED redundant
 
-// DEBUG: Log Booking Request Body
-app.use('/api/users/bookings', (req, res, next) => {
-  if (req.method === 'POST') {
-    console.log('DEBUG: POST /api/users/bookings BODY:', JSON.stringify(req.body, null, 2));
-  }
-  next();
-});
+// DEBUG: Log Booking Request Body (development only)
+if (process.env.NODE_ENV !== 'production') {
+  app.use('/api/users/bookings', (req, res, next) => {
+    if (req.method === 'POST') {
+      console.log('DEBUG: POST /api/users/bookings BODY:', JSON.stringify(req.body, null, 2));
+    }
+    next();
+  });
+}
 
-// DEBUG: Log B2B Upload request and response to upload_debug.log
-app.use((req, res, next) => {
-  if (req.path.includes('/b2b/documents/upload')) {
-    const fs = require('fs');
-    const path = require('path');
-    const logFile = path.join(__dirname, 'upload_debug.log');
-    
-    fs.appendFileSync(logFile, `[${new Date().toISOString()}] Incoming request: method=${req.method}, headers=${JSON.stringify(req.headers)}\n`);
-
-    const originalJson = res.json;
-    res.json = function (body) {
-      fs.appendFileSync(logFile, `[${new Date().toISOString()}] Response sent: status=${res.statusCode}, body=${JSON.stringify(body)}\n`);
-      return originalJson.apply(this, arguments);
-    };
-  }
-  next();
-});
+// DEBUG: B2B upload trace (development only)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    if (req.path.includes('/b2b/documents/upload')) {
+      const fs = require('fs');
+      const logFile = path.join(__dirname, 'upload_debug.log');
+      fs.appendFileSync(logFile, `[${new Date().toISOString()}] Incoming request: method=${req.method}\n`);
+      const originalJson = res.json;
+      res.json = function (body) {
+        fs.appendFileSync(logFile, `[${new Date().toISOString()}] Response sent: status=${res.statusCode}\n`);
+        return originalJson.apply(this, arguments);
+      };
+    }
+    next();
+  });
+}
 // (Old Vendor Register Logger Removed)
 
 
@@ -193,17 +196,11 @@ app.get('/health', (req, res) => {
   const mongoose = require('mongoose');
   const { isRedisConnected } = require('./services/redisService');
   const {
-    TASKY_REGISTRATION_OTP_SMS_TEMPLATE,
     TASKY_DLT_TEMPLATE_ID,
     REGISTRATION_SMS_TEMPLATE_VERSION
   } = require('./services/smsService');
-  const { getBypassPhones, getBypassOtp } = require('./utils/otpBypass.util');
   const dbOk = mongoose.connection.readyState === 1;
-  const smsSender =
-    process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
-    process.env.SMS_INDIA_HUB_SENDER_ID ||
-    'WBINFS';
-  res.status(200).json({
+  const payload = {
     success: true,
     message: 'WBI API is running',
     uptime: process.uptime(),
@@ -213,26 +210,26 @@ app.get('/health', (req, res) => {
       redis: process.env.REDIS_ENABLED === 'true'
         ? (isRedisConnected() ? 'ok' : 'degraded')
         : 'disabled'
-    },
-    smsRegistrationOtp: {
+    }
+  };
+  if (process.env.NODE_ENV !== 'production') {
+    const smsSender =
+      process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
+      process.env.SMS_INDIA_HUB_SENDER_ID ||
+      'WBINFS';
+    payload.smsRegistrationOtp = {
       templateVersion: REGISTRATION_SMS_TEMPLATE_VERSION,
       dltTemplateId:
         process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || TASKY_DLT_TEMPLATE_ID,
-      bodyPreview: TASKY_REGISTRATION_OTP_SMS_TEMPLATE('######'),
       senderId: smsSender,
-      apiKeyConfigured: Boolean(process.env.SMS_INDIA_HUB_API_KEY),
-      entityIdConfigured: Boolean(process.env.SMS_INDIA_HUB_DLT_ENTITY_ID)
-    },
-    kycAadhaarOtp: {
+      apiKeyConfigured: Boolean(process.env.SMS_INDIA_HUB_API_KEY)
+    };
+    payload.kycAadhaarOtp = {
       serverSessionCache: require('./constants/kycAadhaarBuild').KYC_AADHAAR_BUILD,
       cgpeApiConfigured: Boolean(process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY)
-    },
-    otpBypass: {
-      phones: getBypassPhones(),
-      codeLength: getBypassOtp().length,
-      smsSkipped: true
-    }
-  });
+    };
+  }
+  res.status(200).json(payload);
 });
 
 // Quick Redis Test Route — disabled in production (no public probe surface)
@@ -403,6 +400,7 @@ app.use('/api/b2b/support', require('./routes/b2b-routes/support.routes'));
 app.use('/api/b2b/users', require('./routes/b2b-routes/users.routes'));
 // Admin Auth routes (mounted first to prevent generic /api/admin middleware interception)
 app.use('/api/admin/auth', require('./routes/admin-routes/adminAuth.routes'));
+app.use('/api/admin', rateLimiter.adminApiLimiter);
 app.use('/api/admin', require('./routes/admin-routes/b2bManagement.routes'));
 app.use('/api/admin/b2b-onboarding', require('./routes/admin-routes/b2bEnterpriseOnboarding.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bBulkJobAdmin.routes'));
@@ -627,6 +625,9 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const seedSchedulingConfig = require('./services/seedSchedulingConfig');
         seedSchedulingConfig().catch(err => console.error('[Server] Seeding failed:', err));
 
+        const { isClusterLeader } = require('./utils/clusterLeader');
+
+        if (isClusterLeader()) {
         // Initialize Booking Scheduler for Wave-Based Alerting
         const { initializeScheduler } = require('./services/bookingScheduler');
         initializeScheduler(getIO());
@@ -650,12 +651,16 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const { startPaymentExpiryScheduler } = require('./services/paymentExpiryScheduler');
         startPaymentExpiryScheduler();
         console.log('[Server] Payment Expiry Scheduler initialized');
+        } else {
+          console.log('[Server] Skipping in-process schedulers on PM2 worker', process.env.NODE_APP_INSTANCE);
+        }
 
         // Initialize BullMQ Workers for Security Solutions Flow
         require('./jobs/vendorMatchingJob');
         require('./jobs/projectAssignmentJob');
         require('./jobs/engineerAssignmentJob');
         require('./jobs/slaMonitorJob');
+        require('./jobs/bookingDispatchQueue');
         console.log('[Server] BullMQ Workers initialized');
 
         // Initialize BullMQ Workers for B2B Bulk Uploads

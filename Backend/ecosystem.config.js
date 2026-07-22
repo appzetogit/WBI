@@ -29,11 +29,16 @@ module.exports = {
       },
       env_production: {
         NODE_ENV: 'production',
-        // Ensure these are set in the process environment / .env on the host:
-        // REDIS_ENABLED=true
-        // REDIS_URL=redis://...
-        // RATE_LIMIT_MAX=300
-        // ENGINEER_API_RATE_MAX=120
+        REDIS_ENABLED: 'true',
+        RATE_LIMIT_MAX: '100',
+        ADMIN_RATE_LIMIT_MAX: '200',
+        LOGIN_RATE_LIMIT_MAX: '10',
+        REGISTRATION_RATE_LIMIT_MAX: '5',
+        OTP_HTTP_RATE_LIMIT_MAX: '5',
+        OTP_RATE_LIMIT: '5',
+        OTP_RATE_WINDOW: '3600',
+        MONGODB_MAX_POOL_SIZE: '25',
+        REQUEST_LOG_ENABLED: 'true'
       }
     }
   ]

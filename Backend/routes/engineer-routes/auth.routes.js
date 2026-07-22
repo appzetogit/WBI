@@ -55,13 +55,13 @@ const loginValidation = [
 router.post('/send-otp', idempotency, otpLimiter, sendOTPValidation, sendOTP);
 
 // LAYER 3: Login verify — max 3 per 10 seconds (rapid-fire click protection)
-router.post('/verify-login', idempotency, strictApiLimiter, verifyLoginValidation, verifyLogin);
+router.post('/verify-login', idempotency, loginLimiter, verifyLoginValidation, verifyLogin);
 
-// LAYER 3: Registration — max 5 per 30 minutes
+// LAYER 3: Registration — max 5 per minute
 router.post('/register', idempotency, registrationLimiter, registerValidation, register);
 router.post('/register-company', registrationLimiter, registerCompany);
 
-router.post('/login', strictApiLimiter, loginValidation, login);
+router.post('/login', loginLimiter, loginValidation, login);
 router.post('/refresh-token', refreshToken);
 router.get('/config/registration', getRegistrationConfig);
 

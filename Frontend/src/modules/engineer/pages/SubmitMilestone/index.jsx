@@ -25,7 +25,7 @@ const SubmitMilestone = () => {
   const fetchMilestoneDetails = async () => {
     try {
       setLoading(true);
-      const res = await api.get(`/api/workers/projects/${projectId}/milestones/${milestoneId}`);
+      const res = await api.get(`/engineers/projects/${projectId}/milestones/${milestoneId}`);
       if (res.data.success) {
         const ms = res.data.data;
         if (!['Pending', 'In Progress', 'Rejected'].includes(ms.status)) {
@@ -91,7 +91,7 @@ const SubmitMilestone = () => {
         attachments: files
       };
 
-      const res = await api.post(`/api/workers/projects/${projectId}/milestones/${milestoneId}/submit`, payload);
+      const res = await api.post(`/engineers/projects/${projectId}/milestones/${milestoneId}/submit`, payload);
       
       if (res.data.success) {
         toast.success('Milestone submitted for review!');

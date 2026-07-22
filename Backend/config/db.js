@@ -28,8 +28,8 @@ const connectDB = async () => {
         socketTimeoutMS: 45000,           // Close sockets after 45s of inactivity
         connectTimeoutMS: 30000,          // TCP connection timeout
         heartbeatFrequencyMS: 10000,      // How often to check server health
-        maxPoolSize: 100,                 // Max simultaneous connections (scaled for 50k users)
-        minPoolSize: 10,                  // Keep at least 10 connections warm
+        maxPoolSize: parseInt(process.env.MONGODB_MAX_POOL_SIZE, 10) || 25,
+        minPoolSize: parseInt(process.env.MONGODB_MIN_POOL_SIZE, 10) || 5,
         retryWrites: true,
         w: 'majority',
         readPreference: 'secondaryPreferred', // Offload read operations to Replicas

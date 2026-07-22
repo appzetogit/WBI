@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const rateLimiter = require('../../middleware/rateLimiter');
+const { registrationLimiter, loginLimiter } = rateLimiter;
 const { uploadGenericFile, handleMulterError } = require('../../middleware/uploadMiddleware');
 const { authenticate } = require('../../middleware/authMiddleware');
 const {
@@ -13,8 +15,8 @@ const {
 } = require('../../controllers/b2bControllers/b2bAuthController');
 
 // Public auth routes
-router.post('/register', registerCompany);
-router.post('/login', loginCompany);
+router.post('/register', registrationLimiter, registerCompany);
+router.post('/login', loginLimiter, loginCompany);
 router.post('/refresh-token', refreshToken);
 
 // Document upload route - Public since it's used during the register form wizard before submission!

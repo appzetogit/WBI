@@ -4,26 +4,31 @@ const { authenticate } = require('../../middleware/authMiddleware');
 const { isAdmin } = require('../../middleware/roleMiddleware');
 const {
   getTools, createTool, updateTool, deleteTool,
-  getCoupons, createCoupon, updateCoupon, deleteCoupon,
   getConfig, updateConfig
 } = require('../../controllers/adminControllers/adminEngineerConfigController');
+const couponAdmin = require('../../controllers/adminControllers/adminEngineerCouponController');
 
-// All routes require authentication and admin role
 router.use(authenticate, isAdmin);
 
-// Engineer Tools
 router.get('/engineer-tools', getTools);
 router.post('/engineer-tools', createTool);
 router.patch('/engineer-tools/:id', updateTool);
 router.delete('/engineer-tools/:id', deleteTool);
 
-// Engineer Coupons
-router.get('/engineer-coupons', getCoupons);
-router.post('/engineer-coupons', createCoupon);
-router.patch('/engineer-coupons/:id', updateCoupon);
-router.delete('/engineer-coupons/:id', deleteCoupon);
+router.get('/engineer-coupons', couponAdmin.listCoupons);
+router.post('/engineer-coupons', couponAdmin.createCoupon);
+router.patch('/engineer-coupons/:id', couponAdmin.updateCoupon);
+router.delete('/engineer-coupons/:id', couponAdmin.deleteCoupon);
+router.patch('/engineer-coupons/:id/toggle', couponAdmin.toggleCoupon);
 
-// Engineer Registration Config
+router.get('/engineer-offer-banners', couponAdmin.listBanners);
+router.post('/engineer-offer-banners', couponAdmin.createBanner);
+router.patch('/engineer-offer-banners/:id', couponAdmin.updateBanner);
+router.delete('/engineer-offer-banners/:id', couponAdmin.deleteBanner);
+
+router.get('/engineer-coupon-analytics', couponAdmin.getAnalytics);
+router.get('/engineer-coupon-redemptions/export', couponAdmin.exportRedemptions);
+
 router.get('/engineer-registration-config', getConfig);
 router.patch('/engineer-registration-config', updateConfig);
 

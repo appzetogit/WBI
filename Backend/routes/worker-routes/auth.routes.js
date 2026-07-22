@@ -11,6 +11,8 @@ const {
 } = require('../../controllers/workerControllers/workerAuthController');
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isWorker } = require('../../middleware/roleMiddleware');
+const rateLimiter = require('../../middleware/rateLimiter');
+const { otpLimiter, registrationLimiter, loginLimiter } = rateLimiter;
 const { getRegistrationConfig } = require('../../controllers/workerControllers/workerConfigController');
 
 // Validation rules
@@ -37,10 +39,10 @@ const loginValidation = [
 ];
 
 // Routes
-router.post('/send-otp', sendOTPValidation, sendOTP);
-router.post('/verify-login', verifyLoginValidation, verifyLogin); // New Unified Entry
-router.post('/register', registerValidation, register);
-router.post('/login', loginValidation, login);
+router.post('/send-otp', otpLimiter, sendOTPValidation, sendOTP);
+router.post('/verify-login', loginLimiter, verifyLoginValidation, verifyLogin);
+router.post('/register', registrationLimiter, registerValidation, register);
+router.post('/login', loginLimiter, loginValidation, login);
 router.post('/refresh-token', refreshToken);
 router.get('/config/registration', getRegistrationConfig); // Added config route
 router.post('/logout', authenticate, isWorker, logout);

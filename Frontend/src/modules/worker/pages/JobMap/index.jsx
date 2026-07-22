@@ -329,29 +329,6 @@ const JobMap = () => {
     };
   }, [currentLocation]);
 
-  // Sync Location to Backend (Periodic)
-  useEffect(() => {
-    if (socket && id) {
-      socket.emit('join_tracking', id);
-    }
-  }, [socket, id]);
-
-  useEffect(() => {
-    if (currentLocation && socket && id) {
-      const syncInterval = setInterval(() => {
-        if (currentLocation.lat && currentLocation.lng) {
-          socket.emit('update_location', {
-            bookingId: id,
-            lat: currentLocation.lat,
-            lng: currentLocation.lng
-          });
-        }
-      }, 5000);
-
-      return () => clearInterval(syncInterval);
-    }
-  }, [currentLocation, socket, id]);
-
   const prevLocationRef = useRef(null);
 
   const directionsCalculatedRef = useRef(false);
