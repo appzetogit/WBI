@@ -4,14 +4,27 @@ const EngineerOfferBanner = require('../models/EngineerOfferBanner');
 const EngineerRegistrationConfig = require('../models/EngineerRegistrationConfig');
 
 const REGISTRATION_TYPE = 'engineer_joining_fee';
+const IST_TZ = 'Asia/Kolkata';
+
+const toIstDateKey = (d) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: IST_TZ }).format(new Date(d));
 
 const normalizeList = (arr) =>
   (arr || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean);
 
+const isCouponExpired = (coupon, now = new Date()) => {
+  if (!coupon.isActive) return true;
+  if (coupon.validTill && now > new Date(coupon.validTill)) return true;
+  return false;
+};
+
+/** Active for redemption (IST calendar: validFrom day has started). */
 const isWithinSchedule = (coupon, now = new Date()) => {
   if (!coupon.isActive) return false;
-  if (coupon.validFrom && now < new Date(coupon.validFrom)) return false;
   if (coupon.validTill && now > new Date(coupon.validTill)) return false;
+  if (coupon.validFrom) {
+    if (toIstDateKey(now) < toIstDateKey(coupon.validFrom)) return false;
+  }
   return true;
 };
 
@@ -100,6 +113,15 @@ async function validateCouponForRegistration({
   }
 
   if (!isWithinSchedule(coupon)) {
+    const fromKey = coupon.validFrom ? toIstDateKey(coupon.validFrom) : null;
+    const nowKey = toIstDateKey(new Date());
+    if (fromKey && nowKey < fromKey) {
+      return {
+        ok: false,
+        status: 400,
+        message: `This coupon is not active yet. It starts on ${new Date(coupon.validFrom).toLocaleDateString('en-IN', { timeZone: IST_TZ })}.`
+      };
+    }
     return { ok: false, status: 400, message: 'Coupon is not active or has expired' };
   }
 
@@ -191,14 +213,14 @@ async function listApplicableCoupons(ctx) {
   return applicable;
 }
 
-/** Any scheduled coupon for engineer joining fee (for showing coupon UI / private codes). */
+/** Any non-expired engineer joining-fee coupon (shows coupon UI; redemption still schedule-checked). */
 async function hasAnyActiveRegistrationCoupons(registrationType = REGISTRATION_TYPE) {
-  const now = new Date();
   const coupons = await EngineerCoupon.find({ isActive: true })
-    .select('validFrom validTill applicableRegistrationTypes')
+    .select('validTill applicableRegistrationTypes isActive')
     .lean();
+  const now = new Date();
   return coupons.some(
-    (c) => isWithinSchedule(c, now) && matchesRegistrationType(c, registrationType)
+    (c) => !isCouponExpired(c, now) && matchesRegistrationType(c, registrationType)
   );
 }
 

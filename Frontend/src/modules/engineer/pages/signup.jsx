@@ -1276,9 +1276,6 @@ export default function EngineerSignup() {
                           </span>
                         </div>
                         
-                        {(registrationOffers?.showCouponInput ||
-                          registrationOffers?.couponsAvailable ||
-                          registrationOffers?.publicCoupons?.length > 0) ? (
                         <div className="mb-6">
                           <label className="block text-xs font-bold text-gray-600 mb-2 uppercase tracking-wide">Have a coupon code?</label>
                           <div className="flex gap-2">
@@ -1315,7 +1312,6 @@ export default function EngineerSignup() {
                             </div>
                           )}
                         </div>
-                        ) : null}
 
                         {paymentData && (
                           <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 text-sm">

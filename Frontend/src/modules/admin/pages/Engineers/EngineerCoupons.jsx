@@ -113,7 +113,10 @@ const EngineerCoupons = () => {
         minAmount: Number(f.minAmount) || 0,
         usageLimit: Number(f.usageLimit) || 0,
         perUserLimit: Number(f.perUserLimit) || 1,
-        validFrom: fromInputDate(f.validFrom) || undefined,
+        validFrom:
+          couponModal.mode === 'create' && !f.validFrom
+            ? new Date().toISOString()
+            : fromInputDate(f.validFrom) || undefined,
         validTill: fromInputDate(f.validTill),
         applicableServices: String(f.applicableServices || '')
           .split(',')
