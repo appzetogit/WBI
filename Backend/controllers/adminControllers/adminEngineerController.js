@@ -60,6 +60,27 @@ const getAllEngineers = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
+    // Relink orphan signup KYC (tempEntityId → engineer._id) for this page
+    // so admin View/Verification shows documents without a manual migration
+    try {
+      const { ensureProfileKycLinked, readCustomField } = require('../../services/kycEntityLinkService');
+      const VerificationDocument = require('../../models/VerificationDocument');
+      await Promise.all(
+        engineers.map(async (eng) => {
+          const tempId = readCustomField(eng, 'tempEntityId');
+          if (!tempId) return;
+          const docsCount = await VerificationDocument.countDocuments({
+            ownerId: eng._id,
+            ownerType: 'engineer'
+          });
+          if (docsCount > 0) return;
+          await ensureProfileKycLinked('engineer', eng.toObject ? eng.toObject() : eng);
+        })
+      );
+    } catch (linkErr) {
+      console.warn('[getAllEngineers] KYC link warning:', linkErr.message);
+    }
+
     // Get total count
     const total = await Engineer.countDocuments(query);
 
