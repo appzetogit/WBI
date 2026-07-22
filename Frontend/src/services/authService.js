@@ -490,8 +490,18 @@ export const engineerAuthService = {
     return response.data;
   },
 
-  completeDigiLockerSignup: async (recordId) => {
-    const response = await api.post('/engineers/auth/digilocker/complete', { recordId });
+  completeDigiLockerSignup: async (payload) => {
+    const body =
+      typeof payload === 'string'
+        ? { recordId: payload }
+        : {
+            recordId: payload.recordId || payload.transactionId,
+            transactionId: payload.transactionId || payload.recordId,
+            code: payload.code,
+            state: payload.state,
+            codeVerifier: payload.codeVerifier
+          };
+    const response = await api.post('/engineers/auth/digilocker/complete', body);
     return response.data;
   },
 

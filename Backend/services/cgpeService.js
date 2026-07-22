@@ -1,5 +1,16 @@
 const axios = require('axios');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+// #region agent log
+const DEBUG_LOG_PATH = path.join(__dirname, '..', '..', '.cursor', 'debug-7d825b.log');
+function agentLog(hypothesisId, location, message, data = {}) {
+  const payload = { sessionId: '7d825b', runId: 'pre-fix', hypothesisId, location, message, data, timestamp: Date.now() };
+  try { fs.appendFileSync(DEBUG_LOG_PATH, JSON.stringify(payload) + '\n'); } catch (_) { /* ignore */ }
+  fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d825b' }, body: JSON.stringify(payload) }).catch(() => {});
+}
+// #endregion
 
 class CgpeService {
   constructor() {
@@ -59,6 +70,10 @@ class CgpeService {
         throw new Error(errorMsg);
       }
 
+      // #region agent log
+      agentLog('A', 'cgpeService.js:makeRequest:ok', 'CGPE request OK', { endpoint, httpStatus: response.status, hasData: !!response.data });
+      // #endregion
+
       return response.data;
     } catch (error) {
       // Log full CGPE error response for debugging on production
@@ -72,6 +87,9 @@ class CgpeService {
         throw new Error(`CGPE API Error: Your server IP (${resData.error?.clientIP || 'unknown'}) is not whitelisted. Please add this IP in your CGPE merchant dashboard under IP Whitelist settings.`);
       }
       const errorMessage = resData.message || resData.error || error.message || 'Verification failed due to invalid details or provider error.';
+      // #region agent log
+      agentLog('A', 'cgpeService.js:makeRequest:err', 'CGPE request failed', { endpoint, httpStatus: error.response?.status || null, providerMsg: String(errorMessage).slice(0, 120), baseUrl: this.baseUrl });
+      // #endregion
       throw new Error(`Verification Failed: ${errorMessage} (Status: ${error.response?.status || 'Unknown'})`);
     }
   }
@@ -149,55 +167,27 @@ class CgpeService {
 
   async generateAadhaarOtp(aadhaarNumber) {
     const num = String(aadhaarNumber);
-    const docBody = { merchantId: this.clientId, aadhaarNumber: num };
-    // Official CGPE docs: POST /api/kyc/aadhaar/generate-otp (then legacy /api/v1/*)
-    const docGenerateEndpoints = [
-      '/api/kyc/aadhaar/generate-otp',
-      '/api/v1/kyc/aadhaar/generate-otp',
-      '/api/v1/verify/aadhaar/generate-otp'
-    ];
+    const isMock = process.env.USE_MOCK_KYC === 'true' || !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
+    // #region agent log
+    agentLog('D', 'cgpeService.js:generateAadhaarOtp:start', 'generateAadhaarOtp start', { baseUrl: this.baseUrl, isMock, aadhaarLast4: num.slice(-4), merchantConfigured: !!this.clientId, runId: 'post-fix' });
+    // #endregion
 
-    let lastDocErr = null;
-    for (const endpoint of docGenerateEndpoints) {
-      try {
-        const result = await this.makeRequest(endpoint, docBody);
-        const requestId =
-          this.extractOkycSessionId(result) ||
-          result?.data?.requestId ||
-          result?.requestId ||
-          null;
-        if (!requestId) {
-          console.warn('[CGPE] generate-otp ok but no requestId on', endpoint, Object.keys(result?.data || {}));
-        }
-        const clientId = requestId || `doc_${num.slice(-4)}_${Date.now()}`;
-        console.log('[CGPE] Aadhaar OTP generated via', endpoint, 'requestId=', clientId);
-        return {
-          success: true,
-          data: {
-            clientId,
-            flow: 'doc',
-            message: result.message || result.data?.message || 'OTP sent successfully'
-          },
-          requestId: clientId
-        };
-      } catch (docErr) {
-        lastDocErr = docErr;
-        console.warn('[CGPE] generate-otp failed on', endpoint, docErr.message);
-      }
-    }
-
+    // Primary: OKYC on verify.cgpey.com (doc /api/kyc/* and /api/v1/*/aadhaar/generate-otp return 404)
     try {
-      const result = await this.makeRequest('/api/v1/verify/okyc/initiate', {
-        merchantId: this.clientId,
-        aadhaarNumber: num
-      });
+      const result = await this.makeRequest('/api/v1/verify/okyc/initiate', { aadhaarNumber: num });
       const sessionId = this.extractOkycSessionId(result);
       if (!sessionId) {
         const keys = Object.keys(result?.data || result || {});
         console.error('[CGPE] okyc/initiate missing session id keys:', keys);
+        // #region agent log
+        agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycNoSession', 'okyc initiate missing session', { keys, runId: 'post-fix' });
+        // #endregion
         throw new Error('Aadhaar OTP sent but provider session id missing. Please try Get OTP again.');
       }
       console.log('[CGPE] Aadhaar OTP generated via okyc/initiate session=', sessionId);
+      // #region agent log
+      agentLog('B', 'cgpeService.js:generateAadhaarOtp:okycOk', 'okyc initiate succeeded', { flow: 'okyc', hasSession: true, runId: 'post-fix' });
+      // #endregion
       return {
         success: true,
         data: {
@@ -207,13 +197,16 @@ class CgpeService {
         },
         requestId: result.data?.transactionId || result.reference_id || result.data?.referenceId || sessionId
       };
-    } catch (error) {
-      throw lastDocErr || error;
+    } catch (okycErr) {
+      // #region agent log
+      agentLog('E', 'cgpeService.js:generateAadhaarOtp:okycFail', 'okyc initiate failed', { err: String(okycErr?.message || '').slice(0, 160), runId: 'post-fix' });
+      // #endregion
+      throw okycErr;
     }
   }
 
   /**
-   * Verify Aadhaar OTP — doc flow (merchantId + aadhaar + otp [+ requestId]) then OKYC fallback
+   * Verify Aadhaar OTP — OKYC primary (matches generate via okyc/initiate)
    */
   async verifyAadhaarOtp(sessionId, otp, aadhaarNumber) {
     try {
@@ -227,48 +220,12 @@ class CgpeService {
       }
 
       const sid = String(sessionId ?? '').trim();
-      const hasRealRequestId =
-        sid && !this.isStaleFakeOkycSessionId(sid) && !this.isSyntheticDocSessionId(sid);
-
-      // Official docs body: merchantId + aadhaarNumber + otp. Also send requestId when we have one.
-      const docPayload = {
-        merchantId: this.clientId,
-        aadhaarNumber: aadhaar,
-        otp: otpStr,
-        ...(hasRealRequestId
-          ? { requestId: sid, clientId: sid, referenceId: sid, reference_id: sid }
-          : {})
-      };
-      const docVerifyEndpoints = [
-        '/api/kyc/aadhaar/verify-otp',
-        '/api/v1/kyc/aadhaar/verify-otp',
-        '/api/v1/verify/aadhaar/verify-otp',
-        '/api/v1/verify/aadhaar/submit-otp'
-      ];
-
-      let lastDocErr = null;
-      for (const endpoint of docVerifyEndpoints) {
-        try {
-          const result = await this.makeRequest(endpoint, docPayload);
-          console.log('[CGPE] Aadhaar OTP verified via', endpoint);
-          return this.normalizeAadhaarVerifyResult(result, aadhaar);
-        } catch (docErr) {
-          lastDocErr = docErr;
-          console.warn('[CGPE] verify-otp failed on', endpoint, docErr.message);
-        }
+      if (!sid || this.isStaleFakeOkycSessionId(sid) || this.isSyntheticDocSessionId(sid)) {
+        throw new Error('OTP session expired. Please tap Get OTP again and use the new code.');
       }
 
-      if (!hasRealRequestId) {
-        const hint = lastDocErr?.message || 'Validation error';
-        throw new Error(
-          /validation error|invalid otp|otp/i.test(hint)
-            ? 'Invalid or expired Aadhaar OTP. Tap Get OTP again and enter the latest UIDAI SMS within 2–3 minutes.'
-            : hint
-        );
-      }
-
+      // OKYC verify — same session from okyc/initiate (do not call dead /api/kyc/* paths)
       const okycPayload = {
-        merchantId: this.clientId,
         sessionId: sid,
         clientId: sid,
         reference_id: sid,
@@ -280,11 +237,17 @@ class CgpeService {
 
       try {
         const result = await this.makeRequest('/api/v1/verify/okyc/verify', okycPayload);
+        // #region agent log
+        agentLog('B', 'cgpeService.js:verifyAadhaarOtp:okycOk', 'okyc verify succeeded', { runId: 'post-fix' });
+        // #endregion
         console.log('[CGPE] Aadhaar OTP verified via okyc/verify');
         return this.normalizeAadhaarVerifyResult(result, aadhaar);
       } catch (okycErr) {
-        const msg = okycErr.message || lastDocErr?.message || 'Aadhaar verification failed';
-        if (/validation error/i.test(msg) || /invalid otp/i.test(msg)) {
+        // #region agent log
+        agentLog('E', 'cgpeService.js:verifyAadhaarOtp:okycFail', 'okyc verify failed', { err: String(okycErr?.message || '').slice(0, 160), runId: 'post-fix' });
+        // #endregion
+        const msg = okycErr.message || 'Aadhaar verification failed';
+        if (/validation error/i.test(msg) || /invalid otp/i.test(msg) || /route not found/i.test(msg)) {
           throw new Error(
             'Invalid or expired Aadhaar OTP. Tap Get OTP again and enter the latest UIDAI SMS within 2–3 minutes.'
           );
@@ -369,52 +332,93 @@ class CgpeService {
 
   /**
    * Initiate DigiLocker OAuth Flow
+   * Docs: POST /api/v1/digilocker/initiate { mobileNumber, redirectUrl }
+   * Headers: x-merchant-id, x-api-key, x-secret-key
    */
   async initiateDigiLocker(mobileNumber, redirectUrl) {
+    // #region agent log
+    agentLog('DL1', 'cgpeService.js:initiateDigiLocker', 'digilocker initiate', { hasMobile: !!mobileNumber, hasRedirect: !!redirectUrl, runId: 'post-fix' });
+    // #endregion
     const result = await this.makeRequest('/api/v1/digilocker/initiate', {
-      mobileNumber,
-      redirectUrl
+      mobileNumber: String(mobileNumber || '').trim(),
+      redirectUrl: String(redirectUrl || '').trim()
     });
+    const d = result.data || {};
+    const authUrl = d.authUrl || d.authorizationUrl || d.url || null;
+    const recordId = d.recordId || d.transactionId || null;
+    if (!authUrl || !recordId) {
+      // #region agent log
+      agentLog('DL1', 'cgpeService.js:initiateDigiLocker:badResp', 'missing authUrl/recordId', { keys: Object.keys(d), runId: 'post-fix' });
+      // #endregion
+      throw new Error('DigiLocker initiate failed: authUrl or recordId missing from provider');
+    }
+    // #region agent log
+    agentLog('DL1', 'cgpeService.js:initiateDigiLocker:ok', 'digilocker initiate ok', { hasAuthUrl: true, hasRecordId: true, runId: 'post-fix' });
+    // #endregion
     return {
       success: true,
       data: {
-        recordId: result.data?.recordId,
-        authUrl: result.data?.authUrl,
-        state: result.data?.state
-      }
+        recordId,
+        publicId: d.publicId || null,
+        authUrl,
+        authorizationUrl: authUrl,
+        state: d.state || null
+      },
+      requestId: result.requestId || result.data?.requestId
     };
   }
 
   /**
-   * Callback for DigiLocker OAuth Code
+   * Callback for DigiLocker OAuth Code — no auth headers (per CGPE docs)
    */
   async callbackDigiLocker(code, state, codeVerifier, recordId) {
-    // Official docs state no auth headers needed for this step
-    const response = await axios.post(`${this.baseUrl}/api/v1/digilocker/callback`, {
-      code,
-      state,
-      codeVerifier,
-      recordId
-    });
+    // #region agent log
+    agentLog('DL2', 'cgpeService.js:callbackDigiLocker', 'digilocker callback', { hasCode: !!code, hasState: !!state, hasVerifier: !!codeVerifier, hasRecordId: !!recordId, runId: 'post-fix' });
+    // #endregion
+    const response = await axios.post(
+      `${this.baseUrl}/api/v1/digilocker/callback`,
+      {
+        code: String(code || '').trim(),
+        state: String(state || '').trim(),
+        codeVerifier: String(codeVerifier || '').trim(),
+        recordId: String(recordId || '').trim()
+      },
+      { headers: { 'Content-Type': 'application/json' }, timeout: 30000 }
+    );
+    if (response.data && response.data.success === false) {
+      throw new Error(response.data.message || 'DigiLocker callback failed');
+    }
     return response.data;
   }
 
   /**
-   * Complete DigiLocker OAuth Flow
+   * Complete DigiLocker OAuth Flow — returns verified Aadhaar KYC
    */
   async completeDigiLocker(recordId) {
+    // #region agent log
+    agentLog('DL3', 'cgpeService.js:completeDigiLocker', 'digilocker complete', { hasRecordId: !!recordId, runId: 'post-fix' });
+    // #endregion
     const result = await this.makeRequest('/api/v1/digilocker/complete', {
-      recordId
+      recordId: String(recordId || '').trim()
     });
-    const aadhaarData = result.data?.aadhaarData || {};
+    const aadhaarData = result.data?.aadhaarData || result.data || {};
     return {
       success: true,
       data: {
-        fullName: aadhaarData.name,
-        dob: aadhaarData.dateOfBirth,
+        fullName: aadhaarData.name || aadhaarData.fullName,
+        dob: aadhaarData.dateOfBirth || aadhaarData.dob,
         gender: aadhaarData.gender,
         address: aadhaarData.address,
-        aadhaarNumberMasked: aadhaarData.aadhaarNumberMasked || 'XXXX-XXXX-XXXX'
+        state: aadhaarData.state,
+        district: aadhaarData.district,
+        pincode: aadhaarData.pincode,
+        aadhaarNumberMasked:
+          aadhaarData.aadhaarNumberMasked ||
+          (aadhaarData.aadhaarNumber
+            ? `XXXX-XXXX-${String(aadhaarData.aadhaarNumber).slice(-4)}`
+            : 'XXXX-XXXX-XXXX'),
+        transactionId: result.data?.transactionId || result.requestId,
+        status: result.data?.status || 'VERIFIED'
       }
     };
   }
@@ -603,14 +607,31 @@ class CgpeService {
     }
 
     if (endpoint.includes('digilocker/initiate')) {
+      const rid = 'mock_record_12345';
+      const redirect = data.redirectUrl || 'http://localhost:5174/engineer/signup';
+      const authUrl = redirect.includes('?')
+        ? `${redirect}&recordId=${rid}&code=mock_code&state=mock_state&codeVerifier=mock_verifier`
+        : `${redirect}?recordId=${rid}&code=mock_code&state=mock_state&codeVerifier=mock_verifier`;
       return {
         success: true,
         requestId: `req_dl_init_${Date.now()}`,
         status: 'SUCCESS',
         data: {
-          url: data.redirectUrl ? (data.redirectUrl.includes('?') ? `${data.redirectUrl}&recordId=mock_record_12345` : `${data.redirectUrl}?recordId=mock_record_12345`) : 'http://localhost:5174/mock-digilocker-redirect?recordId=mock_record_12345',
-          recordId: 'mock_record_12345'
+          recordId: rid,
+          publicId: 'digilocker_mock_public',
+          authUrl,
+          authorizationUrl: authUrl,
+          url: authUrl,
+          state: 'mock_state'
         }
+      };
+    }
+
+    if (endpoint.includes('digilocker/callback')) {
+      return {
+        success: true,
+        message: 'Authorization code received (mock)',
+        data: { recordId: data.recordId || 'mock_record_12345', status: 'PENDING' }
       };
     }
 
@@ -620,15 +641,20 @@ class CgpeService {
         requestId: `req_dl_comp_${Date.now()}`,
         status: 'SUCCESS',
         data: {
-          fullName: 'Mock User',
-          dob: '1990-01-01',
-          gender: 'MALE',
-          aadhaarNumberMasked: 'XXXX-XXXX-1234',
-          address: {
+          transactionId: `txn_mock_${Date.now()}`,
+          recordId: data.recordId || 'mock_record_12345',
+          service: 'DIGILOCKER',
+          aadhaarData: {
+            name: 'Mock User',
+            dateOfBirth: '1990-01-01',
+            gender: 'MALE',
+            address: 'Mock Address',
             state: 'Mock State',
+            district: 'Mock District',
             pincode: '123456',
-            careOf: 'Mock C/O'
-          }
+            aadhaarNumberMasked: 'XXXX-XXXX-1234'
+          },
+          status: 'VERIFIED'
         }
       };
     }

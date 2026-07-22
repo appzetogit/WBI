@@ -210,13 +210,12 @@ exports.initiateDigiLocker = async (req, res) => {
   try {
     const { role, mobileNumber, redirectUrl, entityId, draftId } = req.body;
     if (!mobileNumber) return res.status(400).json({ success: false, message: 'Mobile number is required' });
+    if (!redirectUrl) return res.status(400).json({ success: false, message: 'redirectUrl is required' });
     
-    // Initiate with CGPE
     const result = await cgpeService.initiateDigiLocker(mobileNumber, redirectUrl);
     
-    // Create session
     const session = await DigiLockerSession.create({
-      role,
+      role: role || 'engineer',
       entityId: entityId || null,
       draftId: draftId || null,
       mobileNumber,
@@ -232,7 +231,11 @@ exports.initiateDigiLocker = async (req, res) => {
       success: true,
       data: {
         authorizationUrl: result.data.authUrl,
-        transactionId: session.transactionId
+        authUrl: result.data.authUrl,
+        transactionId: session.transactionId,
+        recordId: session.transactionId,
+        state: result.data.state || null,
+        publicId: result.data.publicId || null
       }
     });
   } catch (error) {
@@ -243,32 +246,37 @@ exports.initiateDigiLocker = async (req, res) => {
 
 exports.completeDigiLocker = async (req, res) => {
   try {
-    const { transactionId, code, state, codeVerifier } = req.body; // transactionId is the recordId
-    if (!transactionId) return res.status(400).json({ success: false, message: 'transactionId (recordId) is required' });
+    const { transactionId, recordId, code, state, codeVerifier } = req.body;
+    const id = transactionId || recordId;
+    if (!id) return res.status(400).json({ success: false, message: 'recordId (transactionId) is required' });
     
-    const session = await DigiLockerSession.findOne({ transactionId });
-    if (!session) return res.status(404).json({ success: false, message: 'DigiLocker session not found or expired' });
+    let session = await DigiLockerSession.findOne({ transactionId: id });
     
-    // If frontend provides callback params, process callback first
+    // CGPE docs step 3: callback with code/state/codeVerifier BEFORE complete
     if (code && state && codeVerifier) {
-      await cgpeService.callbackDigiLocker(code, state, codeVerifier, transactionId);
+      await cgpeService.callbackDigiLocker(code, state, codeVerifier, id);
+    } else if (!code || !state || !codeVerifier) {
+      console.warn('[KYC] DigiLocker complete without full OAuth callback params — attempting complete only');
     }
 
-    const result = await cgpeService.completeDigiLocker(transactionId);
+    const result = await cgpeService.completeDigiLocker(id);
     
-    session.status = 'completed';
-    await session.save();
+    if (session) {
+      session.status = 'completed';
+      await session.save();
+    }
     
     const maskedAadhaar = result.data?.aadhaarNumberMasked || 'XXXX-XXXX-XXXX';
+    const entityId = session?.entityId || req.body.entityId;
+    const role = session?.role || req.body.role;
     
-    if (session.entityId) {
-      // Upsert KYCVerification
+    if (entityId && role) {
       const kycRec = await KYCVerification.findOneAndUpdate(
-        { role: session.role, entityId: session.entityId, documentType: 'aadhaar' },
+        { role, entityId, documentType: 'aadhaar' },
         {
           documentNumberMasked: maskedAadhaar,
           provider: 'digilocker',
-          providerTransactionId: transactionId,
+          providerTransactionId: id,
           verificationMode: 'digilocker',
           status: 'verified',
           extractedName: result.data?.fullName,
@@ -279,14 +287,13 @@ exports.completeDigiLocker = async (req, res) => {
         { upsert: true, new: true }
       );
       
-      // Sync
-      await syncToLegacy(session.role, session.entityId, 'aadhaar', 'verified', null, null, {
+      await syncToLegacy(role, entityId, 'aadhaar', 'verified', null, null, {
         documentNumberMasked: maskedAadhaar,
-        transactionId,
+        transactionId: id,
         rawResponse: result.data
       });
       
-      await logAudit(session.role, session.entityId, 'DIGILOCKER_COMPLETE', 'aadhaar', 'digilocker', 'verified', 'DigiLocker verified', req);
+      await logAudit(role, entityId, 'DIGILOCKER_COMPLETE', 'aadhaar', 'digilocker', 'verified', 'DigiLocker verified', req);
     }
     
     res.json({
@@ -461,6 +468,9 @@ exports.generateAadhaarOtp = async (req, res) => {
     });
   } catch (error) {
     console.error('[KYC] generateAadhaarOtp Error:', error);
+    // #region agent log
+    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',runId:'pre-fix',hypothesisId:'E',location:'kycController.js:generateAadhaarOtp:catch',message:'controller returning 400',data:{msg:String(error?.message||'').slice(0,160),hasEntityId:!!req.body?.entityId},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (req.body.entityId) {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_OTP_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }

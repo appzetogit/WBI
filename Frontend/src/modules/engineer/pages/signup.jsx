@@ -138,12 +138,21 @@ export default function EngineerSignup() {
              setFormData(p => ({ ...p, uploadedDocuments: docs }));
           }
 
-          // Check for DigiLocker return
+          // Check for DigiLocker return (CGPE: code + state + codeVerifier; recordId from session/URL)
           const urlParams = new URLSearchParams(window.location.search);
-          const recordId = urlParams.get('recordId');
+          const code = urlParams.get('code');
+          const state = urlParams.get('state');
+          const codeVerifier = urlParams.get('codeVerifier') || urlParams.get('code_verifier');
+          const recordId =
+            urlParams.get('recordId') ||
+            sessionStorage.getItem('digilockerRecordId') ||
+            null;
           const stepStr = urlParams.get('step');
-          if (recordId) {
-            completeDigiLockerVerification(recordId, stepStr);
+          if (recordId && (code || urlParams.get('recordId'))) {
+            completeDigiLockerVerification(
+              { recordId, code, state, codeVerifier },
+              stepStr
+            );
             window.history.replaceState({}, document.title, window.location.pathname);
           }
         } else {
@@ -171,15 +180,16 @@ export default function EngineerSignup() {
     }));
   }, [formData, currentStep, isPhoneVerified, otpSent, isAadhaarVerified, isPanVerified, isPaymentSuccess]);
 
-  const completeDigiLockerVerification = async (recordId, stepStr) => {
+  const completeDigiLockerVerification = async (payload, stepStr) => {
     setVerifyingAadhaar(true);
     if (stepStr) {
       setCurrentStep(Number(stepStr));
     }
     try {
-      const res = await engineerAuthService.completeDigiLockerSignup(recordId);
+      const res = await engineerAuthService.completeDigiLockerSignup(payload);
       if (res.success) {
         setIsAadhaarVerified(true);
+        sessionStorage.removeItem('digilockerRecordId');
         if (res.data?.aadhaarNumberMasked) {
           setFormData(p => ({ ...p, aadhaarNumber: res.data.aadhaarNumberMasked }));
         }
@@ -392,8 +402,11 @@ export default function EngineerSignup() {
       }));
 
       const res = await engineerAuthService.initiateDigiLockerSignup(mobile, redirectUrl);
-      if (res.success && res.data?.url) {
-        window.location.href = res.data.url;
+      const authUrl = res.data?.authorizationUrl || res.data?.authUrl || res.data?.url;
+      const recordId = res.data?.recordId || res.data?.transactionId;
+      if (res.success && authUrl) {
+        if (recordId) sessionStorage.setItem('digilockerRecordId', recordId);
+        window.location.href = authUrl;
       } else {
         toast.error('Failed to initiate DigiLocker flow');
         setVerifyingAadhaar(false);

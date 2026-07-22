@@ -139,12 +139,26 @@ const KYCVerificationStep = forwardRef(({
       loadRules();
     }
     
-    // Check if returning from DigiLocker
+    // Check if returning from DigiLocker OAuth (CGPE docs: code + state + codeVerifier)
     const urlParams = new URLSearchParams(window.location.search);
-    const recordId = urlParams.get('recordId');
-    if (recordId) {
-      handleDigiLockerComplete(recordId);
-      window.history.replaceState({}, document.title, window.location.pathname);
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
+    const codeVerifier = urlParams.get('codeVerifier') || urlParams.get('code_verifier');
+    const recordId =
+      urlParams.get('recordId') ||
+      sessionStorage.getItem('digilockerRecordId') ||
+      null;
+    if (recordId && (code || urlParams.get('recordId'))) {
+      handleDigiLockerComplete({
+        recordId,
+        transactionId: recordId,
+        code,
+        state,
+        codeVerifier,
+        role,
+        entityId
+      });
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
     }
   }, [role, rulesOverride]);
 
@@ -194,15 +208,18 @@ const KYCVerificationStep = forwardRef(({
     }
   };
 
-  const handleDigiLockerComplete = async (transactionId) => {
+  const handleDigiLockerComplete = async (payload) => {
     try {
-      const res = await kycService.completeDigiLocker(transactionId);
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verifying' } }));
+      const res = await kycService.completeDigiLocker(payload);
       if (res.success) {
         toast.success('DigiLocker verification complete!');
+        sessionStorage.removeItem('digilockerRecordId');
         setVerifications(p => ({ ...p, aadhaar: { status: 'verified', data: res.data } }));
       }
     } catch (err) {
       toast.error(err.message || 'DigiLocker verification failed');
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message } }));
     }
   };
 
@@ -212,16 +229,30 @@ const KYCVerificationStep = forwardRef(({
         toast.error('Mobile number is required for DigiLocker');
         return;
       }
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'generating_otp' } }));
       if (onBeforeDigiLockerInitiate) {
         await onBeforeDigiLockerInitiate();
       }
-      const finalRedirectUrl = redirectUrl || window.location.href; // Use prop if provided
-      const res = await kycService.initiateDigiLocker({ role, mobileNumber, redirectUrl: finalRedirectUrl, entityId, draftId });
-      if (res.success && res.data?.authorizationUrl) {
-        window.location.href = res.data.authorizationUrl;
+      const finalRedirectUrl = redirectUrl || window.location.href;
+      const res = await kycService.initiateDigiLocker({
+        role,
+        mobileNumber,
+        redirectUrl: finalRedirectUrl,
+        entityId,
+        draftId
+      });
+      const authUrl = res.data?.authorizationUrl || res.data?.authUrl;
+      const recordId = res.data?.recordId || res.data?.transactionId;
+      if (res.success && authUrl) {
+        if (recordId) sessionStorage.setItem('digilockerRecordId', recordId);
+        window.location.href = authUrl;
+      } else {
+        toast.error('Failed to start DigiLocker — no auth URL');
+        setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed' } }));
       }
     } catch (err) {
       toast.error(err.message || 'Failed to initiate DigiLocker');
+      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message } }));
     }
   };
 
@@ -427,6 +458,24 @@ const KYCVerificationStep = forwardRef(({
                 <div className="mt-2">
                   {(rule.verificationMode === 'digilocker' || rule.documentType === 'aadhaar') && (
                     <div className="space-y-3">
+                      {/* DigiLocker is the CGPE-supported Aadhaar path (OTP routes return 404 on verify.cgpey.com) */}
+                      <button
+                        type="button"
+                        onClick={handleDigiLockerInitiate}
+                        disabled={vState.status === 'generating_otp' || vState.status === 'verifying'}
+                        className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+                      >
+                        {vState.status === 'generating_otp' || vState.status === 'verifying'
+                          ? 'Opening DigiLocker...'
+                          : 'Verify Aadhaar via DigiLocker'}
+                      </button>
+                      <p className="text-[11px] text-gray-500 text-center">
+                        Secure UIDAI DigiLocker consent — recommended
+                      </p>
+                      <div className="relative py-1">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-100" /></div>
+                        <div className="relative flex justify-center"><span className="bg-white px-2 text-[10px] text-gray-400 uppercase">or OTP</span></div>
+                      </div>
                       <input
                         type="text"
                         inputMode="numeric"
@@ -438,9 +487,10 @@ const KYCVerificationStep = forwardRef(({
                       />
                       {!vState.otpSent ? (
                         <button 
+                          type="button"
                           onClick={() => handleGenerateAadhaarOtp(aadhaarNumber)}
                           disabled={vState.status === 'generating_otp'}
-                          className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+                          className="w-full bg-gray-900 hover:bg-black text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
                         >
                           {vState.status === 'generating_otp' ? 'Sending OTP...' : 'Get OTP'}
                         </button>
@@ -456,6 +506,7 @@ const KYCVerificationStep = forwardRef(({
                             className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border mt-2"
                           />
                           <button 
+                            type="button"
                             onClick={() => handleVerifyAadhaar(vState.clientId, aadhaarOtp, aadhaarNumber)}
                             disabled={vState.status === 'verifying'}
                             className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"

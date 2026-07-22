@@ -19,9 +19,21 @@ export const kycService = {
     }
   },
 
-  completeDigiLocker: async (transactionId) => {
+  completeDigiLocker: async (payload) => {
     try {
-      const response = await api.post('/kyc/digilocker/complete', { transactionId });
+      const body =
+        typeof payload === 'string'
+          ? { transactionId: payload, recordId: payload }
+          : {
+              transactionId: payload.transactionId || payload.recordId,
+              recordId: payload.recordId || payload.transactionId,
+              code: payload.code,
+              state: payload.state,
+              codeVerifier: payload.codeVerifier,
+              role: payload.role,
+              entityId: payload.entityId
+            };
+      const response = await api.post('/kyc/digilocker/complete', body);
       return response.data;
     } catch (error) {
       throw error.response?.data || { success: false, message: 'Failed to complete DigiLocker' };

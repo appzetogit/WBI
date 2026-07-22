@@ -764,8 +764,18 @@ const initiateDigiLockerSignup = async (req, res) => {
     if (!mobileNumber) {
       return res.status(400).json({ success: false, message: 'Mobile number is required' });
     }
+    if (!redirectUrl) {
+      return res.status(400).json({ success: false, message: 'redirectUrl is required' });
+    }
     const result = await cgpeService.initiateDigiLocker(mobileNumber, redirectUrl);
-    res.status(200).json(result);
+    res.status(200).json({
+      success: true,
+      data: {
+        ...result.data,
+        authorizationUrl: result.data.authUrl || result.data.authorizationUrl,
+        transactionId: result.data.recordId
+      }
+    });
   } catch (error) {
     console.error('DigiLocker initiate error:', error);
     res.status(500).json({ success: false, message: error.response?.data?.message || error.message || 'DigiLocker initiation failed' });
@@ -773,15 +783,19 @@ const initiateDigiLockerSignup = async (req, res) => {
 };
 
 /**
- * Complete DigiLocker Flow
+ * Complete DigiLocker Flow (callback + complete per CGPE docs)
  */
 const completeDigiLockerSignup = async (req, res) => {
   try {
-    const { recordId } = req.body;
-    if (!recordId) {
+    const { recordId, transactionId, code, state, codeVerifier } = req.body;
+    const id = recordId || transactionId;
+    if (!id) {
       return res.status(400).json({ success: false, message: 'Record ID is required' });
     }
-    const result = await cgpeService.completeDigiLocker(recordId);
+    if (code && state && codeVerifier) {
+      await cgpeService.callbackDigiLocker(code, state, codeVerifier, id);
+    }
+    const result = await cgpeService.completeDigiLocker(id);
     res.status(200).json(result);
   } catch (error) {
     console.error('DigiLocker complete error:', error);
