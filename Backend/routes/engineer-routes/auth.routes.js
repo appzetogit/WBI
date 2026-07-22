@@ -17,7 +17,7 @@ const { registerCompany } = require('../../controllers/b2bControllers/companyAut
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isEngineer } = require('../../middleware/roleMiddleware');
 const rateLimiter = require('../../middleware/rateLimiter');
-const { verificationLimiter, otpLimiter, registrationLimiter, strictApiLimiter } = rateLimiter;
+const { verificationLimiter, otpLimiter, registrationLimiter, loginLimiter, strictApiLimiter } = rateLimiter;
 const { getRegistrationConfig } = require('../../controllers/engineerControllers/engineerConfigController');
 const idempotency = require('../../middleware/idempotency');
 
