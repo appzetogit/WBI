@@ -204,6 +204,8 @@ const register = async (req, res) => {
       tshirtSize, toolsAvailable, otherTools, hasBike, vehicleNumber, 
       drivingLicenseUrl, rcUrl, selfieUrl, introVideoUrl,
       registrationDraftId,
+      tempEntityId,
+      kycEntityId,
       ...customFields // Capture all other dynamic fields here
     } = req.body;
 
@@ -429,7 +431,16 @@ const register = async (req, res) => {
       tshirtSize, toolsAvailable, otherTools, hasBike, vehicleNumber,
       drivingLicenseUrl: drivingLicenseUrlProcessed, rcUrl: rcUrlProcessed, 
       selfieUrl: selfieUrlProcessed, introVideoUrl: introVideoUrlProcessed,
-      customFields: customFields || {},
+      aadhar: {
+        number: customFields?.aadhaarNumber || customFields?.aadharNumber || '',
+        document: aadhaarDoc?.url || null,
+        backDocument: aadhaarDoc?.backUrl || null
+      },
+      customFields: {
+        ...(customFields || {}),
+        // Persist signup KYC temp id so admin can relink orphan docs if needed
+        tempEntityId: tempEntityId || kycEntityId || customFields?.tempEntityId || null
+      },
       engineerType: draft ? draft.engineerType : (req.body.engineerType || 'freelancer'),
       vendorId: vendorId,
       linkedViaCode: linkedViaCode,
@@ -482,6 +493,23 @@ const register = async (req, res) => {
     // Commit transaction if all database writes succeed
     await session.commitTransaction();
     session.endSession();
+
+    // Link signup KYC / physical uploads (stored under tempEntityId) → real engineer._id
+    try {
+      const { linkKycEntityToProfile, ensureProfileKycLinked } = require('../../services/kycEntityLinkService');
+      const signupTempId = tempEntityId || kycEntityId || customFields?.tempEntityId;
+      if (signupTempId && String(signupTempId) !== String(engineer._id)) {
+        await linkKycEntityToProfile({
+          role: 'engineer',
+          fromEntityId: signupTempId,
+          toEntityId: engineer._id
+        });
+      } else {
+        await ensureProfileKycLinked('engineer', engineer);
+      }
+    } catch (linkErr) {
+      console.warn('[Engineer Register] KYC entity link failed:', linkErr.message);
+    }
 
     const tokens = generateTokenPair({
       userId: engineer._id,

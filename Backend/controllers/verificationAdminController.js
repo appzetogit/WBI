@@ -76,25 +76,28 @@ if (mongoose.connection.readyState === 1) {
  */
 exports.getVerifications = async (req, res) => {
   try {
-    const { roleType, status, search, page = 1, limit = 20 } = req.query;
+    const { roleType, status, search, ownerId, page = 1, limit = 20 } = req.query;
     const query = {};
 
     if (roleType) query.ownerType = roleType;
     if (status) query.overallStatus = status;
+    if (ownerId && mongoose.Types.ObjectId.isValid(ownerId)) {
+      query.ownerId = ownerId;
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Get requests
-    const requests = await VerificationRequest.find(query)
+    let requests = await VerificationRequest.find(query)
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
 
-    const total = await VerificationRequest.countDocuments(query);
+    let total = await VerificationRequest.countDocuments(query);
 
     // Populate user profile details for each request
-    const enrichedRequests = [];
+    let enrichedRequests = [];
     for (const r of requests) {
       const ProfileModel = getOwnerModel(r.ownerType);
       const profile = await ProfileModel.findById(r.ownerId).select('name phone email approvalStatus').lean();
@@ -105,6 +108,46 @@ exports.getVerifications = async (req, res) => {
       });
     }
 
+    // Optional search by name / phone / email (in-memory filter after enrich)
+    if (search && String(search).trim()) {
+      const q = String(search).trim().toLowerCase();
+      enrichedRequests = enrichedRequests.filter((r) => {
+        const p = r.profile || {};
+        return (
+          String(p.name || '').toLowerCase().includes(q) ||
+          String(p.phone || '').includes(q) ||
+          String(p.email || '').toLowerCase().includes(q) ||
+          String(r.ownerId || '').toLowerCase().includes(q)
+        );
+      });
+      // When searching without ownerId, scan more broadly
+      if (!ownerId) {
+        const all = await VerificationRequest.find(roleType ? { ownerType: roleType } : {})
+          .sort({ updatedAt: -1 })
+          .limit(200)
+          .lean();
+        enrichedRequests = [];
+        for (const r of all) {
+          const ProfileModel = getOwnerModel(r.ownerType);
+          const profile = await ProfileModel.findById(r.ownerId).select('name phone email approvalStatus').lean();
+          const row = { ...r, profile: profile || { name: 'Unknown User', phone: '', email: '' } };
+          const p = row.profile;
+          if (
+            String(p.name || '').toLowerCase().includes(q) ||
+            String(p.phone || '').includes(q) ||
+            String(p.email || '').toLowerCase().includes(q) ||
+            String(r.ownerId || '').toLowerCase().includes(q)
+          ) {
+            if (!status || r.overallStatus === status) enrichedRequests.push(row);
+          }
+        }
+        total = enrichedRequests.length;
+        enrichedRequests = enrichedRequests.slice(skip, skip + parseInt(limit));
+      } else {
+        total = enrichedRequests.length;
+      }
+    }
+
     res.status(200).json({
       success: true,
       data: enrichedRequests,
@@ -112,7 +155,7 @@ exports.getVerifications = async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / Math.max(parseInt(limit), 1))
       }
     });
 
@@ -135,7 +178,18 @@ exports.getVerificationDetail = async (req, res) => {
     }
 
     const ProfileModel = getOwnerModel(request.ownerType);
-    const profile = await ProfileModel.findById(request.ownerId).select('-password').lean();
+    let profile = await ProfileModel.findById(request.ownerId).select('-password').lean();
+
+    // Relink orphan signup KYC docs under this owner before returning gallery
+    try {
+      const { ensureProfileKycLinked } = require('../services/kycEntityLinkService');
+      if (profile) {
+        await ensureProfileKycLinked(request.ownerType, profile);
+        profile = await ProfileModel.findById(request.ownerId).select('-password').lean();
+      }
+    } catch (linkErr) {
+      console.warn('[getVerificationDetail] KYC link warning:', linkErr.message);
+    }
 
     const docs = await VerificationDocument.find({ ownerId: request.ownerId }).sort({ documentType: 1, side: 1 }).lean();
     const KYCVerification = require('../models/KYCVerification');
@@ -144,11 +198,49 @@ exports.getVerificationDetail = async (req, res) => {
       entityId: request.ownerId
     }).lean();
 
-    const enrichedDocs = docs.map((d) => ({
-      ...d,
-      signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
-      verifiedBy: d.verifiedBy || d.reviewedBy || null
-    }));
+    const enrichedDocs = docs
+      .map((d) => ({
+        ...d,
+        signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
+        verifiedBy: d.verifiedBy || d.reviewedBy || null
+      }))
+      .filter((d) => {
+        const url = d.signedPreviewUrl || d.fileUrl;
+        return url && url !== 'digilocker-fetch';
+      });
+
+    // Also surface KYC physical uploads that may not be in VerificationDocument yet
+    for (const rec of kycRecords) {
+      const hasFront = enrichedDocs.some(
+        (d) => d.documentType === rec.documentType && (d.side === 'front' || d.side === 'single')
+      );
+      const hasBack = enrichedDocs.some(
+        (d) => d.documentType === rec.documentType && d.side === 'back'
+      );
+      if (rec.fileUrl && rec.fileUrl !== 'digilocker-fetch' && !hasFront) {
+        enrichedDocs.push({
+          _id: `kyc-${rec._id}-front`,
+          documentType: rec.documentType,
+          side: 'front',
+          fileUrl: rec.fileUrl,
+          signedPreviewUrl: rec.fileUrl,
+          status: rec.physicalUploadStatus === 'uploaded' ? 'pending' : (rec.status || 'pending'),
+          documentNumberMasked: rec.documentNumberMasked,
+          source: 'kyc'
+        });
+      }
+      if (rec.backFileUrl && !hasBack) {
+        enrichedDocs.push({
+          _id: `kyc-${rec._id}-back`,
+          documentType: rec.documentType,
+          side: 'back',
+          fileUrl: rec.backFileUrl,
+          signedPreviewUrl: rec.backFileUrl,
+          status: rec.physicalUploadStatus === 'uploaded' ? 'pending' : (rec.status || 'pending'),
+          source: 'kyc'
+        });
+      }
+    }
 
     const cgpeStatus = {};
     for (const rec of kycRecords) {

@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FiCheck, FiX, FiEye, FiSearch, FiFilter, FiDownload, FiLoader, FiDollarSign, FiPower, FiTrash2, FiExternalLink } from 'react-icons/fi';
+import { FiCheck, FiX, FiEye, FiSearch, FiFilter, FiDownload, FiLoader, FiDollarSign, FiPower, FiTrash2, FiExternalLink, FiShield } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import CardShell from '../UserCategories/components/CardShell';
 import Modal from '../UserCategories/components/Modal';
 import DocumentPreviewModal from '../../../../components/documents/DocumentPreviewModal';
 import adminEngineerService from '../../../../services/adminEngineerService';
+import verificationService from '../../../../services/verificationService';
 import { formatEngineerServiceLabel } from '../../utils/adminHelpers';
 
 const display = (value) => {
@@ -32,7 +34,7 @@ const SectionTitle = ({ children }) => (
   <h4 className="text-xs font-black uppercase tracking-wider text-gray-500 border-b border-gray-100 pb-2 mb-3">{children}</h4>
 );
 
-const DocThumb = ({ label, url, status, onPreview }) => {
+const DocThumb = ({ label, url, status, onPreview, onApprove, canApprove, approving }) => {
   if (!url) return null;
   const isPdf = String(url).toLowerCase().includes('.pdf');
   const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(String(url)) || String(url).includes('/video/');
@@ -43,20 +45,25 @@ const DocThumb = ({ label, url, status, onPreview }) => {
     }
     onPreview?.({ url, title: label });
   };
+  const statusLabel = status || 'pending';
+  const statusClass =
+    statusLabel === 'verified' || statusLabel === 'approved' || statusLabel === 'Approved'
+      ? 'bg-green-50 text-green-700 border-green-100'
+      : statusLabel === 'rejected' || statusLabel === 'Rejected'
+        ? 'bg-red-50 text-red-700 border-red-100'
+        : 'bg-amber-50 text-amber-700 border-amber-100';
+
   return (
     <div className="rounded-xl border border-gray-100 overflow-hidden bg-gray-50">
       <div className="px-3 py-2 flex items-center justify-between gap-2 border-b border-gray-100 bg-white">
-        <div>
-          <p className="text-xs font-bold text-gray-800 capitalize">{label}</p>
-          {status ? <p className="text-[10px] text-gray-400 capitalize">{status}</p> : null}
+        <div className="min-w-0">
+          <p className="text-xs font-bold text-gray-800 capitalize truncate">{label}</p>
+          <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${statusClass}`}>
+            {String(statusLabel).replace(/_/g, ' ')}
+          </span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={openPreview}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
-            title="Preview"
-          >
+        <div className="flex items-center gap-1 shrink-0">
+          <button type="button" onClick={openPreview} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg" title="Preview">
             <FiEye className="w-3.5 h-3.5" />
           </button>
           <a href={url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-600 hover:bg-gray-100 rounded-lg" title="Open">
@@ -76,21 +83,38 @@ const DocThumb = ({ label, url, status, onPreview }) => {
           <img src={url} alt={label} className="w-full h-40 object-cover" loading="lazy" />
         )}
       </button>
+      {canApprove ? (
+        <div className="p-2 border-t border-gray-100 bg-white">
+          <button
+            type="button"
+            disabled={approving || statusLabel === 'verified' || statusLabel === 'approved'}
+            onClick={onApprove}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-100 disabled:opacity-40 transition-colors"
+          >
+            <FiCheck className="w-3.5 h-3.5" />
+            {approving ? 'Approving...' : 'Approve Document'}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 };
 
 const AllEngineers = () => {
+  const navigate = useNavigate();
   const [engineers, setEngineers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'pending', 'approved', 'rejected'
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEngineer, setSelectedEngineer] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [verificationDocuments, setVerificationDocuments] = useState([]);
+  const [documentGallery, setDocumentGallery] = useState([]);
+  const [digitalStatuses, setDigitalStatuses] = useState([]);
   const [cgpeStatus, setCgpeStatus] = useState({});
+  const [verificationRequest, setVerificationRequest] = useState(null);
   const [detailStats, setDetailStats] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [approvingDocType, setApprovingDocType] = useState(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [payAmount, setPayAmount] = useState('');
@@ -225,8 +249,10 @@ const AllEngineers = () => {
     setIsViewModalOpen(true);
     setDetailLoading(true);
     setSelectedEngineer(null);
-    setVerificationDocuments([]);
+    setDocumentGallery([]);
+    setDigitalStatuses([]);
     setCgpeStatus({});
+    setVerificationRequest(null);
     setDetailStats(null);
     try {
       const response = await adminEngineerService.getEngineerDetails(engineer.id);
@@ -241,8 +267,10 @@ const AllEngineers = () => {
         id: eng._id,
         serviceCategory: formatEngineerServiceLabel(eng)
       });
-      setVerificationDocuments(response.data.documents || []);
+      setDocumentGallery(response.data.documentGallery || []);
+      setDigitalStatuses(response.data.digitalStatuses || []);
       setCgpeStatus(response.data.cgpeStatus || {});
+      setVerificationRequest(response.data.verificationRequest || null);
       setDetailStats(response.data.stats || null);
     } catch (error) {
       console.error('Error loading engineer details:', error);
@@ -251,6 +279,52 @@ const AllEngineers = () => {
     } finally {
       setDetailLoading(false);
     }
+  };
+
+  const reloadEngineerDetails = async (engineerId) => {
+    const response = await adminEngineerService.getEngineerDetails(engineerId);
+    if (response.success && response.data?.engineer) {
+      const eng = response.data.engineer;
+      setSelectedEngineer({
+        ...eng,
+        id: eng._id,
+        serviceCategory: formatEngineerServiceLabel(eng)
+      });
+      setDocumentGallery(response.data.documentGallery || []);
+      setDigitalStatuses(response.data.digitalStatuses || []);
+      setCgpeStatus(response.data.cgpeStatus || {});
+      setVerificationRequest(response.data.verificationRequest || null);
+      setDetailStats(response.data.stats || null);
+    }
+  };
+
+  const handleApproveDocument = async (documentType) => {
+    if (!verificationRequest?._id || !documentType) {
+      toast.error('Open Document Verification to review this file');
+      return;
+    }
+    try {
+      setApprovingDocType(documentType);
+      const res = await verificationService.approveDocument(verificationRequest._id, documentType);
+      if (res.success) {
+        toast.success(`${String(documentType).replace(/_/g, ' ')} approved`);
+        await reloadEngineerDetails(selectedEngineer.id);
+      } else {
+        toast.error(res.message || 'Failed to approve document');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to approve document');
+    } finally {
+      setApprovingDocType(null);
+    }
+  };
+
+  const openDocumentVerification = () => {
+    if (!selectedEngineer?.id) return;
+    const params = new URLSearchParams();
+    params.set('ownerId', selectedEngineer.id);
+    if (verificationRequest?._id) params.set('requestId', verificationRequest._id);
+    navigate(`/admin/engineers/verifications?${params.toString()}`);
   };
 
   const handlePayClick = (engineer) => {
@@ -467,8 +541,9 @@ const AllEngineers = () => {
         onClose={() => {
           setIsViewModalOpen(false);
           setSelectedEngineer(null);
-          setVerificationDocuments([]);
+          setDocumentGallery([]);
           setCgpeStatus({});
+          setVerificationRequest(null);
           setDetailStats(null);
           setPreviewDoc(null);
         }}
@@ -639,144 +714,114 @@ const AllEngineers = () => {
 
             {/* Media + documents gallery */}
             <div>
-              <SectionTitle>Media & Documents</SectionTitle>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <DocThumb
-                  label="Selfie"
-                  url={selectedEngineer.selfieUrl}
-                  status={selectedEngineer.selfieStatus}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="Intro Video"
-                  url={selectedEngineer.introVideoUrl}
-                  status={selectedEngineer.introVideoStatus}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="Aadhaar Front"
-                  url={selectedEngineer.aadhar?.document || selectedEngineer.documents?.aadhaar || selectedEngineer.documents?.aadhaarFrontUrl}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="Aadhaar Back"
-                  url={selectedEngineer.aadhar?.backDocument}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="PAN Document"
-                  url={selectedEngineer.pan?.document || selectedEngineer.documents?.pan}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="Driving License"
-                  url={selectedEngineer.drivingLicenseUrl || selectedEngineer.licenseUrl}
-                  status={selectedEngineer.licenseVerificationStatus}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="RC Document"
-                  url={selectedEngineer.rcUrl}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="Education Certificate"
-                  url={selectedEngineer.educationCertificateUrl}
-                  status={selectedEngineer.educationCertificateStatus}
-                  onPreview={setPreviewDoc}
-                />
-                <DocThumb
-                  label="Police Verification"
-                  url={selectedEngineer.policeVerification?.document}
-                  status={selectedEngineer.policeVerification?.status}
-                  onPreview={setPreviewDoc}
-                />
-                {(selectedEngineer.uploadedDocuments || []).map((doc, idx) => (
-                  <React.Fragment key={`up-${doc.key || idx}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 mb-3">
+                <h4 className="text-xs font-black uppercase tracking-wider text-gray-500">Media & Documents</h4>
+                <button
+                  type="button"
+                  onClick={openDocumentVerification}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-100 transition-colors"
+                >
+                  <FiShield className="w-3.5 h-3.5" />
+                  Open Document Verification
+                </button>
+              </div>
+
+              {verificationRequest ? (
+                <div className="mb-3 flex flex-wrap gap-2 text-[11px]">
+                  <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold capitalize">
+                    Verification: {String(verificationRequest.overallStatus || 'pending').replace(/_/g, ' ')}
+                  </span>
+                  <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold capitalize">
+                    Admin review: {verificationRequest.adminReviewStatus || 'pending'}
+                  </span>
+                  <span className="px-2 py-1 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                    {(verificationRequest.verifiedDocuments || []).length}/{(verificationRequest.requiredDocuments || []).length || '—'} required verified
+                  </span>
+                </div>
+              ) : null}
+
+              {digitalStatuses.length > 0 ? (
+                <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {digitalStatuses.map((item) => (
+                    <div key={item.key} className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                      <p className="text-xs font-bold text-gray-900 capitalize">{item.label}</p>
+                      <p className="text-[11px] font-semibold text-emerald-700 mt-1 capitalize">{item.status}</p>
+                      {item.documentNumberMasked ? (
+                        <p className="text-sm font-mono text-gray-800 mt-1">{item.documentNumberMasked}</p>
+                      ) : null}
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        {item.note}
+                        {item.verificationMode ? ` · via ${item.verificationMode}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {documentGallery.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {documentGallery.map((doc) => (
                     <DocThumb
-                      label={String(doc.key || `Document ${idx + 1}`).replace(/_/g, ' ')}
+                      key={doc.key || `${doc.documentType}_${doc.side}_${doc.url}`}
+                      label={doc.label || String(doc.documentType || 'Document').replace(/_/g, ' ')}
                       url={doc.url}
                       status={doc.status}
                       onPreview={setPreviewDoc}
+                      canApprove={Boolean(verificationRequest?._id && doc.documentType && !['intro_video', 'rc'].includes(doc.documentType))}
+                      approving={approvingDocType === doc.documentType}
+                      onApprove={() => handleApproveDocument(doc.documentType)}
                     />
-                    {doc.backUrl ? (
-                      <DocThumb
-                        label={`${String(doc.key || 'Document').replace(/_/g, ' ')} (Back)`}
-                        url={doc.backUrl}
-                        status={doc.status}
-                        onPreview={setPreviewDoc}
-                      />
-                    ) : null}
-                  </React.Fragment>
-                ))}
-                {(selectedEngineer.skillCertificates || []).map((cert, idx) => (
-                  <DocThumb
-                    key={`cert-${idx}`}
-                    label={cert.name || `Skill Certificate ${idx + 1}`}
-                    url={cert.documentUrl}
-                    onPreview={setPreviewDoc}
-                  />
-                ))}
-                {(cgpeStatus?.aadhaar?.fileUrl || cgpeStatus?.aadhaar?.backFileUrl) ? (
-                  <>
-                    <DocThumb label="CGPE Aadhaar File" url={cgpeStatus.aadhaar.fileUrl} status={cgpeStatus.aadhaar.physicalUploadStatus || cgpeStatus.aadhaar.status} onPreview={setPreviewDoc} />
-                    <DocThumb label="CGPE Aadhaar Back" url={cgpeStatus.aadhaar.backFileUrl} status={cgpeStatus.aadhaar.physicalUploadStatus || cgpeStatus.aadhaar.status} onPreview={setPreviewDoc} />
-                  </>
-                ) : null}
-                {(cgpeStatus?.pan?.fileUrl || cgpeStatus?.pan?.backFileUrl) ? (
-                  <>
-                    <DocThumb label="CGPE PAN File" url={cgpeStatus.pan.fileUrl} status={cgpeStatus.pan.physicalUploadStatus || cgpeStatus.pan.status} onPreview={setPreviewDoc} />
-                    <DocThumb label="CGPE PAN Back" url={cgpeStatus.pan.backFileUrl} status={cgpeStatus.pan.physicalUploadStatus || cgpeStatus.pan.status} onPreview={setPreviewDoc} />
-                  </>
-                ) : null}
-                {verificationDocuments.map((doc) => (
-                  <DocThumb
-                    key={doc._id}
-                    label={`${String(doc.documentType || 'Document').replace(/_/g, ' ')}${doc.side && doc.side !== 'single' ? ` (${doc.side})` : ''}`}
-                    url={doc.signedPreviewUrl || doc.fileUrl}
-                    status={doc.status}
-                    onPreview={setPreviewDoc}
-                  />
-                ))}
-              </div>
-              {!selectedEngineer.selfieUrl &&
-                !selectedEngineer.introVideoUrl &&
-                !selectedEngineer.aadhar?.document &&
-                !selectedEngineer.pan?.document &&
-                !(selectedEngineer.uploadedDocuments || []).length &&
-                !verificationDocuments.length && (
-                  <p className="text-sm text-gray-500 text-center py-6 border border-dashed border-gray-200 rounded-xl mt-2">
-                    No documents uploaded yet.
-                  </p>
-                )}
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 text-center py-6 border border-dashed border-gray-200 rounded-xl">
+                  {digitalStatuses.length
+                    ? 'No physical document images uploaded. Digital KYC status is shown above.'
+                    : 'No documents found yet. Reopen this view after refresh if KYC was done at signup.'}
+                </p>
+              )}
+
+              <p className="mt-3 text-[11px] text-gray-400">
+                Tip: Use <span className="font-semibold text-gray-600">Open Document Verification</span> for full-screen review, reject / re-upload, and CGPE status.
+              </p>
             </div>
 
-            {selectedEngineer.approvalStatus === 'pending' && (
-              <div className="flex gap-3 pt-4 border-t border-gray-200">
-                <button
-                  onClick={async () => {
-                    await handleApprove(selectedEngineer.id);
-                    setIsViewModalOpen(false);
-                    setSelectedEngineer(null);
-                  }}
-                  className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <FiCheck className="w-5 h-5" />
-                  Approve Engineer
-                </button>
-                <button
-                  onClick={async () => {
-                    await handleReject(selectedEngineer.id);
-                    setIsViewModalOpen(false);
-                    setSelectedEngineer(null);
-                  }}
-                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <FiX className="w-5 h-5" />
-                  Reject Engineer
-                </button>
-              </div>
-            )}
+            <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={openDocumentVerification}
+                className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <FiShield className="w-5 h-5" />
+                Review Documents
+              </button>
+              {selectedEngineer.approvalStatus === 'pending' && (
+                <>
+                  <button
+                    onClick={async () => {
+                      await handleApprove(selectedEngineer.id);
+                      setIsViewModalOpen(false);
+                      setSelectedEngineer(null);
+                    }}
+                    className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <FiCheck className="w-5 h-5" />
+                    Approve Engineer
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleReject(selectedEngineer.id);
+                      setIsViewModalOpen(false);
+                      setSelectedEngineer(null);
+                    }}
+                    className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <FiX className="w-5 h-5" />
+                    Reject Engineer
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         ) : null}
       </Modal>

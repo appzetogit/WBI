@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FiShield, FiCheckCircle, FiXCircle, FiAlertCircle, FiRefreshCw, 
@@ -10,6 +11,7 @@ import verificationService from '../../../../services/verificationService';
 import DocumentPreviewModal from '../../../../components/documents/DocumentPreviewModal';
 
 const VerificationManagement = ({ initialRole = '' }) => {
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('pending');
   const [loading, setLoading] = useState(false);
   const [requests, setRequests] = useState([]);
@@ -20,6 +22,8 @@ const VerificationManagement = ({ initialRole = '' }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [preview, setPreview] = useState({ open: false, url: '', title: '' });
+  const [ownerIdFilter] = useState(searchParams.get('ownerId') || '');
+  const deepLinkRequestId = searchParams.get('requestId') || '';
   
   // Modals for reject/re-upload reasons
   const [reasonModal, setReasonModal] = useState({ show: false, docType: null, actionType: null, reason: '' });
@@ -75,8 +79,10 @@ const VerificationManagement = ({ initialRole = '' }) => {
         page,
         limit: 10,
         roleType: roleFilter || undefined,
-        status: statusFilter || undefined,
-        search: searchQuery || undefined
+        // When deep-linking by owner, don't force status filter
+        status: ownerIdFilter ? undefined : (statusFilter || undefined),
+        search: searchQuery || undefined,
+        ownerId: ownerIdFilter || undefined
       });
       if (res.success) {
         setRequests(res.data || []);
@@ -140,7 +146,36 @@ const VerificationManagement = ({ initialRole = '' }) => {
     } else if (activeTab === 'logs') {
       fetchLogs();
     }
-  }, [activeTab, page, roleFilter, statusFilter, logsPage, logStatusFilter]);
+  }, [activeTab, page, roleFilter, statusFilter, logsPage, logStatusFilter, ownerIdFilter]);
+
+  // Deep-link: ?requestId=... or ?ownerId=...
+  useEffect(() => {
+    const openDeepLink = async () => {
+      if (deepLinkRequestId) {
+        setActiveTab('pending');
+        await handleViewDetail(deepLinkRequestId);
+        return;
+      }
+      if (ownerIdFilter) {
+        setActiveTab('pending');
+        setStatusFilter('');
+        try {
+          const res = await verificationService.getVerifications({
+            ownerId: ownerIdFilter,
+            roleType: roleFilter || initialRole || undefined,
+            limit: 5
+          });
+          if (res.success && res.data?.[0]?._id) {
+            await handleViewDetail(res.data[0]._id);
+          }
+        } catch (err) {
+          console.error('Deep-link ownerId failed', err);
+        }
+      }
+    };
+    openDeepLink();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkRequestId, ownerIdFilter]);
 
   // Handle tab switch
   const handleTabChange = (tab) => {

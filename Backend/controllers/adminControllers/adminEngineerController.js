@@ -108,13 +108,28 @@ const getEngineerDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const engineer = await Engineer.findById(id).select('-password').lean();
+    let engineer = await Engineer.findById(id).select('-password').lean();
 
     if (!engineer) {
       return res.status(404).json({
         success: false,
         message: 'Engineer not found'
       });
+    }
+
+    // Relink orphan signup KYC docs (tempEntityId → engineer._id) then hydrate profile fields
+    const {
+      ensureProfileKycLinked,
+      readCustomField
+    } = require('../../services/kycEntityLinkService');
+    let verificationRequest = null;
+    try {
+      const linkResult = await ensureProfileKycLinked('engineer', engineer);
+      verificationRequest = linkResult.verificationRequest || null;
+      // Reload after hydrate/remap so aadhar/pan URLs appear
+      engineer = await Engineer.findById(id).select('-password').lean();
+    } catch (linkErr) {
+      console.warn('[getEngineerDetails] KYC link warning:', linkErr.message);
     }
 
     // Get engineer booking stats
@@ -140,10 +155,14 @@ const getEngineerDetails = async (req, res) => {
 
     const VerificationDocument = require('../../models/VerificationDocument');
     const KYCVerification = require('../../models/KYCVerification');
+    const VerificationRequest = require('../../models/VerificationRequest');
 
-    const [verificationDocs, kycRecords] = await Promise.all([
+    const [verificationDocs, kycRecords, existingRequest] = await Promise.all([
       VerificationDocument.find({ ownerId: engineer._id }).sort({ documentType: 1, side: 1 }).lean(),
-      KYCVerification.find({ role: 'engineer', entityId: engineer._id }).lean()
+      KYCVerification.find({ role: 'engineer', entityId: engineer._id }).lean(),
+      verificationRequest
+        ? Promise.resolve(verificationRequest)
+        : VerificationRequest.findOne({ ownerId: engineer._id, ownerType: 'engineer' })
     ]);
 
     const documents = verificationDocs.map((d) => ({
@@ -151,6 +170,39 @@ const getEngineerDetails = async (req, res) => {
       signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
       verifiedBy: d.verifiedBy || d.reviewedBy || null
     }));
+
+    const isRealFileUrl = (url) =>
+      Boolean(url) &&
+      url !== 'digilocker-fetch' &&
+      (String(url).startsWith('http') || String(url).startsWith('data:') || String(url).startsWith('/'));
+
+    // Build a unified gallery from KYC + legacy profile fields when VerificationDocument is sparse
+    const gallery = [];
+    const digitalStatuses = [];
+    const pushGallery = (item) => {
+      if (!isRealFileUrl(item?.url)) return;
+      const already = gallery.some(
+        (g) =>
+          g.url === item.url ||
+          (g.documentType === item.documentType && g.side === (item.side || 'single') && g.source === item.source)
+      );
+      if (already) return;
+      gallery.push({ ...item, side: item.side || 'single' });
+    };
+
+    for (const d of documents) {
+      const url = isRealFileUrl(d.signedPreviewUrl) ? d.signedPreviewUrl : d.fileUrl;
+      pushGallery({
+        key: `${d.documentType}_${d.side || 'single'}`,
+        label: `${String(d.documentType).replace(/_/g, ' ')}${d.side && d.side !== 'single' ? ` (${d.side})` : ''}`,
+        documentType: d.documentType,
+        side: d.side || 'single',
+        url,
+        status: d.status,
+        source: 'verification_document',
+        docId: d._id
+      });
+    }
 
     const cgpeStatus = {};
     for (const rec of kycRecords) {
@@ -161,22 +213,148 @@ const getEngineerDetails = async (req, res) => {
         physicalUploadStatus: rec.physicalUploadStatus,
         documentNumberMasked: rec.documentNumberMasked,
         verifiedAt: rec.verifiedAt,
-        fileUrl: rec.fileUrl,
-        backFileUrl: rec.backFileUrl
+        fileUrl: isRealFileUrl(rec.fileUrl) ? rec.fileUrl : null,
+        backFileUrl: isRealFileUrl(rec.backFileUrl) ? rec.backFileUrl : null
       };
+
+      const hasGalleryDoc = gallery.some((g) => g.documentType === rec.documentType);
+
+      if (isRealFileUrl(rec.fileUrl) && !hasGalleryDoc) {
+        pushGallery({
+          key: `kyc_${rec.documentType}_front`,
+          label: `${String(rec.documentType).replace(/_/g, ' ')}`,
+          documentType: rec.documentType,
+          side: 'front',
+          url: rec.fileUrl,
+          status: rec.physicalUploadStatus === 'uploaded' ? 'pending' : (rec.status || 'pending'),
+          source: 'kyc'
+        });
+      }
+      if (isRealFileUrl(rec.backFileUrl)) {
+        pushGallery({
+          key: `kyc_${rec.documentType}_back`,
+          label: `${String(rec.documentType).replace(/_/g, ' ')} (back)`,
+          documentType: rec.documentType,
+          side: 'back',
+          url: rec.backFileUrl,
+          status: rec.physicalUploadStatus === 'uploaded' ? 'pending' : (rec.status || 'pending'),
+          source: 'kyc'
+        });
+      }
+
+      // Digital CGPE / DigiLocker verify without physical card image
+      if (!isRealFileUrl(rec.fileUrl) && !isRealFileUrl(rec.backFileUrl) && ['aadhaar', 'pan', 'bank'].includes(rec.documentType)) {
+        digitalStatuses.push({
+          key: `digital_${rec.documentType}`,
+          documentType: rec.documentType,
+          label: String(rec.documentType).replace(/_/g, ' '),
+          status: rec.status,
+          verificationMode: rec.verificationMode,
+          provider: rec.provider,
+          documentNumberMasked: rec.documentNumberMasked || null,
+          note:
+            rec.status === 'verified'
+              ? 'Verified digitally (no physical card image uploaded)'
+              : 'No physical card image uploaded'
+        });
+      }
     }
+
+    // Legacy profile media
+    const legacyDocs = [
+      { key: 'selfie', label: 'Selfie', url: engineer.selfieUrl, status: engineer.selfieStatus, documentType: 'selfie' },
+      { key: 'intro_video', label: 'Intro Video', url: engineer.introVideoUrl, status: engineer.introVideoStatus, documentType: 'intro_video' },
+      { key: 'aadhaar_front', label: 'Aadhaar Front', url: engineer.aadhar?.document || engineer.documents?.aadhaar || engineer.documents?.aadhaarFrontUrl, documentType: 'aadhaar', side: 'front' },
+      { key: 'aadhaar_back', label: 'Aadhaar Back', url: engineer.aadhar?.backDocument || engineer.documents?.aadhaarBackUrl, documentType: 'aadhaar', side: 'back' },
+      { key: 'pan', label: 'PAN Card', url: engineer.pan?.document || engineer.documents?.pan, documentType: 'pan', side: 'single' },
+      { key: 'driving_license', label: 'Driving License', url: engineer.drivingLicenseUrl || engineer.licenseUrl, status: engineer.licenseVerificationStatus, documentType: 'license' },
+      { key: 'rc', label: 'RC Document', url: engineer.rcUrl, documentType: 'rc' },
+      { key: 'education', label: 'Education Certificate', url: engineer.educationCertificateUrl, status: engineer.educationCertificateStatus, documentType: 'education_certificate' },
+      { key: 'police', label: 'Police Verification', url: engineer.policeVerification?.document, status: engineer.policeVerification?.status, documentType: 'police_verification' }
+    ];
+
+    for (const item of legacyDocs) {
+      const already = gallery.some((g) => g.documentType === item.documentType && g.side === (item.side || 'single'));
+      if (!already) {
+        pushGallery({
+          ...item,
+          side: item.side || 'single',
+          source: 'profile'
+        });
+      }
+    }
+
+    for (const doc of engineer.uploadedDocuments || []) {
+      pushGallery({
+        key: `uploaded_${doc.key}_front`,
+        label: String(doc.key || 'Document').replace(/_/g, ' '),
+        url: doc.url,
+        status: doc.status,
+        documentType: doc.key,
+        side: 'front',
+        source: 'uploadedDocuments'
+      });
+      if (doc.backUrl) {
+        pushGallery({
+          key: `uploaded_${doc.key}_back`,
+          label: `${String(doc.key || 'Document').replace(/_/g, ' ')} (back)`,
+          url: doc.backUrl,
+          status: doc.status,
+          documentType: doc.key,
+          side: 'back',
+          source: 'uploadedDocuments'
+        });
+      }
+    }
+
+    const requestDoc = existingRequest?.toObject
+      ? existingRequest.toObject()
+      : existingRequest;
 
     res.status(200).json({
       success: true,
       data: {
-        engineer,
+        engineer: {
+          ...engineer,
+          // Surface numbers from customFields when legacy fields empty
+          aadhar: {
+            ...(engineer.aadhar || {}),
+            number:
+              engineer.aadhar?.number ||
+              readCustomField(engineer, 'aadhaarNumber') ||
+              readCustomField(engineer, 'aadharNumber') ||
+              cgpeStatus?.aadhaar?.documentNumberMasked ||
+              ''
+          },
+          pan: {
+            ...(engineer.pan || {}),
+            number:
+              engineer.pan?.number ||
+              readCustomField(engineer, 'panNumber') ||
+              cgpeStatus?.pan?.documentNumberMasked ||
+              ''
+          }
+        },
         stats: jobStats[0] || {
           totalJobs: 0,
           completedJobs: 0,
           totalJobValue: 0
         },
-        documents,
-        cgpeStatus
+        documents: documents.filter((d) => isRealFileUrl(d.signedPreviewUrl || d.fileUrl)),
+        documentGallery: gallery,
+        digitalStatuses,
+        cgpeStatus,
+        verificationRequest: requestDoc
+          ? {
+              _id: requestDoc._id,
+              overallStatus: requestDoc.overallStatus,
+              adminReviewStatus: requestDoc.adminReviewStatus,
+              requiredDocuments: requestDoc.requiredDocuments,
+              submittedDocuments: requestDoc.submittedDocuments,
+              verifiedDocuments: requestDoc.verifiedDocuments,
+              rejectedDocuments: requestDoc.rejectedDocuments
+            }
+          : null
       }
     });
   } catch (error) {
