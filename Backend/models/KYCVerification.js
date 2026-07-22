@@ -25,10 +25,29 @@ const kycVerificationSchema = new mongoose.Schema({
   }, // To prevent duplicate checks (hash of PAN number or file hash)
   fileUrl: { 
     type: String 
-  }, // If uploaded
+  }, // Front / single side upload
   fileKey: { 
     type: String 
-  }, // Cloudinary/S3 key
+  },
+  backFileUrl: {
+    type: String
+  },
+  backFileKey: {
+    type: String
+  },
+  mimeType: {
+    type: String,
+    default: ''
+  },
+  fileSize: {
+    type: Number,
+    default: 0
+  },
+  physicalUploadStatus: {
+    type: String,
+    enum: ['not_required', 'pending', 'uploaded', 'rejected'],
+    default: 'not_required'
+  },
   provider: { 
     type: String, 
     enum: ['cgpe', 'manual', 'digilocker', 'razorpayx'], 

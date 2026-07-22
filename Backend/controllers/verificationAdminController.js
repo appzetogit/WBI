@@ -137,20 +137,46 @@ exports.getVerificationDetail = async (req, res) => {
     const ProfileModel = getOwnerModel(request.ownerType);
     const profile = await ProfileModel.findById(request.ownerId).select('-password').lean();
 
-    const docs = await VerificationDocument.find({ ownerId: request.ownerId }).lean();
+    const docs = await VerificationDocument.find({ ownerId: request.ownerId }).sort({ documentType: 1, side: 1 }).lean();
+    const KYCVerification = require('../models/KYCVerification');
+    const kycRecords = await KYCVerification.find({
+      role: request.ownerType,
+      entityId: request.ownerId
+    }).lean();
 
-    // Map documents and generate signed URLs for private files
-    const enrichedDocs = docs.map(d => ({
+    const enrichedDocs = docs.map((d) => ({
       ...d,
-      signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl // Fallback to raw URL if generation fails
+      signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
+      verifiedBy: d.verifiedBy || d.reviewedBy || null
     }));
+
+    const cgpeStatus = {};
+    for (const rec of kycRecords) {
+      cgpeStatus[rec.documentType] = {
+        status: rec.status,
+        provider: rec.provider,
+        verificationMode: rec.verificationMode,
+        physicalUploadStatus: rec.physicalUploadStatus,
+        documentNumberMasked: rec.documentNumberMasked,
+        verifiedAt: rec.verifiedAt,
+        fileUrl: rec.fileUrl,
+        backFileUrl: rec.backFileUrl
+      };
+    }
 
     res.status(200).json({
       success: true,
       data: {
         request,
         profile,
-        documents: enrichedDocs
+        documents: enrichedDocs,
+        cgpeStatus,
+        verificationSummary: {
+          aadhaar: cgpeStatus.aadhaar?.status || 'pending',
+          pan: cgpeStatus.pan?.status || 'pending',
+          overall: request.overallStatus,
+          adminReview: request.adminReviewStatus
+        }
       }
     });
 
@@ -178,16 +204,19 @@ exports.approveDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Verification request not found' });
     }
 
-    const doc = await VerificationDocument.findOne({ ownerId: request.ownerId, documentType });
-    if (!doc) {
+    const docs = await VerificationDocument.find({ ownerId: request.ownerId, documentType });
+    if (!docs.length) {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
-    doc.status = 'verified';
-    doc.rejectionReason = undefined;
-    doc.verifiedAt = new Date();
-    doc.reviewedBy = adminId;
-    await doc.save();
+    for (const doc of docs) {
+      doc.status = 'verified';
+      doc.rejectionReason = undefined;
+      doc.verifiedAt = new Date();
+      doc.verifiedBy = adminId;
+      doc.reviewedBy = adminId;
+      await doc.save();
+    }
 
     // Update Request tracking lists
     request.verifiedDocuments = [...new Set([...request.verifiedDocuments, documentType])];
@@ -213,13 +242,31 @@ exports.approveDocument = async (req, res) => {
     }
     await request.save();
 
+    try {
+      const { createNotification } = require('./notificationControllers/notificationController');
+      await createNotification({
+        userId: request.ownerId,
+        userModel: request.ownerType === 'engineer' ? 'Engineer' : 'Worker',
+        type: allRequiredVerified ? 'documents_approved' : 'document_approved',
+        title: allRequiredVerified ? 'Documents approved' : 'Document approved',
+        message: allRequiredVerified
+          ? 'All required documents were approved. Your account verification is complete.'
+          : `Your ${documentType.replace(/_/g, ' ')} was approved by admin.`,
+        relatedId: request._id,
+        relatedType: 'verification_request',
+        pushData: { type: 'document_approved', documentType }
+      });
+    } catch (notifyErr) {
+      console.warn('Approve notify skipped:', notifyErr.message);
+    }
+
     // Log admin activity
     await AdminActivityLog.create({
       adminId,
       action: 'DOCUMENT_APPROVE',
-      targetId: doc._id,
+      targetId: docs[0]._id,
       targetType: 'VerificationDocument',
-      details: { documentType, ownerId: request.ownerId },
+      details: { documentType, ownerId: request.ownerId, sides: docs.map((d) => d.side) },
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
@@ -228,7 +275,7 @@ exports.approveDocument = async (req, res) => {
       success: true,
       message: `Document ${documentType} approved successfully`,
       data: {
-        document: doc,
+        documents: docs,
         request
       }
     });
@@ -257,16 +304,23 @@ exports.rejectDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Verification request not found' });
     }
 
-    const doc = await VerificationDocument.findOne({ ownerId: request.ownerId, documentType });
-    if (!doc) {
+    const docs = await VerificationDocument.find({ ownerId: request.ownerId, documentType });
+    if (!docs.length) {
       return res.status(404).json({ success: false, message: 'Document not found' });
     }
 
-    doc.status = 'rejected';
-    doc.rejectionReason = rejectionReason;
-    doc.verifiedAt = undefined;
-    doc.reviewedBy = adminId;
-    await doc.save();
+    for (const doc of docs) {
+      doc.status = 'rejected';
+      doc.rejectionReason = rejectionReason;
+      doc.verifiedAt = undefined;
+      doc.reviewedBy = adminId;
+      doc.verifiedBy = adminId;
+      doc.rejectionHistory = [
+        ...(doc.rejectionHistory || []),
+        { reason: rejectionReason, rejectedBy: adminId, rejectedAt: new Date(), action: 'reject' }
+      ];
+      await doc.save();
+    }
 
     // Update Request tracking
     request.rejectedDocuments = [...new Set([...request.rejectedDocuments, documentType])];
@@ -282,11 +336,27 @@ exports.rejectDocument = async (req, res) => {
       'documents.status': 'Rejected'
     });
 
+    try {
+      const { createNotification } = require('./notificationControllers/notificationController');
+      await createNotification({
+        userId: request.ownerId,
+        userModel: request.ownerType === 'engineer' ? 'Engineer' : 'Worker',
+        type: 'document_rejected',
+        title: 'Document rejected',
+        message: `Your ${documentType.replace(/_/g, ' ')} was rejected. Reason: ${rejectionReason}. Please re-upload.`,
+        relatedId: request._id,
+        relatedType: 'verification_request',
+        pushData: { type: 'document_rejected', documentType, rejectionReason }
+      });
+    } catch (notifyErr) {
+      console.warn('Reject notify skipped:', notifyErr.message);
+    }
+
     // Log admin activity
     await AdminActivityLog.create({
       adminId,
       action: 'DOCUMENT_REJECT',
-      targetId: doc._id,
+      targetId: docs[0]._id,
       targetType: 'VerificationDocument',
       details: { documentType, rejectionReason, ownerId: request.ownerId },
       ipAddress: req.ip,
@@ -297,7 +367,7 @@ exports.rejectDocument = async (req, res) => {
       success: true,
       message: `Document ${documentType} rejected successfully`,
       data: {
-        document: doc,
+        documents: docs,
         request
       }
     });
@@ -345,7 +415,7 @@ exports.requestReupload = async (req, res) => {
     await request.save();
 
     // Trigger Notification to user
-    const { createNotification } = require('../notificationControllers/notificationController');
+    const { createNotification } = require('./notificationControllers/notificationController');
     await createNotification({
       userId: request.ownerId,
       userModel: request.ownerType === 'engineer' ? 'Engineer' : 'Worker',

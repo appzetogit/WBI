@@ -294,6 +294,15 @@ export const SocketProvider = ({ children }) => {
 
     // Listen for special Vendor Booking Requests
     if (userType === 'vendor') {
+      const refreshSupport = () => {
+        window.dispatchEvent(new Event('support:ticketUpdated'));
+        window.dispatchEvent(new Event('support:ticketCreated'));
+      };
+      newSocket.on('support:ticketCreated', refreshSupport);
+      newSocket.on('support:ticketUpdated', refreshSupport);
+      newSocket.on('support:ticketCommented', refreshSupport);
+      newSocket.on('support:slaBreach', refreshSupport);
+
       newSocket.on('new_booking_request', (data) => {
         // console.log('🚨 New Booking Request Alert:', data);
 

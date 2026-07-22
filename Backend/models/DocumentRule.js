@@ -30,7 +30,16 @@ const documentRuleSchema = new mongoose.Schema({
   maxFileSize: { 
     type: Number, 
     default: 5 * 1024 * 1024 // 5MB
-  }, 
+  },
+  /** When true, user must upload the physical document image/PDF even if CGPE/DigiLocker verified the number */
+  requirePhysicalUpload: {
+    type: Boolean,
+    default: false
+  },
+  requiresFrontAndBack: {
+    type: Boolean,
+    default: false
+  },
   sortOrder: { 
     type: Number, 
     default: 0 

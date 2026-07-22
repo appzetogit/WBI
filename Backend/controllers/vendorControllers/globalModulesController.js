@@ -4,9 +4,21 @@ const VendorGlobalPerformance = require('../../models/VendorGlobalPerformance');
 const VendorGlobalCompliance = require('../../models/VendorGlobalCompliance');
 const VendorGlobalNotification = require('../../models/VendorGlobalNotification');
 const VendorGlobalSupportTicket = require('../../models/VendorGlobalSupportTicket');
-const VendorGlobalSetting = require('../../models/VendorGlobalSetting');
+const SupportTicketAudit = require('../../models/SupportTicketAudit');
+const {
+  resolveSupportConfig,
+  publicConfigView,
+  createTicket,
+  transitionTicket,
+  addComment
+} = require('../../services/vendorSupportService');
 
 const vendorId = (req) => new mongoose.Types.ObjectId(req.user._id || req.user.id);
+const vendorActor = (req) => ({
+  role: 'vendor',
+  id: req.user._id || req.user.id,
+  name: req.user.businessName || req.user.name || req.user.email || 'Vendor'
+});
 const esc = (value) => new RegExp(String(value).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 const pageParams = (req) => {
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -142,6 +154,16 @@ exports.updateNotification = async (req, res) => {
   }
 };
 
+exports.getSupportConfig = async (req, res) => {
+  try {
+    const cfg = await resolveSupportConfig(req.query.serviceCategoryCode || '');
+    res.json({ success: true, data: publicConfigView(cfg) });
+  } catch (error) {
+    console.error('support config:', error);
+    res.status(500).json({ success: false, message: 'Failed to load support configuration' });
+  }
+};
+
 exports.getSupport = async (req, res) => {
   try {
     const vid = vendorId(req);
@@ -149,36 +171,68 @@ exports.getSupport = async (req, res) => {
     const filter = { vendorId: vid };
     if (req.query.status) filter.status = req.query.status;
     if (req.query.priority) filter.priority = req.query.priority;
-    if (req.query.categoryType) filter.category = req.query.categoryType;
-    await applyService(filter, vid, req.query.category);
+    if (req.query.categoryType || req.query.category) filter.category = req.query.categoryType || req.query.category;
+    if (req.query.tag) filter.tags = req.query.tag;
+    await applyService(filter, vid, req.query.categoryCode || req.query.serviceCategoryCode);
     if (req.query.search) {
       const term = esc(req.query.search);
       filter.$or = [{ subject: term }, { ticketCode: term }, { description: term }, { assignedTeam: term }];
     }
+    const sort = {};
+    const sortBy = req.query.sortBy || 'updatedAt';
+    const sortDir = req.query.sortDir === 'asc' ? 1 : -1;
+    sort[sortBy] = sortDir;
+
     const [data, total, stats] = await Promise.all([
-      VendorGlobalSupportTicket.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(limit).lean(),
+      VendorGlobalSupportTicket.find(filter).sort(sort).skip(skip).limit(limit).lean(),
       VendorGlobalSupportTicket.countDocuments(filter),
-      VendorGlobalSupportTicket.aggregate([{ $match: { vendorId: vid } }, { $group: { _id: '$status', count: { $sum: 1 }, avgResponse: { $avg: '$averageResponseMinutes' } } }])
+      VendorGlobalSupportTicket.aggregate([
+        { $match: { vendorId: vid } },
+        { $group: { _id: '$status', count: { $sum: 1 }, avgResponse: { $avg: '$averageResponseMinutes' } } }
+      ])
     ]);
-    res.json({ success: true, data, stats, pagination: meta(page, limit, total) });
+    const cfg = await resolveSupportConfig(req.query.serviceCategoryCode || '');
+    res.json({
+      success: true,
+      data,
+      stats,
+      pagination: meta(page, limit, total),
+      config: publicConfigView(cfg)
+    });
   } catch (error) {
     console.error('support:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch support tickets' });
   }
 };
 
+exports.getSupportTicket = async (req, res) => {
+  try {
+    const ticket = await VendorGlobalSupportTicket.findOne({
+      _id: req.params.id,
+      vendorId: vendorId(req)
+    }).lean();
+    if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found' });
+    const replies = (ticket.replies || []).filter((r) => !r.internal);
+    const audit = await SupportTicketAudit.find({ ticketId: ticket._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    res.json({ success: true, data: { ...ticket, replies, audit } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to load ticket' });
+  }
+};
+
 exports.createSupportTicket = async (req, res) => {
   try {
-    const ticket = await new VendorGlobalSupportTicket({
+    const result = await createTicket({
       vendorId: vendorId(req),
-      subject: req.body.subject || 'New support request',
-      description: req.body.description || '',
-      category: req.body.category || 'general',
-      priority: req.body.priority || 'medium',
-      serviceCategoryCode: req.body.serviceCategoryCode || '',
-      serviceCategoryName: req.body.serviceCategoryName || ''
-    }).save();
-    res.status(201).json({ success: true, data: ticket });
+      body: req.body,
+      actor: vendorActor(req),
+      req
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ success: false, message: result.message });
+    res.status(201).json({ success: true, data: result.data });
   } catch (error) {
     console.error('create ticket:', error);
     res.status(500).json({ success: false, message: 'Failed to create support ticket' });
@@ -189,14 +243,29 @@ exports.updateSupportTicket = async (req, res) => {
   try {
     const doc = await VendorGlobalSupportTicket.findOne({ _id: req.params.id, vendorId: vendorId(req) });
     if (!doc) return res.status(404).json({ success: false, message: 'Ticket not found' });
-    const { action, message } = req.body;
-    if (action === 'assign') doc.status = 'assigned';
-    else if (action === 'investigate') doc.status = 'investigation';
-    else if (action === 'resolve') doc.status = 'resolved';
-    else if (action === 'close') doc.status = 'closed';
-    if (message) doc.replies.push({ author: req.user.name || 'Vendor', role: 'vendor', message });
-    await doc.save();
-    res.json({ success: true, data: doc });
+
+    if (req.body.action === 'comment' || (!req.body.action && req.body.message)) {
+      const result = await addComment({
+        ticket: doc,
+        message: req.body.message,
+        internal: false,
+        attachments: req.body.attachments,
+        actor: vendorActor(req),
+        req
+      });
+      if (!result.ok) return res.status(result.status || 400).json({ success: false, message: result.message });
+      return res.json({ success: true, data: result.data });
+    }
+
+    const result = await transitionTicket({
+      ticket: doc,
+      action: req.body.action,
+      message: req.body.message,
+      actor: vendorActor(req),
+      req
+    });
+    if (!result.ok) return res.status(result.status || 400).json({ success: false, message: result.message });
+    res.json({ success: true, data: result.data });
   } catch (error) {
     console.error('update ticket:', error);
     res.status(500).json({ success: false, message: 'Failed to update support ticket' });
@@ -205,13 +274,10 @@ exports.updateSupportTicket = async (req, res) => {
 
 exports.getSettings = async (req, res) => {
   try {
-    const vid = vendorId(req);
-    const settings = await VendorGlobalSetting.findOneAndUpdate(
-      { vendorId: vid },
-      { $setOnInsert: { vendorId: vid } },
-      { upsert: true, new: true }
-    ).lean();
-    res.json({ success: true, data: settings });
+    const { hydrateVendorSettings } = require('../../services/vendorSettingsService');
+    const result = await hydrateVendorSettings(vendorId(req));
+    if (!result.ok) return res.status(result.status || 400).json({ success: false, message: result.message });
+    res.json({ success: true, data: result.data });
   } catch (error) {
     console.error('settings:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch settings' });
@@ -220,12 +286,10 @@ exports.getSettings = async (req, res) => {
 
 exports.updateSettings = async (req, res) => {
   try {
-    const settings = await VendorGlobalSetting.findOneAndUpdate(
-      { vendorId: vendorId(req) },
-      { $set: req.body },
-      { upsert: true, new: true, runValidators: true }
-    );
-    res.json({ success: true, data: settings });
+    const { updateVendorSettings } = require('../../services/vendorSettingsService');
+    const result = await updateVendorSettings(vendorId(req), req.body || {});
+    if (!result.ok) return res.status(result.status || 400).json({ success: false, message: result.message });
+    res.json({ success: true, data: result.data });
   } catch (error) {
     console.error('update settings:', error);
     res.status(500).json({ success: false, message: 'Failed to update settings' });

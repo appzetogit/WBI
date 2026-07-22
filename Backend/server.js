@@ -408,6 +408,8 @@ app.use('/api/admin/b2b-wallets', require('./routes/admin-routes/b2bWalletAdmin.
 app.use('/api/admin/b2b/invoices', require('./routes/admin-routes/b2bInvoiceAdmin.routes'));
 app.use('/api/admin/b2b/reports', require('./routes/admin-routes/b2bReportAdmin.routes'));
 app.use('/api/admin/b2b/support', require('./routes/admin-routes/b2bSupportAdmin.routes'));
+app.use('/api/admin/vendor-support', require('./routes/admin-routes/adminVendorSupport.routes'));
+app.use('/api/admin/vendor-settings', require('./routes/admin-routes/adminVendorSettings.routes'));
 
 // Admin routes
 app.use('/api/admin', require('./routes/admin-routes/cityManagement.routes.js'));
@@ -651,6 +653,14 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const { startPaymentExpiryScheduler } = require('./services/paymentExpiryScheduler');
         startPaymentExpiryScheduler();
         console.log('[Server] Payment Expiry Scheduler initialized');
+
+        // Vendor Support SLA / escalation (every 5 minutes)
+        const { ensureDefaultSupportConfig, processSlaEscalations } = require('./services/vendorSupportService');
+        ensureDefaultSupportConfig().catch((err) => console.error('[Support] seed config failed', err.message));
+        setInterval(() => {
+          processSlaEscalations(100).catch((err) => console.error('[Support] SLA job', err.message));
+        }, 5 * 60 * 1000);
+        console.log('[Server] Vendor Support SLA scheduler initialized');
         } else {
           console.log('[Server] Skipping in-process schedulers on PM2 worker', process.env.NODE_APP_INSTANCE);
         }

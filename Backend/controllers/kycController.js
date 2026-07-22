@@ -71,39 +71,73 @@ const logAudit = async (role, entityId, action, documentType, provider, status, 
 const syncToLegacy = async (role, entityId, documentType, status, fileUrl, fileKey, meta = {}) => {
   try {
     if (role === 'worker' || role === 'engineer') {
+      const side = meta.side || 'single';
       const docData = {
         ownerId: entityId,
         ownerType: role,
         documentType,
-        status: status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'under_review'),
+        side,
+        status: status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : (status === 'uploaded' ? 'uploaded' : 'under_review')),
         fileUrl: fileUrl || 'digilocker-fetch',
         fileKey: fileKey || 'digilocker-fetch',
         documentNumberMasked: meta.documentNumberMasked || null,
         cgpeRequestId: meta.transactionId || null,
         cgpeResponse: meta.rawResponse || null,
-        matchScore: meta.matchScore || null
+        matchScore: meta.matchScore || null,
+        mimeType: meta.mimeType || '',
+        fileSize: meta.fileSize || 0,
+        thumbnailUrl: meta.thumbnailUrl || '',
+        uploadedAt: new Date()
       };
-      
+
+      const existing = await VerificationDocument.findOne({ ownerId: entityId, documentType, side });
+      if (existing) {
+        docData.version = (existing.version || 1) + 1;
+      }
+
       await VerificationDocument.findOneAndUpdate(
-        { ownerId: entityId, documentType },
-        docData,
-        { upsert: true, new: true }
+        { ownerId: entityId, documentType, side },
+        { $set: docData },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
       );
-      
+
+      const ProfileModel = role === 'engineer' ? require('../models/Engineer') : require('../models/Worker');
+      const profileUpdate = {};
+
+      if (documentType === 'aadhaar' && fileUrl && fileUrl !== 'digilocker-fetch') {
+        if (side === 'back') {
+          profileUpdate['aadhar.backDocument'] = fileUrl;
+          profileUpdate['documents.aadhaarBackUrl'] = fileUrl;
+        } else {
+          profileUpdate['aadhar.document'] = fileUrl;
+          profileUpdate['documents.aadhaar'] = fileUrl;
+          profileUpdate['documents.aadhaarFrontUrl'] = fileUrl;
+        }
+      }
+      if (documentType === 'pan' && fileUrl && fileUrl !== 'digilocker-fetch') {
+        profileUpdate['pan.document'] = fileUrl;
+        profileUpdate['documents.pan'] = fileUrl;
+      }
+      if (documentType === 'selfie' && fileUrl && fileUrl !== 'digilocker-fetch' && role === 'engineer') {
+        profileUpdate.selfieUrl = fileUrl;
+        profileUpdate.selfieStatus = status === 'verified' ? 'approved' : 'pending';
+      }
+      if (documentType === 'profile_photo' && fileUrl && fileUrl !== 'digilocker-fetch') {
+        profileUpdate.profilePhoto = fileUrl;
+      }
+
       if (role === 'engineer') {
-        const Engineer = require('../models/Engineer');
-        const updateData = {};
         if (documentType === 'license') {
-          updateData.licenseVerificationStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'uploaded');
-          if (fileUrl) updateData.licenseUrl = fileUrl;
+          profileUpdate.licenseVerificationStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'uploaded');
+          if (fileUrl && fileUrl !== 'digilocker-fetch') profileUpdate.licenseUrl = fileUrl;
         } else if (documentType === 'education_certificate') {
-          updateData.educationCertificateStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'uploaded');
-          if (fileUrl) updateData.educationCertificateUrl = fileUrl;
+          profileUpdate.educationCertificateStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'uploaded');
+          if (fileUrl && fileUrl !== 'digilocker-fetch') profileUpdate.educationCertificateUrl = fileUrl;
         }
-        
-        if (Object.keys(updateData).length > 0) {
-          await Engineer.findByIdAndUpdate(entityId, updateData);
-        }
+      }
+
+      if (Object.keys(profileUpdate).length > 0) {
+        await ProfileModel.findByIdAndUpdate(entityId, profileUpdate);
       }
     } else if (role === 'vendor') {
       const updateData = {};
@@ -143,29 +177,206 @@ exports.getDocumentRules = async (req, res) => {
     
     let rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
     
-    // Seed default rules if empty
+    // Seed default rules if empty — CGPE modes preserved; physical upload required for ID cards
     if (rules.length === 0) {
       const defaultRules = [
-        { role, documentType: 'aadhaar', label: 'Aadhaar Card', required: true, verificationMode: 'digilocker', sortOrder: 1 },
-        { role, documentType: 'pan', label: 'PAN Card', required: true, verificationMode: 'api', sortOrder: 2 },
-        { role, documentType: 'bank', label: 'Bank Details', required: true, verificationMode: 'api', sortOrder: 3 },
-        { role, documentType: 'selfie', label: 'Selfie / Live Photo', required: true, verificationMode: 'upload_only', sortOrder: 4 }
+        {
+          role,
+          documentType: 'aadhaar',
+          label: 'Aadhaar Card',
+          required: true,
+          verificationMode: 'digilocker',
+          requirePhysicalUpload: true,
+          requiresFrontAndBack: true,
+          allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+          maxFileSize: 5 * 1024 * 1024,
+          sortOrder: 1
+        },
+        {
+          role,
+          documentType: 'pan',
+          label: 'PAN Card',
+          required: true,
+          verificationMode: 'api',
+          requirePhysicalUpload: true,
+          requiresFrontAndBack: false,
+          allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+          maxFileSize: 5 * 1024 * 1024,
+          sortOrder: 2
+        },
+        { role, documentType: 'bank', label: 'Bank Details', required: true, verificationMode: 'api', requirePhysicalUpload: false, sortOrder: 3 },
+        {
+          role,
+          documentType: 'selfie',
+          label: 'Selfie / Live Photo',
+          required: true,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png'],
+          maxFileSize: 5 * 1024 * 1024,
+          sortOrder: 4
+        },
+        {
+          role,
+          documentType: 'profile_photo',
+          label: 'Profile Photo',
+          required: true,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png'],
+          maxFileSize: 5 * 1024 * 1024,
+          sortOrder: 5
+        },
+        {
+          role,
+          documentType: 'address_proof',
+          label: 'Address Proof',
+          required: role === 'worker',
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+          maxFileSize: 8 * 1024 * 1024,
+          sortOrder: 6
+        }
       ];
+      if (role === 'engineer') {
+        defaultRules.push(
+          {
+            role: 'engineer',
+            documentType: 'education_certificate',
+            label: 'Education / Degree Certificate',
+            required: true,
+            verificationMode: 'upload_only',
+            requirePhysicalUpload: true,
+            allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+            maxFileSize: 8 * 1024 * 1024,
+            sortOrder: 7
+          },
+          {
+            role: 'engineer',
+            documentType: 'experience_certificate',
+            label: 'Experience Certificate',
+            required: false,
+            verificationMode: 'upload_only',
+            requirePhysicalUpload: true,
+            allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+            maxFileSize: 8 * 1024 * 1024,
+            sortOrder: 8
+          },
+          {
+            role: 'engineer',
+            documentType: 'license',
+            label: 'Professional License',
+            required: false,
+            verificationMode: 'api',
+            requirePhysicalUpload: false,
+            sortOrder: 9
+          }
+        );
+      }
+      if (role === 'worker') {
+        defaultRules.push({
+          role: 'worker',
+          documentType: 'skill_certificate',
+          label: 'Skill Certificate',
+          required: false,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+          maxFileSize: 8 * 1024 * 1024,
+          sortOrder: 7
+        });
+      }
       await DocumentRule.insertMany(defaultRules);
       rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
+    } else {
+      // Backward-compatible migration: enable physical uploads on existing ID rules without changing CGPE mode
+      await DocumentRule.updateMany(
+        { role, documentType: 'aadhaar', requirePhysicalUpload: { $ne: true } },
+        { $set: { requirePhysicalUpload: true, requiresFrontAndBack: true } }
+      );
+      await DocumentRule.updateMany(
+        { role, documentType: 'pan', requirePhysicalUpload: { $ne: true } },
+        { $set: { requirePhysicalUpload: true } }
+      );
+      rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
     }
-    
-    // Inject Engineer specific rules if missing
+
+    // Inject Engineer specific upload rules if missing (do not alter CGPE modes)
     if (role === 'engineer') {
-      const hasLicense = rules.find(r => r.documentType === 'license');
-      if (!hasLicense) {
-        const engineerRules = [
-          { role: 'engineer', documentType: 'license', label: 'Professional License', required: true, verificationMode: 'api', sortOrder: 5 },
-          { role: 'engineer', documentType: 'education_certificate', label: 'Education Certificate', required: true, verificationMode: 'upload_only', sortOrder: 6 }
-        ];
-        await DocumentRule.insertMany(engineerRules);
-        rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
+      const needed = [
+        {
+          documentType: 'education_certificate',
+          label: 'Education / Degree Certificate',
+          required: true,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          sortOrder: 7
+        },
+        {
+          documentType: 'experience_certificate',
+          label: 'Experience Certificate',
+          required: false,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          sortOrder: 8
+        },
+        {
+          documentType: 'profile_photo',
+          label: 'Profile Photo',
+          required: true,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          sortOrder: 5
+        }
+      ];
+      for (const item of needed) {
+        const exists = rules.find((r) => r.documentType === item.documentType);
+        if (!exists) {
+          await DocumentRule.create({
+            role: 'engineer',
+            ...item,
+            allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+            maxFileSize: 8 * 1024 * 1024,
+            isActive: true
+          });
+        }
       }
+      rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
+    }
+
+    if (role === 'worker') {
+      const needed = [
+        {
+          documentType: 'profile_photo',
+          label: 'Profile Photo',
+          required: true,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          sortOrder: 5
+        },
+        {
+          documentType: 'address_proof',
+          label: 'Address Proof',
+          required: true,
+          verificationMode: 'upload_only',
+          requirePhysicalUpload: true,
+          sortOrder: 6
+        }
+      ];
+      for (const item of needed) {
+        const exists = rules.find((r) => r.documentType === item.documentType);
+        if (!exists) {
+          await DocumentRule.create({
+            role: 'worker',
+            ...item,
+            allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+            maxFileSize: 8 * 1024 * 1024,
+            isActive: true
+          });
+        }
+      }
+      rules = await DocumentRule.find({ role, isActive: true }).sort({ sortOrder: 1 });
     }
     
     res.json({ success: true, data: rules });
@@ -419,27 +630,97 @@ exports.verifyBank = async (req, res) => {
 
 exports.uploadDocument = async (req, res) => {
   try {
-    const { role, entityId, documentType, fileUrl, fileKey } = req.body;
-    if (!documentType || !fileUrl) return res.status(400).json({ success: false, message: 'documentType and fileUrl are required' });
-    
+    const {
+      role,
+      entityId,
+      documentType,
+      fileUrl,
+      fileKey,
+      side = 'single',
+      mimeType = '',
+      fileSize = 0,
+      thumbnailUrl = ''
+    } = req.body;
+    if (!documentType || !fileUrl) {
+      return res.status(400).json({ success: false, message: 'documentType and fileUrl are required' });
+    }
+
+    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf', ''];
+    if (mimeType && !allowedMimes.includes(String(mimeType).toLowerCase()) && !String(mimeType).startsWith('image/')) {
+      return res.status(400).json({ success: false, message: 'Invalid file type. Allowed: JPG, JPEG, PNG, PDF' });
+    }
+    if (fileSize && Number(fileSize) > 10 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'File size must be 10MB or less' });
+    }
+
+    const normalizedSide = ['front', 'back', 'single'].includes(side) ? side : 'single';
+    const rule = await DocumentRule.findOne({ role, documentType, isActive: true });
+
     if (entityId) {
+      const kycPatch = {
+        provider: 'manual',
+        verificationMode: rule?.verificationMode || 'upload_only',
+        mimeType: mimeType || '',
+        fileSize: Number(fileSize) || 0,
+        physicalUploadStatus: 'uploaded',
+        status: rule?.verificationMode === 'upload_only' ? 'pending' : undefined
+      };
+
+      if (normalizedSide === 'back') {
+        kycPatch.backFileUrl = fileUrl;
+        kycPatch.backFileKey = fileKey || fileUrl;
+      } else {
+        kycPatch.fileUrl = fileUrl;
+        kycPatch.fileKey = fileKey || fileUrl;
+      }
+
+      // Do not overwrite CGPE verified status with pending when this is a physical add-on upload
+      const existing = await KYCVerification.findOne({ role, entityId, documentType });
+      if (existing?.status === 'verified') {
+        delete kycPatch.status;
+      } else if (kycPatch.status === undefined) {
+        kycPatch.status = 'pending';
+      }
+
       await KYCVerification.findOneAndUpdate(
         { role, entityId, documentType },
-        {
-          fileUrl,
-          fileKey,
-          provider: 'manual',
-          verificationMode: 'upload_only',
-          status: 'pending' // Needs manual review or just uploaded state
-        },
+        { $set: kycPatch },
         { upsert: true, new: true }
       );
-      
-      await syncToLegacy(role, entityId, documentType, 'uploaded', fileUrl, fileKey, {});
-      await logAudit(role, entityId, 'DOCUMENT_UPLOAD', documentType, 'manual', 'pending', 'Document uploaded', req);
+
+      await syncToLegacy(role, entityId, documentType, 'uploaded', fileUrl, fileKey || fileUrl, {
+        side: normalizedSide,
+        mimeType,
+        fileSize: Number(fileSize) || 0,
+        thumbnailUrl
+      });
+      await logAudit(role, entityId, 'DOCUMENT_UPLOAD', documentType, 'manual', 'pending', `Document uploaded (${normalizedSide})`, req);
+
+      // Notify under-review when all required physical uploads exist (non-blocking)
+      try {
+        if (role === 'worker' || role === 'engineer') {
+          const { createNotification } = require('./notificationControllers/notificationController');
+          await createNotification({
+            userId: entityId,
+            userModel: role === 'engineer' ? 'Engineer' : 'Worker',
+            type: 'document_uploaded',
+            title: 'Document uploaded',
+            message: `Your ${documentType.replace(/_/g, ' ')} (${normalizedSide}) was uploaded and is pending review.`,
+            relatedId: entityId,
+            relatedType: 'kyc_document',
+            pushData: { type: 'document_uploaded', documentType, side: normalizedSide }
+          });
+        }
+      } catch (notifyErr) {
+        console.warn('[KYC] upload notify skipped:', notifyErr.message);
+      }
     }
-    
-    res.json({ success: true, message: 'Document uploaded successfully' });
+
+    res.json({
+      success: true,
+      message: 'Document uploaded successfully',
+      data: { documentType, side: normalizedSide, fileUrl }
+    });
   } catch (error) {
     console.error('[KYC] uploadDocument Error:', error);
     res.status(400).json({ success: false, message: error.message || 'Failed to upload document' });

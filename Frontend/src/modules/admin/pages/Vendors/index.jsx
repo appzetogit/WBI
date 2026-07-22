@@ -15,6 +15,8 @@ import ProjectTemplates from '../ProjectTemplates';
 import AssignmentConfig from '../AssignmentConfig';
 import ServiceManagement from '../ServiceManagement';
 import FormBuilder from '../FormBuilder';
+import VendorSupport from './VendorSupport';
+import VendorSettings from './VendorSettings';
 import AdminHubTabs from '../../components/layout/AdminHubTabs';
 
 const VENDOR_TABS = [
@@ -23,6 +25,8 @@ const VENDOR_TABS = [
   { to: 'analytics', label: 'Analytics' },
   { to: 'payments', label: 'Payments' },
   { to: 'settlements/pending', label: 'Settlements', activePrefix: 'settlements' },
+  { to: 'support', label: 'Support' },
+  { to: 'settings-module', label: 'Settings Module' },
   { to: 'service-management', label: 'Service Mgmt', activePrefix: 'service-management' },
   { to: 'services-catalog', label: 'Services' },
   { to: 'parts-catalog', label: 'Parts' },
@@ -50,6 +54,8 @@ const Vendors = () => {
           <Route path="bookings" element={<VendorBookings />} />
           <Route path="analytics" element={<VendorAnalytics />} />
           <Route path="payments" element={<VendorPayments />} />
+          <Route path="support" element={<VendorSupport />} />
+          <Route path="settings-module" element={<VendorSettings />} />
           <Route path="settlements/vendor/:vendorId" element={<VendorLedger />} />
           <Route path="settlements/*" element={<SettlementManagement />} />
           <Route path="service-management" element={<ServiceManagement />} />

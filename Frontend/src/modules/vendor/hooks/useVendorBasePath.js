@@ -21,11 +21,16 @@ export default function useVendorBasePath() {
     ? serviceSlug
     : resolvedPrimary;
 
-  return useMemo(() => ({
-    slug,
-    basePath: `/vendor/${slug}`,
-    serviceRoutes: routes,
-    primaryService: routes.find((r) => r.slug === slug) || routes[0] || null,
-    path: (rest = 'dashboard') => vendorPath(slug, rest)
-  }), [slug, routes]);
+  return useMemo(() => {
+    const primaryService = routes.find((r) => r.slug === slug) || routes[0] || null;
+    return {
+      slug,
+      basePath: `/vendor/${slug}`,
+      serviceRoutes: routes,
+      primaryService,
+      categoryCode: primaryService?.categoryCode || primaryService?.code || '',
+      categoryName: primaryService?.categoryName || primaryService?.name || primaryService?.label || '',
+      path: (rest = 'dashboard') => vendorPath(slug, rest)
+    };
+  }, [slug, routes]);
 }

@@ -3,10 +3,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FiShield, FiCheckCircle, FiXCircle, FiAlertCircle, FiRefreshCw, 
   FiExternalLink, FiSearch, FiSliders, FiClock, FiEye, FiChevronRight,
-  FiUser, FiBriefcase, FiCheck, FiX, FiInfo
+  FiUser, FiBriefcase, FiCheck, FiX, FiInfo, FiDownload, FiMaximize2
 } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import verificationService from '../../../../services/verificationService';
+import DocumentPreviewModal from '../../../../components/documents/DocumentPreviewModal';
 
 const VerificationManagement = ({ initialRole = '' }) => {
   const [activeTab, setActiveTab] = useState('pending');
@@ -18,6 +19,7 @@ const VerificationManagement = ({ initialRole = '' }) => {
   const [statusFilter, setStatusFilter] = useState('pending_verification');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [preview, setPreview] = useState({ open: false, url: '', title: '' });
   
   // Modals for reject/re-upload reasons
   const [reasonModal, setReasonModal] = useState({ show: false, docType: null, actionType: null, reason: '' });
@@ -840,33 +842,37 @@ const VerificationManagement = ({ initialRole = '' }) => {
                 {/* Profile Card Section */}
                 <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Contact Details</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Personal Information</p>
                     <p className="text-sm font-bold text-slate-800">{selectedRequest.profile?.name}</p>
                     <p className="text-xs text-slate-500">{selectedRequest.profile?.phone}</p>
                     <p className="text-xs text-slate-500">{selectedRequest.profile?.email}</p>
                   </div>
                   
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Registration Info</p>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Verification Status</p>
                     <p className="text-sm font-bold text-slate-800 capitalize">{selectedRequest.request.ownerType}</p>
-                    <p className="text-xs text-slate-500">Service Category: {selectedRequest.profile?.serviceCategory || 'Not Selected'}</p>
-                    <p className="text-xs text-slate-500">Address: {selectedRequest.profile?.address?.city || 'No Location'}</p>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {getStatusBadge(selectedRequest.request.overallStatus)}
+                      <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full text-[10px] font-semibold capitalize">
+                        Admin: {selectedRequest.request.adminReviewStatus || 'pending'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">Service: {selectedRequest.profile?.serviceCategory || selectedRequest.profile?.serviceCategories?.join?.(', ') || '—'}</p>
                   </div>
 
                   <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Overall Progress</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {getStatusBadge(selectedRequest.request.overallStatus)}
-                    </div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">CGPE / ID Status</p>
+                    <p className="text-xs text-slate-600">Aadhaar: <span className="font-bold capitalize">{selectedRequest.verificationSummary?.aadhaar || selectedRequest.cgpeStatus?.aadhaar?.status || 'pending'}</span></p>
+                    <p className="text-xs text-slate-600">PAN: <span className="font-bold capitalize">{selectedRequest.verificationSummary?.pan || selectedRequest.cgpeStatus?.pan?.status || 'pending'}</span></p>
                     <p className="text-xs text-slate-400 mt-1 font-semibold">
-                      {selectedRequest.request.verifiedDocuments?.length} of {selectedRequest.request.requiredDocuments?.length} mandatory verified
+                      {selectedRequest.request.verifiedDocuments?.length || 0} of {selectedRequest.request.requiredDocuments?.length || 0} mandatory verified
                     </p>
                   </div>
                 </div>
 
                 {/* Documents Checker Checklist */}
                 <div className="space-y-4">
-                  <h4 className="font-black text-slate-800 text-sm">Uploaded Documents Status</h4>
+                  <h4 className="font-black text-slate-800 text-sm">All Uploaded Documents</h4>
                   
                   <div className="space-y-4">
                     {selectedRequest.documents.length === 0 ? (
@@ -874,30 +880,41 @@ const VerificationManagement = ({ initialRole = '' }) => {
                         No documents have been uploaded by this user yet.
                       </div>
                     ) : (
-                      selectedRequest.documents.map(doc => (
+                      selectedRequest.documents.map(doc => {
+                        const previewUrl = doc.signedPreviewUrl || doc.fileUrl;
+                        const isPdf = String(previewUrl || '').toLowerCase().includes('.pdf');
+                        return (
                         <div key={doc._id} className="border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
                           
                           {/* Doc Banner / Summary */}
                           <div className="bg-slate-50/50 p-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <h5 className="font-bold capitalize text-sm">{doc.documentType.replace('_', ' ')}</h5>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h5 className="font-bold capitalize text-sm">{String(doc.documentType).replace(/_/g, ' ')}{doc.side && doc.side !== 'single' ? ` (${doc.side})` : ''}</h5>
                                 <span className="text-[10px] font-bold bg-slate-200 px-2 py-0.5 rounded text-slate-600">{doc.documentNumberMasked || 'No Doc Number'}</span>
+                                {doc.mimeType ? <span className="text-[10px] text-slate-400">{doc.mimeType}</span> : null}
                               </div>
-                              {doc.matchScore && (
+                              <p className="text-[11px] text-slate-400">
+                                Uploaded {doc.uploadedAt || doc.createdAt ? new Date(doc.uploadedAt || doc.createdAt).toLocaleString('en-IN') : '—'}
+                                {doc.fileSize ? ` · ${(doc.fileSize / 1024).toFixed(0)} KB` : ''}
+                                {doc.version ? ` · v${doc.version}` : ''}
+                              </p>
+                              {doc.rejectionReason ? (
+                                <p className="text-xs font-semibold text-rose-600">Admin note: {doc.rejectionReason}</p>
+                              ) : null}
+                              {doc.matchScore ? (
                                 <p className="text-xs font-semibold flex items-center gap-1.5">
                                   Face Match Score: 
                                   <span className={`font-bold ${doc.matchScore >= 70 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                     {doc.matchScore}%
                                   </span>
                                 </p>
-                              )}
+                              ) : null}
                             </div>
 
                             <div className="flex items-center gap-3">
                               {getStatusBadge(doc.status)}
                               
-                              {/* Quick Action Button Dropdowns */}
                               <div className="flex items-center gap-1">
                                 <button
                                   onClick={() => triggerDocAction('approve', doc.documentType)}
@@ -928,30 +945,46 @@ const VerificationManagement = ({ initialRole = '' }) => {
                             </div>
                           </div>
 
-                          {/* Doc Preview / Cloudinary + API Details */}
                           <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                            
-                            {/* File Preview */}
                             <div className="bg-[#F8FAFC] border border-slate-100 p-3 rounded-xl flex flex-col items-center justify-center relative min-h-64 group">
-                              <img fetchPriority="low" loading="lazy" 
-                                src={doc.signedPreviewUrl || doc.fileUrl} 
-                                alt={doc.documentType} 
-                                className="max-h-60 object-contain rounded shadow-sm bg-white" 
-                                onError={(e) => { e.target.style.display = 'none'; }}
-                              />
-                              <div className="mt-3 flex items-center gap-2">
+                              {isPdf ? (
+                                <div className="text-slate-400 text-sm font-semibold">PDF Document</div>
+                              ) : (
+                                <img fetchPriority="low" loading="lazy" 
+                                  src={previewUrl} 
+                                  alt={doc.documentType} 
+                                  className="max-h-60 object-contain rounded shadow-sm bg-white" 
+                                  onError={(e) => { e.target.style.display = 'none'; }}
+                                />
+                              )}
+                              <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreview({ open: true, url: previewUrl, title: `${doc.documentType} ${doc.side || ''}` })}
+                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                                >
+                                  <FiMaximize2 /> Full Screen
+                                </button>
                                 <a 
-                                  href={doc.signedPreviewUrl || doc.fileUrl} 
+                                  href={previewUrl} 
+                                  download
                                   target="_blank" 
                                   rel="noopener noreferrer" 
-                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
                                 >
-                                  Open Secured File <FiExternalLink />
+                                  <FiDownload /> Download
+                                </a>
+                                <a 
+                                  href={previewUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                                >
+                                  Open <FiExternalLink />
                                 </a>
                               </div>
                             </div>
 
-                            {/* API Verification Details Payload */}
                             <div className="bg-[#0F172A] text-slate-300 p-4 rounded-xl border border-slate-800 flex flex-col min-h-64">
                               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                                 <FiInfo /> CGPE API Verification Payload
@@ -974,14 +1007,17 @@ const VerificationManagement = ({ initialRole = '' }) => {
                                 <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4">
                                   <FiAlertCircle className="w-8 h-8 mb-2" />
                                   <p className="text-xs">No instant API verification payload recorded. Requires manual review or CGPE retry.</p>
+                                  {selectedRequest.cgpeStatus?.[doc.documentType] ? (
+                                    <p className="text-[11px] text-emerald-400 mt-2">
+                                      KYC status: {selectedRequest.cgpeStatus[doc.documentType].status} ({selectedRequest.cgpeStatus[doc.documentType].provider})
+                                    </p>
+                                  ) : null}
                                 </div>
                               )}
                             </div>
-
                           </div>
-
                         </div>
-                      ))
+                      );})
                     )}
                   </div>
                 </div>
@@ -992,6 +1028,13 @@ const VerificationManagement = ({ initialRole = '' }) => {
           </>
         )}
       </AnimatePresence>
+
+      <DocumentPreviewModal
+        open={preview.open}
+        url={preview.url}
+        title={preview.title}
+        onClose={() => setPreview({ open: false, url: '', title: '' })}
+      />
 
       {/* REASON MODAL FOR REJECTION / REUPLOAD */}
       {reasonModal.show && (

@@ -3,6 +3,8 @@ import { FiCheckCircle, FiAlertCircle, FiUpload, FiLoader, FiShield } from 'reac
 import { toast } from 'react-hot-toast';
 import { kycService } from '../../services/kycService';
 import { uploadToCloudinary } from '../../utils/cloudinaryUpload';
+import DocumentUploadCard from '../documents/DocumentUploadCard';
+import DocumentPreviewModal from '../documents/DocumentPreviewModal';
 
 /**
  * Compress an image File/Blob to max 1200px width/height at 80% JPEG quality.
@@ -53,6 +55,7 @@ const KYCVerificationStep = forwardRef(({
   const [uploadProgress, setUploadProgress] = useState({}); // { [documentType]: 0-100 }
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [aadhaarOtp, setAadhaarOtp] = useState('');
+  const [preview, setPreview] = useState({ open: false, url: '', title: '' });
   const aadhaarSessionKey = entityId ? `kyc_aadhaar_${entityId}` : 'kyc_aadhaar_draft';
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = useRef(null);
@@ -363,60 +366,116 @@ const KYCVerificationStep = forwardRef(({
     }
   };
 
-  const handleFileUpload = async (e, rule) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const uploadProgressKey = (documentType, side = 'single') =>
+    side === 'single' ? documentType : `${documentType}:${side}`;
 
+  const isCgpeComplete = (rule, vState = {}) => {
+    const status = vState.status;
+    if (rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') {
+      return status === 'uploaded' || status === 'verified';
+    }
+    return status === 'verified';
+  };
+
+  const isPhysicalComplete = (rule, vState = {}) => {
+    if (!rule.requirePhysicalUpload && rule.verificationMode !== 'upload_only' && rule.verificationMode !== 'ocr' && rule.verificationMode !== 'manual') {
+      return true;
+    }
+    if (rule.requiresFrontAndBack) {
+      return Boolean(vState.frontUrl && vState.backUrl);
+    }
+    return Boolean(vState.fileUrl || vState.frontUrl);
+  };
+
+  const isRuleComplete = (rule, vState = {}) => isCgpeComplete(rule, vState) && isPhysicalComplete(rule, vState);
+
+  const handlePhysicalUpload = async (file, rule, side = 'single') => {
+    if (!file) return;
     const maxSize = rule.maxFileSize || 5 * 1024 * 1024;
     if (file.size > maxSize) {
       return toast.error(`File size must be less than ${maxSize / (1024 * 1024)}MB`);
     }
 
-    setActiveUploads(p => ({ ...p, [rule.documentType]: true }));
+    const key = uploadProgressKey(rule.documentType, side);
+    setActiveUploads((p) => ({ ...p, [key]: true }));
     try {
       let fileToUpload = file;
-
-      // Compress images before upload to reduce upload size & time
       if (file.type.startsWith('image/')) {
         try {
           fileToUpload = await compressImage(file);
         } catch {
-          // If compression fails, fall back to original file
           fileToUpload = file;
         }
       }
 
-      // Upload directly to Cloudinary (binary, not base64)
       const fileUrl = await uploadToCloudinary(fileToUpload, 'kyc_documents', (pct) => {
-        setUploadProgress(p => ({ ...p, [rule.documentType]: pct }));
+        setUploadProgress((p) => ({ ...p, [key]: pct }));
       });
 
-      // Save the Cloudinary URL to backend (small JSON payload, not the file bytes)
-      const res = await kycService.uploadDocument({ 
-        role, entityId, documentType: rule.documentType, fileUrl, fileKey: fileToUpload.name
+      const res = await kycService.uploadDocument({
+        role,
+        entityId,
+        documentType: rule.documentType,
+        fileUrl,
+        fileKey: fileToUpload.name,
+        side,
+        mimeType: fileToUpload.type || file.type,
+        fileSize: fileToUpload.size || file.size
       });
 
       if (res.success) {
-        toast.success(`${rule.label} uploaded successfully`);
-        setVerifications(p => ({ ...p, [rule.documentType]: { status: 'uploaded', fileUrl } }));
+        toast.success(`${rule.label}${side !== 'single' ? ` (${side})` : ''} uploaded`);
+        setVerifications((p) => {
+          const prev = p[rule.documentType] || {};
+          const next = { ...prev };
+          if (side === 'front') next.frontUrl = fileUrl;
+          else if (side === 'back') next.backUrl = fileUrl;
+          else next.fileUrl = fileUrl;
+
+          // upload_only rules: mark uploaded; CGPE rules keep verified status
+          if (
+            rule.verificationMode === 'upload_only' ||
+            rule.verificationMode === 'ocr' ||
+            rule.verificationMode === 'manual'
+          ) {
+            next.status = 'uploaded';
+          } else if (!next.status || next.status === 'failed') {
+            next.status = prev.status || 'pending';
+          }
+          next.physicalUploaded = true;
+          return { ...p, [rule.documentType]: next };
+        });
       }
     } catch (err) {
       toast.error(err.message || 'File upload failed');
     } finally {
-      setActiveUploads(p => ({ ...p, [rule.documentType]: false }));
-      setUploadProgress(p => ({ ...p, [rule.documentType]: 0 }));
+      setActiveUploads((p) => ({ ...p, [key]: false }));
+      setUploadProgress((p) => ({ ...p, [key]: 0 }));
     }
+  };
+
+  const handleFileUpload = async (e, rule) => {
+    const file = e.target.files?.[0];
+    if (e?.target) e.target.value = '';
+    await handlePhysicalUpload(file, rule, 'single');
   };
 
   useImperativeHandle(ref, () => ({
     validate: () => {
       for (const rule of rules) {
-        if (rule.required) {
-          const status = verifications[rule.documentType]?.status;
-          if (!status || status === 'failed' || status === 'rejected') {
-            toast.error(`Please complete verification for ${rule.label}`);
-            return false;
-          }
+        if (!rule.required) continue;
+        const vState = verifications[rule.documentType] || {};
+        if (!isCgpeComplete(rule, vState)) {
+          toast.error(`Please complete verification for ${rule.label}`);
+          return false;
+        }
+        if (!isPhysicalComplete(rule, vState)) {
+          toast.error(
+            rule.requiresFrontAndBack
+              ? `Please upload front and back images for ${rule.label}`
+              : `Please upload the document file for ${rule.label}`
+          );
+          return false;
         }
       }
       return true;
@@ -438,27 +497,51 @@ const KYCVerificationStep = forwardRef(({
       <div className="grid gap-4">
         {rules.map(rule => {
           const vState = verifications[rule.documentType] || {};
-          const isVerified = vState.status === 'verified' || vState.status === 'uploaded';
+          const cgpeDone = isCgpeComplete(rule, vState);
+          const physicalDone = isPhysicalComplete(rule, vState);
+          const isComplete = isRuleComplete(rule, vState);
           const isFailed = vState.status === 'failed';
+          const needsPhysical =
+            rule.requirePhysicalUpload ||
+            rule.verificationMode === 'upload_only' ||
+            rule.verificationMode === 'ocr' ||
+            rule.verificationMode === 'manual';
+          const showPhysicalUploader =
+            needsPhysical &&
+            (rule.verificationMode === 'upload_only' ||
+              rule.verificationMode === 'ocr' ||
+              rule.verificationMode === 'manual' ||
+              cgpeDone);
 
           return (
-            <div key={rule.documentType} className={`p-4 border rounded-xl transition-all ${isVerified ? 'border-green-200 bg-green-50/30' : isFailed ? 'border-red-200 bg-red-50/30' : 'border-gray-200 bg-white'}`}>
+            <div key={rule.documentType} className={`p-4 border rounded-xl transition-all ${isComplete ? 'border-green-200 bg-green-50/30' : isFailed ? 'border-red-200 bg-red-50/30' : 'border-gray-200 bg-white'}`}>
               <div className="flex justify-between items-center mb-3">
                 <h4 className="font-semibold text-gray-800 text-sm">{rule.label} {rule.required && <span className="text-red-500">*</span>}</h4>
-                {isVerified ? (
-                  <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> {vState.status === 'verified' ? 'Verified' : 'Uploaded'}</span>
-                ) : isFailed ? (
-                  <span className="flex items-center text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-md"><FiAlertCircle className="mr-1" /> Failed</span>
-                ) : (
-                  <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">Pending</span>
-                )}
+                <div className="flex flex-wrap items-center gap-1.5 justify-end">
+                  {cgpeDone && rule.verificationMode !== 'upload_only' ? (
+                    <span className="flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> CGPE Verified</span>
+                  ) : null}
+                  {needsPhysical ? (
+                    physicalDone ? (
+                      <span className="flex items-center text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> File Uploaded</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md">Upload pending</span>
+                    )
+                  ) : null}
+                  {isComplete ? (
+                    <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> Complete</span>
+                  ) : isFailed ? (
+                    <span className="flex items-center text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-md"><FiAlertCircle className="mr-1" /> Failed</span>
+                  ) : (
+                    <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">Pending</span>
+                  )}
+                </div>
               </div>
 
-              {!isVerified && (
+              {!cgpeDone && (
                 <div className="mt-2">
                   {(rule.verificationMode === 'digilocker' || rule.documentType === 'aadhaar') && (
                     <div className="space-y-3">
-                      {/* DigiLocker is the CGPE-supported Aadhaar path (OTP routes return 404 on verify.cgpey.com) */}
                       <button
                         type="button"
                         onClick={handleDigiLockerInitiate}
@@ -486,7 +569,7 @@ const KYCVerificationStep = forwardRef(({
                         className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border"
                       />
                       {!vState.otpSent ? (
-                        <button 
+                        <button
                           type="button"
                           onClick={() => handleGenerateAadhaarOtp(aadhaarNumber)}
                           disabled={vState.status === 'generating_otp'}
@@ -505,7 +588,7 @@ const KYCVerificationStep = forwardRef(({
                             onChange={(e) => setAadhaarOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                             className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border mt-2"
                           />
-                          <button 
+                          <button
                             type="button"
                             onClick={() => handleVerifyAadhaar(vState.clientId, aadhaarOtp, aadhaarNumber)}
                             disabled={vState.status === 'verifying'}
@@ -522,7 +605,7 @@ const KYCVerificationStep = forwardRef(({
                     <div className="space-y-3">
                       <input type="text" id="panInput" placeholder="Enter PAN Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
                       <input type="text" id="panName" placeholder="Name as per PAN" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
-                      <button 
+                      <button
                         onClick={() => handleVerifyPan(document.getElementById('panInput').value, document.getElementById('panName').value)}
                         disabled={vState.status === 'verifying'}
                         className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
@@ -537,7 +620,7 @@ const KYCVerificationStep = forwardRef(({
                       <input type="text" id="bankAcc" placeholder="Account Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
                       <input type="text" id="bankIfsc" placeholder="IFSC Code" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
                       <input type="text" id="bankName" placeholder="Account Holder Name" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
-                      <button 
+                      <button
                         onClick={() => handleVerifyBank(document.getElementById('bankAcc').value, document.getElementById('bankIfsc').value, document.getElementById('bankName').value)}
                         disabled={vState.status === 'verifying'}
                         className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
@@ -551,7 +634,7 @@ const KYCVerificationStep = forwardRef(({
                     <div className="space-y-3">
                       <input type="text" id="dlNumber" placeholder="Driving License Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black uppercase" />
                       <input type="date" id="dlDob" placeholder="Date of Birth" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
-                      <button 
+                      <button
                         onClick={() => handleVerifyLicense(document.getElementById('dlNumber').value, document.getElementById('dlDob').value)}
                         disabled={vState.status === 'verifying'}
                         className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
@@ -560,29 +643,53 @@ const KYCVerificationStep = forwardRef(({
                       </button>
                     </div>
                   )}
+                </div>
+              )}
 
-                  {(rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') && (
-                    <div className="relative border-2 border-dashed border-gray-300 rounded-lg p-6 hover:bg-gray-50 transition-colors text-center">
-                      <input type="file" accept={rule.allowedMimeTypes ? rule.allowedMimeTypes.join(',') : 'image/*'} onChange={(e) => handleFileUpload(e, rule)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" disabled={!!activeUploads[rule.documentType]} />
-                      {activeUploads[rule.documentType] ? (
-                        <>
-                          <FiLoader className="w-6 h-6 text-blue-500 mx-auto mb-2 animate-spin" />
-                          <p className="text-sm font-semibold text-blue-600">Uploading... {uploadProgress[rule.documentType] || 0}%</p>
-                          <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5">
-                            <div
-                              className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
-                              style={{ width: `${uploadProgress[rule.documentType] || 0}%` }}
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <FiUpload className="w-6 h-6 text-gray-400 mx-auto mb-2" />
-                          <p className="text-sm font-medium text-gray-600">Click or drag file to upload</p>
-                          <p className="text-xs text-gray-400 mt-1">Max size: {(rule.maxFileSize || (5 * 1024 * 1024)) / (1024 * 1024)}MB</p>
-                        </>
-                      )}
+              {showPhysicalUploader && (
+                <div className={`mt-3 space-y-2 ${cgpeDone && needsPhysical ? 'border-t border-gray-100 pt-3' : ''}`}>
+                  {cgpeDone && rule.requirePhysicalUpload && rule.verificationMode !== 'upload_only' ? (
+                    <p className="text-[11px] text-gray-500">
+                      CGPE verification is complete. Upload clear scans of the physical document for admin review.
+                    </p>
+                  ) : null}
+                  {rule.requiresFrontAndBack ? (
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <DocumentUploadCard
+                        label={`${rule.label} — Front`}
+                        required={rule.required}
+                        accept={(rule.allowedMimeTypes || []).join(',') || undefined}
+                        maxSizeBytes={rule.maxFileSize}
+                        fileUrl={vState.frontUrl || ''}
+                        uploading={!!activeUploads[uploadProgressKey(rule.documentType, 'front')]}
+                        progress={uploadProgress[uploadProgressKey(rule.documentType, 'front')] || 0}
+                        onSelect={(file) => handlePhysicalUpload(file, rule, 'front')}
+                        onPreview={(url) => setPreview({ open: true, url, title: `${rule.label} Front` })}
+                      />
+                      <DocumentUploadCard
+                        label={`${rule.label} — Back`}
+                        required={rule.required}
+                        accept={(rule.allowedMimeTypes || []).join(',') || undefined}
+                        maxSizeBytes={rule.maxFileSize}
+                        fileUrl={vState.backUrl || ''}
+                        uploading={!!activeUploads[uploadProgressKey(rule.documentType, 'back')]}
+                        progress={uploadProgress[uploadProgressKey(rule.documentType, 'back')] || 0}
+                        onSelect={(file) => handlePhysicalUpload(file, rule, 'back')}
+                        onPreview={(url) => setPreview({ open: true, url, title: `${rule.label} Back` })}
+                      />
                     </div>
+                  ) : (
+                    <DocumentUploadCard
+                      label={rule.label}
+                      required={rule.required}
+                      accept={(rule.allowedMimeTypes || []).join(',') || undefined}
+                      maxSizeBytes={rule.maxFileSize}
+                      fileUrl={vState.fileUrl || vState.frontUrl || ''}
+                      uploading={!!activeUploads[uploadProgressKey(rule.documentType, 'single')] || !!activeUploads[rule.documentType]}
+                      progress={uploadProgress[uploadProgressKey(rule.documentType, 'single')] || uploadProgress[rule.documentType] || 0}
+                      onSelect={(file) => handlePhysicalUpload(file, rule, 'single')}
+                      onPreview={(url) => setPreview({ open: true, url, title: rule.label })}
+                    />
                   )}
                 </div>
               )}
@@ -590,6 +697,13 @@ const KYCVerificationStep = forwardRef(({
           );
         })}
       </div>
+
+      <DocumentPreviewModal
+        open={preview.open}
+        url={preview.url}
+        title={preview.title}
+        onClose={() => setPreview({ open: false, url: '', title: '' })}
+      />
     </div>
   );
 });

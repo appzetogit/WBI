@@ -230,11 +230,27 @@ const Documents = () => {
         {/* Request Status Banner */}
         <div className="bg-white p-5 rounded-3xl shadow-[0_4px_20px_rgba(0,0,0,0.02)] border border-slate-50">
           <h3 className="font-black text-base flex items-center gap-2">
-            Verification Status
+            Document Verification Status
           </h3>
           <p className="text-xs text-slate-400 mt-1 font-semibold">
-            Overall status: <span className="capitalize font-bold text-slate-700">{statusData?.overallStatus.replace('_', ' ')}</span>
+            Overall status: <span className="capitalize font-bold text-slate-700">{statusData?.overallStatus?.replace?.('_', ' ')}</span>
           </p>
+          {statusData?.counts ? (
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-amber-50 p-2">
+                <p className="text-lg font-black text-amber-700">{statusData.counts.pending || 0}</p>
+                <p className="text-[10px] font-semibold text-amber-600">Pending</p>
+              </div>
+              <div className="rounded-xl bg-rose-50 p-2">
+                <p className="text-lg font-black text-rose-700">{statusData.counts.rejected || 0}</p>
+                <p className="text-[10px] font-semibold text-rose-600">Rejected</p>
+              </div>
+              <div className="rounded-xl bg-emerald-50 p-2">
+                <p className="text-lg font-black text-emerald-700">{statusData.counts.verified || 0}</p>
+                <p className="text-[10px] font-semibold text-emerald-600">Approved</p>
+              </div>
+            </div>
+          ) : null}
           
           {statusData?.overallStatus === 'verified' && (
             <div className="mt-4 p-3 bg-emerald-50 text-emerald-700 rounded-2xl flex items-center gap-2 text-xs font-semibold">
@@ -257,6 +273,22 @@ const Documents = () => {
             </div>
           )}
         </div>
+
+        {Array.isArray(statusData?.timeline) && statusData.timeline.length > 0 ? (
+          <div className="bg-white p-5 rounded-3xl border border-slate-50 space-y-3">
+            <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">Approval Timeline</h4>
+            {statusData.timeline.slice(0, 8).map((item, idx) => (
+              <div key={`${item.documentType}-${idx}`} className="flex items-start gap-3 text-xs">
+                <span className="mt-1 h-2 w-2 rounded-full bg-slate-300 shrink-0" />
+                <div>
+                  <p className="font-bold capitalize text-slate-700">{String(item.documentType || '').replace(/_/g, ' ')} · {item.status}</p>
+                  <p className="text-slate-400">{item.at ? new Date(item.at).toLocaleString('en-IN') : '—'}</p>
+                  {item.note ? <p className="text-rose-600 font-semibold mt-0.5">{item.note}</p> : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {/* Dynamic Documents Slots */}
         <div className="space-y-4">

@@ -57,24 +57,33 @@ exports.uploadDocument = async (req, res) => {
       });
     }
 
-    // Save or update VerificationDocument
-    let doc = await VerificationDocument.findOne({ ownerId, documentType });
+    // Save or update VerificationDocument (per side)
+    const side = req.body.side && ['front', 'back', 'single'].includes(req.body.side) ? req.body.side : 'single';
+    let doc = await VerificationDocument.findOne({ ownerId, documentType, side });
     if (doc) {
       doc.fileUrl = req.file.path;
       doc.fileKey = req.file.filename;
+      doc.mimeType = req.file.mimetype || '';
+      doc.fileSize = req.file.size || 0;
+      doc.version = (doc.version || 1) + 1;
       doc.status = 'uploaded';
       doc.rejectionReason = undefined;
       doc.verifiedAt = undefined;
       doc.reviewedBy = undefined;
+      doc.uploadedAt = new Date();
       await doc.save();
     } else {
       doc = await VerificationDocument.create({
         ownerId,
         ownerType,
         documentType,
+        side,
         fileUrl: req.file.path,
         fileKey: req.file.filename,
-        status: 'uploaded'
+        mimeType: req.file.mimetype || '',
+        fileSize: req.file.size || 0,
+        status: 'uploaded',
+        uploadedAt: new Date()
       });
     }
 
@@ -143,29 +152,52 @@ exports.getMyStatus = async (req, res) => {
       });
     }
 
-    const docs = await VerificationDocument.find({ ownerId });
+    const docs = await VerificationDocument.find({ ownerId }).sort({ updatedAt: -1 });
 
     // Build complete listing of all documents with status mapping
     const documentStatusList = {};
     const allConfiguredDocs = [...config.requiredDocuments, ...config.optionalDocuments];
+    const timeline = [];
 
     allConfiguredDocs.forEach(docType => {
-      const existingDoc = docs.find(d => d.documentType === docType);
+      const matching = docs.filter((d) => d.documentType === docType);
+      const existingDoc = matching[0];
       if (existingDoc) {
         documentStatusList[docType] = {
           uploaded: true,
           status: existingDoc.status,
           rejectionReason: existingDoc.rejectionReason,
+          remarks: existingDoc.remarks || '',
           documentNumberMasked: existingDoc.documentNumberMasked,
           matchScore: existingDoc.matchScore,
           verifiedAt: existingDoc.verifiedAt,
-          updatedAt: existingDoc.updatedAt
+          uploadedAt: existingDoc.uploadedAt || existingDoc.createdAt,
+          updatedAt: existingDoc.updatedAt,
+          version: existingDoc.version,
+          sides: matching.map((d) => ({
+            side: d.side || 'single',
+            fileUrl: d.fileUrl,
+            status: d.status,
+            mimeType: d.mimeType,
+            fileSize: d.fileSize
+          })),
+          rejectionHistory: existingDoc.rejectionHistory || [],
+          isRequired: config.requiredDocuments.includes(docType),
+          canReupload: existingDoc.status === 'rejected'
         };
+        timeline.push({
+          documentType: docType,
+          status: existingDoc.status,
+          at: existingDoc.verifiedAt || existingDoc.uploadedAt || existingDoc.updatedAt,
+          note: existingDoc.rejectionReason || ''
+        });
       } else {
         documentStatusList[docType] = {
           uploaded: false,
           status: 'pending',
-          isRequired: config.requiredDocuments.includes(docType)
+          isRequired: config.requiredDocuments.includes(docType),
+          canReupload: false,
+          sides: []
         };
       }
     });
@@ -177,7 +209,13 @@ exports.getMyStatus = async (req, res) => {
         adminReviewStatus: request.adminReviewStatus,
         requiredDocuments: config.requiredDocuments,
         optionalDocuments: config.optionalDocuments,
-        documents: documentStatusList
+        documents: documentStatusList,
+        timeline: timeline.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0)),
+        counts: {
+          pending: Object.values(documentStatusList).filter((d) => !d.uploaded || d.status === 'pending' || d.status === 'uploaded').length,
+          rejected: Object.values(documentStatusList).filter((d) => d.status === 'rejected').length,
+          verified: Object.values(documentStatusList).filter((d) => d.status === 'verified').length
+        }
       }
     });
 
