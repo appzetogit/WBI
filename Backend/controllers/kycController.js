@@ -72,6 +72,23 @@ const syncToLegacy = async (role, entityId, documentType, status, fileUrl, fileK
   try {
     if (role === 'worker' || role === 'engineer') {
       const side = meta.side || 'single';
+      // Never persist original filenames as Cloudinary public_id
+      let resolvedKey = fileKey;
+      if (
+        !resolvedKey ||
+        resolvedKey === 'digilocker-fetch' ||
+        /\s/.test(String(resolvedKey)) ||
+        /^Screenshot/i.test(String(resolvedKey)) ||
+        /\.(png|jpe?g|webp|gif|pdf)$/i.test(String(resolvedKey))
+      ) {
+        if (fileUrl && fileUrl !== 'digilocker-fetch' && String(fileUrl).includes('/upload/')) {
+          const m = String(fileUrl).match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[a-zA-Z0-9]+(?:\?|$)/);
+          resolvedKey = m?.[1] || fileUrl;
+        } else {
+          resolvedKey = fileUrl || 'digilocker-fetch';
+        }
+      }
+
       const docData = {
         ownerId: entityId,
         ownerType: role,
@@ -79,7 +96,7 @@ const syncToLegacy = async (role, entityId, documentType, status, fileUrl, fileK
         side,
         status: status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : (status === 'uploaded' ? 'uploaded' : 'under_review')),
         fileUrl: fileUrl || 'digilocker-fetch',
-        fileKey: fileKey || 'digilocker-fetch',
+        fileKey: resolvedKey || 'digilocker-fetch',
         documentNumberMasked: meta.documentNumberMasked || null,
         cgpeRequestId: meta.transactionId || null,
         cgpeResponse: meta.rawResponse || null,

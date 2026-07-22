@@ -106,21 +106,10 @@ const getAllEngineers = async (req, res) => {
 /**
  * Temporary signed Cloudinary URL for private/authenticated verification assets
  */
-const generateSignedUrl = (fileKey) => {
-  if (!fileKey) return '';
-  try {
-    const cloudinary = require('../../config/cloudinary');
-    return cloudinary.url(fileKey, {
-      resource_type: 'auto',
-      type: 'authenticated',
-      sign_url: true,
-      expires_at: Math.floor(Date.now() / 1000) + 3600
-    });
-  } catch (error) {
-    console.error('Failed to generate Cloudinary signed URL:', error);
-    return '';
-  }
-};
+const {
+  isRealFileUrl,
+  resolveDocumentPreviewUrl
+} = require('../../utils/documentPreviewUrl');
 
 /**
  * Get engineer details (full registration profile + documents for admin review)
@@ -186,16 +175,15 @@ const getEngineerDetails = async (req, res) => {
         : VerificationRequest.findOne({ ownerId: engineer._id, ownerType: 'engineer' })
     ]);
 
-    const documents = verificationDocs.map((d) => ({
-      ...d,
-      signedPreviewUrl: generateSignedUrl(d.fileKey) || d.fileUrl,
-      verifiedBy: d.verifiedBy || d.reviewedBy || null
-    }));
-
-    const isRealFileUrl = (url) =>
-      Boolean(url) &&
-      url !== 'digilocker-fetch' &&
-      (String(url).startsWith('http') || String(url).startsWith('data:') || String(url).startsWith('/'));
+    const documents = verificationDocs.map((d) => {
+      const { previewUrl, hasPhysicalFile } = resolveDocumentPreviewUrl(d.fileUrl, d.fileKey);
+      return {
+        ...d,
+        signedPreviewUrl: hasPhysicalFile ? previewUrl : null,
+        hasPhysicalFile,
+        verifiedBy: d.verifiedBy || d.reviewedBy || null
+      };
+    });
 
     // Build a unified gallery from KYC + legacy profile fields when VerificationDocument is sparse
     const gallery = [];
@@ -212,7 +200,7 @@ const getEngineerDetails = async (req, res) => {
     };
 
     for (const d of documents) {
-      const url = isRealFileUrl(d.signedPreviewUrl) ? d.signedPreviewUrl : d.fileUrl;
+      const url = d.signedPreviewUrl || d.fileUrl;
       pushGallery({
         key: `${d.documentType}_${d.side || 'single'}`,
         label: `${String(d.documentType).replace(/_/g, ' ')}${d.side && d.side !== 'single' ? ` (${d.side})` : ''}`,

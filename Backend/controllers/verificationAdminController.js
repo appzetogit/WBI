@@ -7,22 +7,25 @@ const BankAccount = require('../models/BankAccount');
 const Worker = require('../models/Worker');
 const Engineer = require('../models/Engineer');
 const cloudinary = require('../config/cloudinary');
+const {
+  isRealFileUrl,
+  resolveDocumentPreviewUrl
+} = require('../utils/documentPreviewUrl');
 
 // Helper to get Owner profile model
 const getOwnerModel = (ownerType) => {
   return ownerType === 'engineer' ? Engineer : Worker;
 };
 
-// Generates temporary secure signed Cloudinary URL for private/authenticated assets
+// Kept for any legacy callers; prefer resolveDocumentPreviewUrl
 const generateSignedUrl = (fileKey) => {
   if (!fileKey) return '';
   try {
-    // Cloudinary SDK signed URL builder
     return cloudinary.url(fileKey, {
       resource_type: 'auto',
       type: 'authenticated',
       sign_url: true,
-      expires_at: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiration
+      expires_at: Math.floor(Date.now() / 1000) + 3600
     });
   } catch (error) {
     console.error('Failed to generate Cloudinary signed URL:', error);
@@ -198,11 +201,6 @@ exports.getVerificationDetail = async (req, res) => {
       entityId: request.ownerId
     }).lean();
 
-    const isRealFileUrl = (url) =>
-      Boolean(url) &&
-      url !== 'digilocker-fetch' &&
-      (String(url).startsWith('http') || String(url).startsWith('data:') || String(url).startsWith('/'));
-
     const buildCgpePayload = (doc, kycRec) => {
       if (doc?.cgpeResponse && typeof doc.cgpeResponse === 'object') return doc.cgpeResponse;
       if (kycRec?.rawResponseEncrypted && typeof kycRec.rawResponseEncrypted === 'object') {
@@ -225,17 +223,13 @@ exports.getVerificationDetail = async (req, res) => {
 
     const enrichedDocs = [];
     for (const d of docs) {
-      const rawUrl = isRealFileUrl(d.fileUrl) ? d.fileUrl : null;
-      const signed = rawUrl && d.fileKey && d.fileKey !== 'digilocker-fetch'
-        ? (generateSignedUrl(d.fileKey) || rawUrl)
-        : rawUrl;
-      const hasPhysicalFile = Boolean(signed);
+      const { previewUrl, hasPhysicalFile } = resolveDocumentPreviewUrl(d.fileUrl, d.fileKey);
       const kycRec = kycByType[d.documentType];
 
       enrichedDocs.push({
         ...d,
-        fileUrl: hasPhysicalFile ? (signed || d.fileUrl) : null,
-        signedPreviewUrl: hasPhysicalFile ? signed : null,
+        fileUrl: hasPhysicalFile ? (previewUrl || d.fileUrl) : null,
+        signedPreviewUrl: hasPhysicalFile ? previewUrl : null,
         hasPhysicalFile,
         verificationMode: kycRec?.verificationMode || d.verificationMode || null,
         cgpeResponse: buildCgpePayload(d, kycRec),

@@ -995,11 +995,30 @@ const VerificationManagement = ({ initialRole = '' }) => {
                                   {isPdf ? (
                                     <div className="text-slate-400 text-sm font-semibold">PDF Document</div>
                                   ) : (
-                                    <img fetchPriority="low" loading="lazy" 
-                                      src={previewUrl} 
-                                      alt={doc.documentType} 
-                                      className="max-h-60 object-contain rounded shadow-sm bg-white" 
-                                      onError={(e) => { e.target.style.display = 'none'; }}
+                                    <img
+                                      fetchPriority="low"
+                                      loading="lazy"
+                                      src={previewUrl}
+                                      alt={doc.documentType}
+                                      className="max-h-60 object-contain rounded shadow-sm bg-white"
+                                      onError={(e) => {
+                                        // Prefer original public Cloudinary URL if signed/broken key fails
+                                        const fallback = doc.fileUrl && doc.fileUrl !== previewUrl ? doc.fileUrl : null;
+                                        if (fallback && e.currentTarget.dataset.fallback !== '1') {
+                                          e.currentTarget.dataset.fallback = '1';
+                                          e.currentTarget.src = fallback;
+                                          return;
+                                        }
+                                        e.currentTarget.style.display = 'none';
+                                        const parent = e.currentTarget.parentElement;
+                                        if (parent && !parent.querySelector('[data-img-error]')) {
+                                          const msg = document.createElement('p');
+                                          msg.dataset.imgError = '1';
+                                          msg.className = 'text-xs text-rose-500 font-semibold text-center px-3';
+                                          msg.textContent = 'Image failed to load. Try Open / Download.';
+                                          parent.insertBefore(msg, parent.firstChild);
+                                        }
+                                      }}
                                     />
                                   )}
                                   <div className="mt-3 flex flex-wrap items-center justify-center gap-2">

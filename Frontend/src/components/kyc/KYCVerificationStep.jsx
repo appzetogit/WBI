@@ -412,12 +412,21 @@ const KYCVerificationStep = forwardRef(({
         setUploadProgress((p) => ({ ...p, [key]: pct }));
       });
 
+      // Prefer Cloudinary public_id from delivery URL (not original filename)
+      let cloudinaryPublicId = fileUrl;
+      try {
+        const m = String(fileUrl).match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[a-zA-Z0-9]+(?:\?|$)/);
+        if (m?.[1]) cloudinaryPublicId = m[1];
+      } catch {
+        cloudinaryPublicId = fileUrl;
+      }
+
       const res = await kycService.uploadDocument({
         role,
         entityId,
         documentType: rule.documentType,
         fileUrl,
-        fileKey: fileToUpload.name,
+        fileKey: cloudinaryPublicId,
         side,
         mimeType: fileToUpload.type || file.type,
         fileSize: fileToUpload.size || file.size
