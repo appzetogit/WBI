@@ -57,6 +57,21 @@ const b2bUserSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  fcmTokens: {
+    type: [String],
+    default: []
+  },
+  fcmTokenMobile: {
+    type: [String],
+    default: []
+  },
+  notificationPreferences: {
+    jobs: { type: Boolean, default: true },
+    payments: { type: Boolean, default: true },
+    account: { type: Boolean, default: true },
+    push: { type: Boolean, default: true },
+    email: { type: Boolean, default: true }
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'B2BUser',

@@ -197,21 +197,16 @@ const registerCompany = async (req, res) => {
     }
 
     try {
-      const Admin = require('../../models/Admin');
-      const { createNotification } = require('../notificationControllers/notificationController');
-      const admins = await Admin.find({ isActive: true }).select('_id');
-      for (const admin of admins) {
-        await createNotification({
-          adminId: admin._id,
-          type: 'b2b_approval_request',
-          title: '🏢 New B2B Registration',
-          message: `${company.companyName} has requested registration.`,
-          relatedId: company._id,
-          relatedType: 'b2b_company',
-          data: { companyId: company._id, companyName: company.companyName },
-          pushData: { type: 'admin_alert', link: '/admin/b2b/onboarding' }
-        });
-      }
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('b2b_registered', {
+        targets: { notifyAllAdmins: true },
+        data: {
+          companyId: company._id,
+          companyName: company.companyName,
+          email: company.email,
+          phone: company.phone
+        }
+      });
     } catch (err) {
       console.error('B2B Admin notification error:', err.message);
     }

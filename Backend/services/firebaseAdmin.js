@@ -205,6 +205,10 @@ async function removeInvalidTokens(tokens) {
     const User = require('../models/User');
     const Vendor = require('../models/Vendor');
     const Worker = require('../models/Worker');
+    const Engineer = require('../models/Engineer');
+    const Admin = require('../models/Admin');
+    let B2BUser;
+    try { B2BUser = require('../models/B2BUser'); } catch (_) { B2BUser = null; }
 
     const updateQuery = {
       $pull: {
@@ -213,16 +217,21 @@ async function removeInvalidTokens(tokens) {
       }
     };
 
-    // We run updates in parallel for all collections as a token might belong to any
-    await Promise.all([
+    const ops = [
       User.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery),
       Vendor.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery),
-      Worker.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery)
-    ]);
+      Worker.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery),
+      Engineer.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery),
+      Admin.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery)
+    ];
+    if (B2BUser) {
+      ops.push(B2BUser.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery));
+    }
+    await Promise.all(ops);
 
-    console.log('[FCM Cleanup] âœ… Invalid tokens removed from database');
+    console.log('[FCM Cleanup] ✅ Invalid tokens removed from database');
   } catch (err) {
-    console.error('[FCM Cleanup] âŒ Error removing tokens:', err);
+    console.error('[FCM Cleanup] ❌ Error removing tokens:', err);
   }
 }
 
@@ -363,22 +372,12 @@ async function sendNotificationToWorker(workerId, payload, includeMobile = true)
  */
 async function sendNotificationToAdmin(adminId, payload, includeMobile = true) {
   try {
-    const User = require('../models/User'); // Use User model for admin too as they share collection or separate Admin model?
-
-    let adminUser = null;
-    try {
-      const Admin = require('../models/Admin');
-      adminUser = await Admin.findById(adminId);
-    } catch (e) {
-      // If Admin model doesn't exist, try User model with role check?
-      // Or maybe adminId refers to a User document.
-      const User = require('../models/User');
-      adminUser = await User.findById(adminId);
-    }
+    const Admin = require('../models/Admin');
+    const adminUser = await Admin.findById(adminId);
 
     if (!adminUser) {
       console.log(`Admin not found: ${adminId}`);
-      return;
+      return { successCount: 0, failureCount: 0 };
     }
 
     let tokens = [];
@@ -389,16 +388,51 @@ async function sendNotificationToAdmin(adminId, payload, includeMobile = true) {
       tokens = [...tokens, ...adminUser.fcmTokenMobile];
     }
 
-    console.log(`[FCM] ðŸ“¤ Sending notification to admin (${adminId}) on ${tokens.length} devices`);
+    if (!tokens.length) {
+      console.log(`[FCM] ⚠️ No FCM tokens for admin ${adminId}`);
+      return { successCount: 0, failureCount: 0 };
+    }
+
+    console.log(`[FCM] 📤 Sending notification to admin (${adminId}) on ${tokens.length} devices`);
 
     const finalPayload = {
       ...payload,
-      title: `ðŸ›¡ï¸ [Admin] ${payload.title}` // Add identification
+      title: `[Admin] ${payload.title}`
     };
 
-    await sendPushNotification(tokens, finalPayload);
+    return await sendPushNotification(tokens, finalPayload);
   } catch (error) {
-    console.error(`[FCM] âŒ Error sending notification to admin ${adminId}:`, error);
+    console.error(`[FCM] ❌ Error sending notification to admin ${adminId}:`, error);
+    return { successCount: 0, failureCount: 1 };
+  }
+}
+
+async function sendNotificationToB2B(b2bUserId, payload, includeMobile = true) {
+  try {
+    const B2BUser = require('../models/B2BUser');
+    const user = await B2BUser.findById(b2bUserId).select('fcmTokens fcmTokenMobile fullName notificationPreferences').lean();
+    if (!user) {
+      console.warn(`[FCM] B2B user ${b2bUserId} not found`);
+      return { successCount: 0, failureCount: 0 };
+    }
+    if (user.notificationPreferences?.push === false) {
+      return { successCount: 0, failureCount: 0 };
+    }
+    let tokens = [];
+    if (user.fcmTokens?.length) tokens = [...tokens, ...user.fcmTokens];
+    if (includeMobile && user.fcmTokenMobile?.length) tokens = [...tokens, ...user.fcmTokenMobile];
+    tokens = [...new Set(tokens.filter(Boolean))];
+    if (!tokens.length) {
+      console.warn(`[FCM] No tokens for B2B user ${b2bUserId}`);
+      return { successCount: 0, failureCount: 0 };
+    }
+    return await sendPushNotification(tokens, {
+      ...payload,
+      title: `[B2B] ${payload.title || 'Update'}`
+    });
+  } catch (error) {
+    console.error(`[FCM] Error sending to B2B ${b2bUserId}:`, error.message);
+    return { successCount: 0, failureCount: 1 };
   }
 }
 
@@ -408,7 +442,7 @@ async function sendNotificationToEngineer(engineerId, payload, includeMobile = t
     const engineer = await Engineer.findById(engineerId).select('fcmTokens fcmTokenMobile').lean();
     if (!engineer) {
       console.warn(`[FCM] Engineer ${engineerId} not found`);
-      return;
+      return { successCount: 0, failureCount: 0 };
     }
     let tokens = [];
     if (engineer.fcmTokens && engineer.fcmTokens.length > 0) {
@@ -420,7 +454,7 @@ async function sendNotificationToEngineer(engineerId, payload, includeMobile = t
     tokens = [...new Set(tokens.filter(Boolean))];
     if (!tokens.length) {
       console.warn(`[FCM] No tokens for engineer ${engineerId}`);
-      return;
+      return { successCount: 0, failureCount: 0 };
     }
     const finalPayload = {
       ...payload,
@@ -429,9 +463,10 @@ async function sendNotificationToEngineer(engineerId, payload, includeMobile = t
         role: 'engineer'
       }
     };
-    await sendPushNotification(tokens, finalPayload);
+    return await sendPushNotification(tokens, finalPayload);
   } catch (error) {
     console.error(`[FCM] Error sending notification to engineer ${engineerId}:`, error.message);
+    return { successCount: 0, failureCount: 1 };
   }
 }
 
@@ -441,5 +476,6 @@ module.exports = {
   sendNotificationToVendor,
   sendNotificationToWorker,
   sendNotificationToAdmin,
-  sendNotificationToEngineer
+  sendNotificationToEngineer,
+  sendNotificationToB2B
 };

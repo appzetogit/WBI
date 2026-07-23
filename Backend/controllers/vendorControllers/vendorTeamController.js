@@ -870,6 +870,21 @@ exports.markAttendance = async (req, res) => {
       { upsert: true, new: true, runValidators: true }
     );
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('attendance_updated', {
+        targets: { vendorId },
+        data: {
+          attendanceId: attendance._id,
+          date: dayStart,
+          status: attendance.status,
+          memberId,
+          message: `Attendance marked as ${attendance.status || status || 'updated'} for ${dayStart.toISOString().slice(0, 10)}.`
+        },
+        actorId: vendorId
+      });
+    } catch (_) { /* non-blocking */ }
+
     res.json({ success: true, data: attendance });
   } catch (error) {
     console.error('[markAttendance Error]', error);

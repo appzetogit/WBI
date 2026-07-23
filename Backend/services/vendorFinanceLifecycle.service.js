@@ -403,19 +403,17 @@ async function generateInvoiceFromMilestone(vendorId, milestoneId) {
   });
 
   try {
-    const { publishVendorNotification } = require('./vendorNotificationCenter.service');
-    await publishVendorNotification({
-      vendorId,
-      type: 'invoice_generated',
-      title: 'Invoice generated',
-      message: `Invoice ${invoice.documentCode} for ₹${invoice.total} is ready.`,
-      module: 'finance',
-      priority: 'normal',
-      relatedId: invoice._id,
-      relatedType: 'invoice',
-      actionUrl: 'finance/invoices',
-      metadata: { documentCode: invoice.documentCode, total: invoice.total },
-      category: 'payments'
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('invoice_generated', {
+      targets: { vendorId },
+      data: {
+        invoiceId: invoice._id,
+        invoiceNumber: invoice.documentCode,
+        amount: invoice.total,
+        message: `Invoice ${invoice.documentCode} for ₹${invoice.total} is ready.`,
+        relatedId: invoice._id,
+        relatedType: 'invoice'
+      }
     });
   } catch (_) { /* non-blocking */ }
 
@@ -667,19 +665,17 @@ async function releaseInvoiceEscrow(vendorId, invoiceId, { commissionRate = 5, t
   emitFinance(vendorId, 'finance:escrowReleased', { invoiceId: invoice._id, net });
 
   try {
-    const { publishVendorNotification } = require('./vendorNotificationCenter.service');
-    await publishVendorNotification({
-      vendorId,
-      type: 'escrow_released',
-      title: 'Settlement completed',
-      message: `₹${net} released to your available wallet from invoice ${invoice.documentCode}.`,
-      module: 'finance',
-      priority: 'high',
-      relatedId: invoice._id,
-      relatedType: 'invoice',
-      actionUrl: 'finance/wallet',
-      metadata: { net, gross, commission, tds },
-      category: 'payments'
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('payment_released', {
+      targets: { vendorId },
+      data: {
+        paymentId: invoice._id,
+        invoiceId: invoice._id,
+        amount: net,
+        message: `₹${net} released to your available wallet from invoice ${invoice.documentCode}.`,
+        relatedId: invoice._id,
+        relatedType: 'invoice'
+      }
     });
   } catch (_) { /* non-blocking */ }
 

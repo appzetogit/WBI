@@ -233,11 +233,15 @@ exports.approveLinkedEngineer = async (req, res) => {
     await session.commitTransaction();
 
     try {
-      const { sendNotificationToEngineer } = require('../../services/firebaseAdmin');
-      await sendNotificationToEngineer(engineer._id, {
-        title: 'Vendor Approved You',
-        body: 'Your vendor approved your join request. You can now receive assigned jobs.',
-        data: { type: 'engineer_vendor_approved', engineerId: String(engineer._id) }
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('engineer_vendor_approved', {
+        targets: { engineerId: engineer._id },
+        data: {
+          vendorId,
+          message: 'Your vendor approved your join request. You can now receive assigned jobs.',
+          relatedId: engineer._id,
+          relatedType: 'engineer'
+        }
       });
     } catch (nErr) {
       console.warn('approveLinkedEngineer notification:', nErr.message);

@@ -282,6 +282,19 @@ const register = async (req, res) => {
     delete userRes.__v;
     userRes.id = user._id;
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('user_registered', {
+        targets: { notifyAllAdmins: true },
+        data: {
+          userId: user._id,
+          name: user.name,
+          phone: user.phone,
+          email: user.email
+        }
+      });
+    } catch (_) { /* non-blocking */ }
+
     res.status(201).json({
       success: true,
       message: 'Registration successful',

@@ -553,6 +553,30 @@ const updateLeave = async (req, res) => {
     if (action === 'reject' && leave.engineerId) {
       await refreshEngineerAvailability(vendorId, leave.engineerId);
     }
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      const targets = { vendorId };
+      if (leave.engineerId || leave.linkedEngineerId) {
+        // Prefer linked engineer id if present on workforce engineer
+        const VendorWorkforceEngineer = require('../../models/VendorWorkforceEngineer');
+        const wf = leave.engineerId
+          ? await VendorWorkforceEngineer.findById(leave.engineerId).select('linkedEngineerId').lean()
+          : null;
+        if (wf?.linkedEngineerId) targets.engineerId = wf.linkedEngineerId;
+      }
+      emitAsync('leave_updated', {
+        targets,
+        data: {
+          leaveId: leave._id,
+          title: `Leave ${leave.status}`,
+          message: `Leave for ${leave.engineerName || 'engineer'} was ${leave.status}.`,
+          relatedId: leave._id,
+          relatedType: 'leave'
+        }
+      });
+    } catch (_) { /* non-blocking */ }
+
     res.status(200).json({ success: true, data: leave });
   } catch (error) {
     console.error('updateLeave:', error);

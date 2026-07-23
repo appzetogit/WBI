@@ -239,7 +239,7 @@ const updateMilestone = async (req, res) => {
       vendorId: new mongoose.Types.ObjectId(vendorId)
     });
     if (!ms) return res.status(404).json({ success: false, message: 'Milestone not found' });
-    const { status, progress, taskId, taskStatus } = req.body;
+    const prevStatus = ms.status;
     if (status) ms.status = status;
     if (progress !== undefined) ms.progress = progress;
     if (taskId && taskStatus) {
@@ -251,6 +251,25 @@ const updateMilestone = async (req, res) => {
       else if (ms.progress > 0) ms.status = 'in_progress';
     }
     await ms.save();
+
+    if (ms.status === 'completed' && prevStatus !== 'completed') {
+      try {
+        const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+        emitAsync('milestone_completed', {
+          targets: { vendorId },
+          data: {
+            milestoneId: ms._id,
+            milestoneName: ms.title || ms.name,
+            projectId: ms.projectId,
+            progress: ms.progress,
+            relatedId: ms._id,
+            relatedType: 'milestone'
+          },
+          actorId: vendorId
+        });
+      } catch (_) { /* non-blocking */ }
+    }
+
     res.status(200).json({ success: true, data: ms });
   } catch (error) {
     console.error('updateMilestone:', error);
@@ -695,6 +714,37 @@ const assignEngineerToProject = async (req, res) => {
       });
     } catch (wfErr) {
       console.warn('workforce mirror skipped:', wfErr.message);
+    }
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('project_assigned_vendor', {
+        targets: { vendorId },
+        data: {
+          projectId: project._id,
+          projectTitle: project.title,
+          engineerId: engineer._id,
+          engineerName: engineer.name,
+          relatedId: project._id,
+          relatedType: 'project',
+          actionUrl: 'workforce/assignments'
+        }
+      });
+      emitAsync('project_assigned_engineer', {
+        targets: { engineerId: engineer._id },
+        data: {
+          projectId: project._id,
+          projectTitle: project.title,
+          jobId: job._id,
+          title: project.title,
+          message: `New job assigned: ${project.title}`,
+          email: engineer.email,
+          relatedId: job._id,
+          relatedType: 'job'
+        }
+      });
+    } catch (nErr) {
+      console.warn('assign orchestrator notify skipped:', nErr.message);
     }
 
     res.status(201).json({

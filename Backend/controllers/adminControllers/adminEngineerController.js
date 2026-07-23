@@ -396,18 +396,19 @@ const approveEngineer = async (req, res) => {
     engineer.isActive = true;
     await engineer.save();
 
-    // Send notification to engineer
-    /*
-    // Note: Assuming notification system supports 'engineer' type or we treat them as users for now
-    await createNotification({
-      userId: engineer._id, // Use userId for engineers too? or need separate engineerId field in notification
-      type: 'engineer_approved',
-      title: 'Engineer Registration Approved',
-      message: 'Your engineer registration has been approved.',
-      relatedId: engineer._id,
-      relatedType: 'engineer'
-    });
-    */
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('engineer_approved', {
+        targets: { engineerId: engineer._id },
+        data: {
+          engineerId: engineer._id,
+          name: engineer.name,
+          email: engineer.email,
+          message: 'Your engineer registration has been approved. You can now receive jobs.'
+        },
+        actorId: req.user?.id || req.user?._id
+      });
+    } catch (_) { /* non-blocking */ }
 
     res.status(200).json({
       success: true,

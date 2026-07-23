@@ -10,6 +10,8 @@ const createNotification = async ({
   vendorId = null,
   workerId = null,
   adminId = null,
+  b2bUserId = null,
+  b2bCompanyId = null,
   type,
   title,
   message,
@@ -26,7 +28,7 @@ const createNotification = async ({
     const { getRedis, isRedisConnected } = require('../../services/redisService');
 
     // Build a deterministic dedup key from the notification fingerprint
-    const dedupTarget = userId || vendorId || workerId || adminId || 'unknown';
+    const dedupTarget = userId || vendorId || workerId || adminId || b2bUserId || 'unknown';
     const dedupKey = `notif:dedup:${type}:${String(relatedId || '')}:${String(dedupTarget)}`;
 
     if (isRedisConnected()) {
@@ -44,6 +46,7 @@ const createNotification = async ({
       if (vendorId) duplicateQuery.vendorId = vendorId;
       if (workerId) duplicateQuery.workerId = workerId;
       if (adminId) duplicateQuery.adminId = adminId;
+      if (b2bUserId) duplicateQuery.b2bUserId = b2bUserId;
       if (relatedId) duplicateQuery.relatedId = relatedId;
 
       const existing = await Notification.findOne(duplicateQuery);
@@ -61,6 +64,8 @@ const createNotification = async ({
       vendorId,
       workerId,
       adminId,
+      b2bUserId,
+      b2bCompanyId,
       type,
       title,
       message,
@@ -99,6 +104,7 @@ const createNotification = async ({
       else if (vendorId) room = `vendor_${vendorId.toString()}`;
       else if (workerId) room = `worker_${workerId.toString()}`;
       else if (adminId) room = `admin_${adminId.toString()}`;
+      else if (b2bUserId) room = `b2b_${b2bUserId.toString()}`;
 
       if (io && room) {
         // Check if user is actively connected to the room
@@ -121,6 +127,7 @@ const createNotification = async ({
       // Emit Socket Event immediately
       if (io && room) {
         io.to(room).emit('notification', notification);
+        if (b2bUserId) io.to(room).emit('b2bNotificationsUpdated', { count: 1 });
       }
     } else {
       console.log(`[Notification] User ${room} is OFFLINE. Sending Push Notification.`);
@@ -158,6 +165,10 @@ const createNotification = async ({
         if (adminId) {
           const { sendNotificationToAdmin } = require('../../services/firebaseAdmin');
           await sendNotificationToAdmin(adminId, payload);
+        }
+        if (b2bUserId) {
+          const { sendNotificationToB2B } = require('../../services/firebaseAdmin');
+          await sendNotificationToB2B(b2bUserId, payload);
         }
       } catch (pushError) {
         console.error('Auto-push notification failed:', pushError);
@@ -372,6 +383,38 @@ const getAdminNotifications = async (req, res) => {
 };
 
 /**
+ * Get B2B user notifications
+ */
+const getB2BNotifications = async (req, res) => {
+  try {
+    const b2bUserId = req.user._id || req.user.id;
+    const { isRead, page = 1, limit = 20 } = req.query;
+    const query = { b2bUserId };
+    if (isRead !== undefined) query.isRead = isRead === 'true';
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    const [notifications, total, unreadCount] = await Promise.all([
+      Notification.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit, 10)),
+      Notification.countDocuments(query),
+      Notification.countDocuments({ b2bUserId, isRead: false })
+    ]);
+    res.status(200).json({
+      success: true,
+      data: notifications,
+      unreadCount,
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
+    });
+  } catch (error) {
+    console.error('Get B2B notifications error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch notifications' });
+  }
+};
+
+/**
  * Mark notification as read
  */
 const markAsRead = async (req, res) => {
@@ -384,8 +427,9 @@ const markAsRead = async (req, res) => {
     let query = { _id: id };
     if (userRole === 'USER') query.userId = userId;
     else if (userRole === 'VENDOR') query.vendorId = userId;
-    else if (userRole === 'WORKER') query.workerId = userId;
+    else if (userRole === 'WORKER' || userRole === 'ENGINEER') query.workerId = userId;
     else if (userRole === 'ADMIN') query.adminId = userId;
+    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
 
     const notification = await Notification.findOne(query);
 
@@ -426,8 +470,9 @@ const markAllAsRead = async (req, res) => {
     let query = { isRead: false };
     if (userRole === 'USER') query.userId = userId;
     else if (userRole === 'VENDOR') query.vendorId = userId;
-    else if (userRole === 'WORKER') query.workerId = userId;
+    else if (userRole === 'WORKER' || userRole === 'ENGINEER') query.workerId = userId;
     else if (userRole === 'ADMIN') query.adminId = userId;
+    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
 
     await Notification.updateMany(query, {
       isRead: true,
@@ -460,8 +505,9 @@ const deleteNotification = async (req, res) => {
     let query = { _id: id };
     if (userRole === 'USER') query.userId = userId;
     else if (userRole === 'VENDOR') query.vendorId = userId;
-    else if (userRole === 'WORKER') query.workerId = userId;
+    else if (userRole === 'WORKER' || userRole === 'ENGINEER') query.workerId = userId;
     else if (userRole === 'ADMIN') query.adminId = userId;
+    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
 
     const notification = await Notification.findOneAndDelete(query);
 
@@ -497,8 +543,9 @@ const deleteAllNotifications = async (req, res) => {
     let query = {};
     if (userRole === 'USER' || userRole === 'user') query.userId = userId;
     else if (userRole === 'VENDOR' || userRole === 'vendor') query.vendorId = userId;
-    else if (userRole === 'WORKER' || userRole === 'worker') query.workerId = userId;
+    else if (userRole === 'WORKER' || userRole === 'worker' || userRole === 'ENGINEER' || userRole === 'engineer') query.workerId = userId;
     else if (userRole === 'ADMIN' || userRole === 'admin' || userRole === 'super_admin') query.adminId = userId;
+    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
     else {
       console.log('Role mismatch in deleteAllNotifications:', userRole);
       return res.status(403).json({
@@ -529,6 +576,7 @@ module.exports = {
   getVendorNotifications,
   getWorkerNotifications,
   getAdminNotifications,
+  getB2BNotifications,
   markAsRead,
   markAllAsRead,
   deleteNotification,

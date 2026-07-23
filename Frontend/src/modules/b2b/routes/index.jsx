@@ -47,11 +47,13 @@ const Wallet = lazyLoad(() => import('../pages/Wallet'));
 const Invoices = lazyLoad(() => import('../pages/Invoices'));
 const Reports = lazyLoad(() => import('../pages/Reports'));
 const Support = lazyLoad(() => import('../pages/Support'));
+const Notifications = lazyLoad(() => import('../pages/Notifications'));
 const Profile = lazyLoad(() => import('../pages/Profile'));
 const Settings = lazyLoad(() => import('../pages/Settings'));
 const Engineers = lazyLoad(() => import('../pages/Engineers'));
 const Users = lazyLoad(() => import('../pages/Users'));
 const EnterpriseOnboarding = lazyLoad(() => import('../pages/EnterpriseOnboarding'));
+const AcceptInvite = lazyLoad(() => import('../pages/AcceptInvite'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F0FDFA]" />
@@ -90,6 +92,7 @@ const B2BRoutes = () => {
               <Route path="/invoices" element={<AnimatedPage><Invoices /></AnimatedPage>} />
               <Route path="/reports" element={<AnimatedPage><Reports /></AnimatedPage>} />
               <Route path="/support" element={<AnimatedPage><Support /></AnimatedPage>} />
+              <Route path="/notifications" element={<AnimatedPage><Notifications /></AnimatedPage>} />
               <Route path="/company-profile" element={<AnimatedPage><Profile /></AnimatedPage>} />
               <Route path="/engineers" element={<AnimatedPage><Engineers /></AnimatedPage>} />
               <Route path="/users" element={<AnimatedPage><Users /></AnimatedPage>} />

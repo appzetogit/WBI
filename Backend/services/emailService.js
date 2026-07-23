@@ -569,8 +569,34 @@ module.exports = {
   sendVendorPartnerActivationEmail,
   sendServiceRequestPaymentEmail,
   sendMailSafe,
+  sendTemplatedNotification,
   getAppUrl
 };
+
+/**
+ * Generic transactional email used by the notification orchestrator.
+ */
+async function sendTemplatedNotification({ to, template, title, message, data = {} }) {
+  const appUrl = typeof getAppUrl === 'function' ? getAppUrl() : (process.env.FRONTEND_URL || 'https://app.wbinfs.com');
+  const action = data.actionUrl
+    ? (String(data.actionUrl).startsWith('http') ? data.actionUrl : `${appUrl}/${String(data.actionUrl).replace(/^\//, '')}`)
+    : null;
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0f172a">
+      <p style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">${template || 'WBI Notice'}</p>
+      <h2 style="margin:8px 0 12px;font-size:20px">${title || 'Notification'}</h2>
+      <p style="line-height:1.5;color:#334155">${message || ''}</p>
+      ${action ? `<p style="margin-top:24px"><a href="${action}" style="background:#0f766e;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Open in WBI</a></p>` : ''}
+    </div>
+  `;
+  return sendMailSafe({
+    to,
+    subject: title || 'WBI Notification',
+    html,
+    title: title || 'WBI Notification',
+    preheader: message || ''
+  });
+}
 
 /**
  * Send B2B Job Completion Thank-You Notification Email

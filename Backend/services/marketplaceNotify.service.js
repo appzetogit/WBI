@@ -41,21 +41,42 @@ async function dispatchVendorOpportunity(vendorId, payload = {}) {
     payload.message ||
     `${payload.opportunityCode || 'Lead'} — ${payload.city || 'your area'}. Review in vendor portal.`;
 
-  await notifyVendor(vendorId, {
-    type: 'client_request',
-    pushType: 'opportunity_new',
-    category: 'leads',
-    title,
-    message,
-    relatedId: payload.opportunityId,
-    relatedType: 'opportunity',
-    priority: 'high',
-    data: {
-      opportunityId: payload.opportunityId ? String(payload.opportunityId) : '',
-      opportunityCode: payload.opportunityCode || '',
-      categoryCode: payload.categoryCode || ''
-    }
-  });
+  try {
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('opportunity_new', {
+      targets: { vendorId },
+      data: {
+        title,
+        message,
+        opportunityId: payload.opportunityId,
+        opportunityCode: payload.opportunityCode,
+        categoryCode: payload.categoryCode,
+        city: payload.city,
+        budget: payload.budget,
+        requiredEngineers: payload.requiredEngineers || 1,
+        email: vendor.email,
+        name: vendor.businessName || vendor.name
+      }
+    });
+    return;
+  } catch (e) {
+    // Fallback to legacy path if orchestrator unavailable
+    await notifyVendor(vendorId, {
+      type: 'client_request',
+      pushType: 'opportunity_new',
+      category: 'leads',
+      title,
+      message,
+      relatedId: payload.opportunityId,
+      relatedType: 'opportunity',
+      priority: 'high',
+      data: {
+        opportunityId: payload.opportunityId ? String(payload.opportunityId) : '',
+        opportunityCode: payload.opportunityCode || '',
+        categoryCode: payload.categoryCode || ''
+      }
+    });
+  }
 
   fireAndForget(
     sendVendorOpportunityEmail(vendor, {

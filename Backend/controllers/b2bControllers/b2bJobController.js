@@ -526,6 +526,20 @@ const approveQuote = async (req, res) => {
       }
     }
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('quote_approved', {
+        targets: { engineerId: quote.engineerId },
+        data: {
+          quoteId: quote._id,
+          jobId: quote.jobId,
+          proposedAmount: quote.proposedAmount,
+          message: `Client approved your revised quote of ₹${Number(quote.proposedAmount).toLocaleString('en-IN')}.`
+        },
+        actorId: req.user?.id || req.user?._id
+      });
+    } catch (_) { /* non-blocking */ }
+
     return res.status(200).json({
       success: true,
       message: 'Quote approved. Job is now active in the queue.',

@@ -25,6 +25,7 @@ const navItems = [
   { name: 'My Jobs', path: '/b2b/jobs', icon: FiBriefcase },
   { name: 'Wallet & Payments', path: '/b2b/wallet', icon: FiCreditCard },
   { name: 'Reports', path: '/b2b/reports', icon: FiPieChart },
+  { name: 'Notifications', path: '/b2b/notifications', icon: FiBell },
   { name: 'Company Profile', path: '/b2b/company-profile', icon: FiUser },
   { name: 'Settings', path: '/b2b/settings', icon: FiSettings },
   { name: 'Logout', path: '#logout', icon: FiLogOut }
@@ -34,6 +35,7 @@ const B2BLayout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [companyData, setCompanyData] = useState(null);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
   const [bulkJobsOpen, setBulkJobsOpen] = useState(location.pathname.startsWith('/b2b/bulk-jobs'));
@@ -52,6 +54,28 @@ const B2BLayout = () => {
       navigate('/b2b/login');
     }
   }, [navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadUnread = async () => {
+      try {
+        const api = (await import('../../../../services/api')).default;
+        const res = await api.get('/notifications/b2b', { params: { limit: 1 } });
+        if (!cancelled) setUnreadNotifs(res.data?.unreadCount || 0);
+      } catch {
+        if (!cancelled) setUnreadNotifs(0);
+      }
+    };
+    loadUnread();
+    const onUpd = () => loadUnread();
+    window.addEventListener('b2bNotificationsUpdated', onUpd);
+    const t = setInterval(loadUnread, 60000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('b2bNotificationsUpdated', onUpd);
+      clearInterval(t);
+    };
+  }, [location.pathname]);
 
   // Close sidebar on mobile when route changes
   useEffect(() => {
@@ -235,9 +259,16 @@ const B2BLayout = () => {
           <div className="flex items-center gap-4">
             
             {/* Notification Icon */}
-            <button className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors">
+            <button
+              type="button"
+              onClick={() => navigate('/b2b/notifications')}
+              className="relative p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
+              aria-label="Notifications"
+            >
               <FiBell className="w-5 h-5" />
-              <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+              {unreadNotifs > 0 && (
+                <span className="absolute top-1.5 right-1.5 min-w-[0.625rem] h-2.5 px-0.5 bg-red-500 rounded-full border-2 border-white" />
+              )}
             </button>
 
             {/* Profile Dropdown */}

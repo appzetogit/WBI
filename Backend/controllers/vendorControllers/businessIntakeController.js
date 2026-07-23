@@ -421,6 +421,29 @@ const submitBid = async (req, res) => {
       console.warn('Socket emit failed (non-critical):', socketErr.message);
     }
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      const Vendor = require('../../models/Vendor');
+      const vendorDoc = await Vendor.findById(vendorId).select('businessName name').lean();
+      const targets = { notifyAllAdmins: true };
+      if (opportunity.assignment?.b2bCompanyId) {
+        targets.b2bCompanyId = opportunity.assignment.b2bCompanyId;
+      }
+      emitAsync('quote_submitted', {
+        targets,
+        data: {
+          quoteId: newBid._id,
+          opportunityId: opportunity._id,
+          projectTitle: opportunity.title,
+          vendorName: vendorDoc?.businessName || vendorDoc?.name,
+          amount,
+          vendorId: vidStr(vendorId),
+          message: `${vendorDoc?.businessName || vendorDoc?.name || 'Vendor'} submitted a bid of ₹${Number(amount).toLocaleString('en-IN')} for ${opportunity.title}.`
+        },
+        actorId: vendorId
+      });
+    } catch (_) { /* non-blocking */ }
+
     res.status(201).json({
       success: true,
       message: 'Bid submitted successfully',
@@ -688,6 +711,21 @@ const awardMyBid = async (req, res) => {
       { vendorId: new mongoose.Types.ObjectId(vendorId), opportunityId: opportunity._id },
       { status: 'accepted' }
     );
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('quote_approved', {
+        targets: { vendorId },
+        data: {
+          quoteId: myBid?._id,
+          opportunityId: opportunity._id,
+          projectId: project._id,
+          projectTitle: opportunity.title,
+          message: `Your bid for "${opportunity.title}" was awarded. Project ${project.projectCode} is ready.`
+        },
+        actorId: vendorId
+      });
+    } catch (_) { /* non-blocking */ }
 
     res.status(200).json({
       success: true,

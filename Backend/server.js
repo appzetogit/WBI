@@ -410,6 +410,7 @@ app.use('/api/b2b/invoices', require('./routes/b2b-routes/invoices.routes'));
 app.use('/api/b2b/reports', require('./routes/b2b-routes/reports.routes'));
 app.use('/api/b2b/support', require('./routes/b2b-routes/support.routes'));
 app.use('/api/b2b/users', require('./routes/b2b-routes/users.routes'));
+app.use('/api/b2b/fcm-tokens', require('./routes/b2b-routes/fcmToken.routes'));
 // Admin Auth routes (mounted first to prevent generic /api/admin middleware interception)
 app.use('/api/admin/auth', require('./routes/admin-routes/adminAuth.routes'));
 app.use('/api/admin', rateLimiter.adminApiLimiter);
@@ -422,6 +423,8 @@ app.use('/api/admin/b2b/reports', require('./routes/admin-routes/b2bReportAdmin.
 app.use('/api/admin/b2b/support', require('./routes/admin-routes/b2bSupportAdmin.routes'));
 app.use('/api/admin/vendor-support', require('./routes/admin-routes/adminVendorSupport.routes'));
 app.use('/api/admin/vendor-settings', require('./routes/admin-routes/adminVendorSettings.routes'));
+app.use('/api/admin/notifications', require('./routes/admin-routes/adminNotification.routes'));
+app.use('/api/admin/fcm-tokens', require('./routes/admin-routes/fcmToken.routes'));
 
 // Admin routes
 app.use('/api/admin', require('./routes/admin-routes/cityManagement.routes.js'));
@@ -683,6 +686,12 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         require('./jobs/engineerAssignmentJob');
         require('./jobs/slaMonitorJob');
         require('./jobs/bookingDispatchQueue');
+        try {
+          const { initNotificationWorker } = require('./jobs/notificationWorker');
+          initNotificationWorker();
+        } catch (notifErr) {
+          console.warn('[Server] Notification worker init skipped:', notifErr.message);
+        }
         console.log('[Server] BullMQ Workers initialized');
 
         // Initialize BullMQ Workers for B2B Bulk Uploads

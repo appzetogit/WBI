@@ -416,19 +416,19 @@ async function createTicket({ vendorId, body, actor, req }) {
   emitSupport('support', 'support:ticketCreated', payload);
 
   try {
-    const { publishVendorNotification } = require('./vendorNotificationCenter.service');
-    await publishVendorNotification({
-      vendorId,
-      type: 'support_ticket_created',
-      title: 'Support ticket created',
-      message: `${ticket.ticketCode}: ${ticket.subject}`,
-      module: 'support',
-      priority: ticket.priority === 'urgent' || ticket.priority === 'critical' ? 'high' : 'normal',
-      relatedId: ticket._id,
-      relatedType: 'support_ticket',
-      actionUrl: `support?ticketId=${ticket._id}`,
-      metadata: { ticketCode: ticket.ticketCode, status: ticket.status },
-      category: 'account'
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('support_ticket_updated', {
+      targets: { vendorId },
+      data: {
+        ticketId: ticket._id,
+        ticketCode: ticket.ticketCode,
+        status: ticket.status,
+        title: 'Support ticket created',
+        message: `${ticket.ticketCode}: ${ticket.subject}`,
+        relatedId: ticket._id,
+        relatedType: 'support_ticket',
+        actionUrl: `support?ticketId=${ticket._id}`
+      }
     });
   } catch (_) { /* non-blocking */ }
 

@@ -30,6 +30,18 @@ const notificationSchema = new mongoose.Schema({
     default: null,
     index: true
   },
+  b2bUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'B2BUser',
+    default: null,
+    index: true
+  },
+  b2bCompanyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'B2BCompany',
+    default: null,
+    index: true
+  },
   // Notification Type — open string so new vendor events don't fail validation
   type: {
     type: String,
@@ -80,6 +92,8 @@ notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ vendorId: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ workerId: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ adminId: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ b2bUserId: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ b2bCompanyId: 1, isRead: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);
 

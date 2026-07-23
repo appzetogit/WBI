@@ -244,15 +244,30 @@ const approveVendor = async (req, res) => {
       console.warn('Vendor company code generation failed:', codeErr.message);
     }
 
-    // Send notification to vendor
-    await createNotification({
-      vendorId: vendor._id,
-      type: 'vendor_approved',
-      title: 'Vendor Registration Approved',
-      message: 'Your vendor registration has been approved. You can now start accepting bookings.',
-      relatedId: vendor._id,
-      relatedType: 'vendor'
-    });
+    // Notify vendor via enterprise orchestrator (in-app + push + email + SMS when DLT configured)
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('vendor_approved', {
+        targets: { vendorId: vendor._id },
+        data: {
+          vendorId: vendor._id,
+          businessName: vendor.businessName || vendor.name,
+          email: vendor.email,
+          phone: vendor.phone
+        },
+        actorId: req.user?._id
+      });
+    } catch (notifErr) {
+      console.warn('vendor_approved notify failed:', notifErr.message);
+      await createNotification({
+        vendorId: vendor._id,
+        type: 'vendor_approved',
+        title: 'Vendor Registration Approved',
+        message: 'Your vendor registration has been approved. You can now start accepting bookings.',
+        relatedId: vendor._id,
+        relatedType: 'vendor'
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -298,15 +313,29 @@ const rejectVendor = async (req, res) => {
     vendor.rejectedReason = reason || 'Registration rejected by admin';
     await vendor.save();
 
-    // Send notification to vendor
-    await createNotification({
-      vendorId: vendor._id,
-      type: 'vendor_rejected',
-      title: 'Vendor Registration Rejected',
-      message: `Your vendor registration has been rejected. Reason: ${vendor.rejectedReason}`,
-      relatedId: vendor._id,
-      relatedType: 'vendor'
-    });
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('vendor_rejected', {
+        targets: { vendorId: vendor._id },
+        data: {
+          vendorId: vendor._id,
+          reason: vendor.rejectedReason,
+          email: vendor.email,
+          phone: vendor.phone
+        },
+        actorId: req.user?._id
+      });
+    } catch (notifErr) {
+      console.warn('vendor_rejected notify failed:', notifErr.message);
+      await createNotification({
+        vendorId: vendor._id,
+        type: 'vendor_rejected',
+        title: 'Vendor Registration Rejected',
+        message: `Your vendor registration has been rejected. Reason: ${vendor.rejectedReason}`,
+        relatedId: vendor._id,
+        relatedType: 'vendor'
+      });
+    }
 
     res.status(200).json({
       success: true,

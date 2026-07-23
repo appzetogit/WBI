@@ -199,18 +199,33 @@ async function processComplianceExpiries(limit = 200) {
     if (Date.now() - last > 7 * 86400000) {
       doc.lastReminderAt = new Date();
       await doc.save();
-      await publishVendorNotification({
-        vendorId: doc.vendorId,
-        type: expired ? 'document_expiry' : 'compliance_alert',
-        title: expired ? 'Compliance document expired' : 'Compliance renewal due',
-        message: `${doc.name} ${expired ? 'has expired' : 'expires soon'}. Please upload a renewed document.`,
-        module: 'compliance',
-        priority: expired ? 'urgent' : 'high',
-        relatedId: doc._id,
-        relatedType: 'compliance',
-        actionUrl: 'compliance',
-        category: 'account'
-      });
+      try {
+        const { emitAsync } = require('./notification/notificationOrchestrator.service');
+        emitAsync('compliance_expiry', {
+          targets: { vendorId: doc.vendorId },
+          data: {
+            documentId: doc._id,
+            documentName: doc.name,
+            expiryDate: doc.expiresAt,
+            message: `${doc.name} ${expired ? 'has expired' : 'expires soon'}. Please upload a renewed document.`,
+            relatedId: doc._id,
+            relatedType: 'compliance'
+          }
+        });
+      } catch (_) {
+        await publishVendorNotification({
+          vendorId: doc.vendorId,
+          type: expired ? 'document_expiry' : 'compliance_alert',
+          title: expired ? 'Compliance document expired' : 'Compliance renewal due',
+          message: `${doc.name} ${expired ? 'has expired' : 'expires soon'}. Please upload a renewed document.`,
+          module: 'compliance',
+          priority: expired ? 'urgent' : 'high',
+          relatedId: doc._id,
+          relatedType: 'compliance',
+          actionUrl: 'compliance',
+          category: 'account'
+        });
+      }
       reminded += 1;
     } else {
       await doc.save();

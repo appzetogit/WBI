@@ -325,23 +325,19 @@ const register = async (req, res) => {
       }
     });
 
-    // Notify Admins
+    // Notify Admins via orchestrator
     try {
-      const { createNotification } = require('../notificationControllers/notificationController');
-      const Admin = require('../../models/Admin');
-      const admins = await Admin.find({ isActive: true }).select('_id');
-      for (const admin of admins) {
-        await createNotification({
-          adminId: admin._id,
-          type: 'vendor_approval_request',
-          title: '👤 New Vendor Registration',
-          message: `${vendor.name} (${vendor.phone}) has registered`,
-          relatedId: vendor._id,
-          relatedType: 'vendor',
-          data: { vendorId: vendor._id, vendorName: vendor.name, phone: vendor.phone },
-          pushData: { type: 'admin_alert', link: '/admin/vendors/all' }
-        });
-      }
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('vendor_registered', {
+        targets: { notifyAllAdmins: true },
+        data: {
+          vendorId: vendor._id,
+          name: vendor.name,
+          businessName: vendor.businessName || vendor.name,
+          phone: vendor.phone,
+          email: vendor.email
+        }
+      });
     } catch (e) { console.error('Notify error', e); }
 
     // Enqueue Heavy Operations to BullMQ (Scaling)

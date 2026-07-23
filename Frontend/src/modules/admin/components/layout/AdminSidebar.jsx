@@ -473,11 +473,14 @@ const AdminSidebar = ({ isOpen, onClose }) => {
               <FiUser className="text-white text-xl" />
             </div>
             <div className="flex-1 min-w-0">
-              <h2 className="font-semibold text-white text-base truncate">
-                {adminUser.name}
+              <h2 className="font-bold text-white text-lg tracking-wider truncate">
+                WBI
               </h2>
-              <p className="text-xs text-gray-400 truncate">
-                {adminUser.role === 'super_admin' ? '⭐ Super Admin' : 'Admin'}
+              <p className="text-sm font-medium text-slate-200 truncate mt-0.5">
+                WBI Admin
+              </p>
+              <p className="text-[10px] text-slate-400 truncate mt-0.5" title="Wetzel Barron Innovation">
+                Wetzel Barron Innovation
               </p>
             </div>
           </div>
