@@ -131,7 +131,7 @@ const TrustVideosSection = () => {
   return (
     <div className="mb-6 px-4 mt-8">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[20px] font-bold text-[#0F172A] tracking-tight">
+        <h2 className="text-xl font-bold text-black">
           Real service experiences
         </h2>
         <button className="text-[14px] font-medium text-[#10AFA5] hover:opacity-80 transition-opacity">

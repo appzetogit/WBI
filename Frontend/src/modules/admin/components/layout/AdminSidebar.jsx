@@ -118,6 +118,7 @@ const getChildRoute = (parentRoute, childName) => {
       "Vendor Payments": "/admin/payments/vendors",
       "Admin Revenue": "/admin/payments/revenue",
       "Payment Reports": "/admin/payments/reports",
+      "Payment Config": "/admin/payments/config",
     },
     "/admin/reports": {
       "Revenue Report": "/admin/reports/revenue",

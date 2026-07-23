@@ -38,7 +38,7 @@ const PopularBrandsWeService = ({ brands = [], onSeeAllClick, isLoading = false,
   if (!brands || brands.length === 0) {
     return (
       <div className="mb-4 px-4 mt-2">
-        <h2 className="text-[18px] font-bold text-[#0F172A] tracking-tight mb-3">
+        <h2 className="text-xl font-bold text-black mb-4">
           Popular Brands We Service
         </h2>
         <div className="p-4 bg-slate-50 text-slate-500 rounded-lg text-sm text-center border border-slate-100 italic">
@@ -75,7 +75,7 @@ const PopularBrandsWeService = ({ brands = [], onSeeAllClick, isLoading = false,
   return (
     <div className="mb-4 px-4 mt-2">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-[18px] font-bold text-[#0F172A] tracking-tight">
+        <h2 className="text-xl font-bold text-black mb-4">
           Popular Brands We Service
         </h2>
         <button 

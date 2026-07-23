@@ -54,7 +54,7 @@ const OfferBannerSlider = ({ banners = [], onBannerClick, title = "Special Offer
     <div className="relative w-full overflow-hidden my-6 px-4">
       {!hideTitle && (
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[1.2rem] font-[800] text-[#0A1929]">{title}</h2>
+          <h2 className="text-xl font-bold text-black">{title}</h2>
         </div>
       )}
       

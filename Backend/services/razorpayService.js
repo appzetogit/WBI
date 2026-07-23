@@ -26,7 +26,7 @@ try {
 /**
  * Create Razorpay order
  */
-const createOrder = async (amount, currency = 'INR', receipt = null, notes = {}) => {
+const createOrder = async (amount, currency = 'INR', receipt = null, notes = {}, extra = {}) => {
   try {
     if (!razorpay) {
       return {
@@ -36,16 +36,21 @@ const createOrder = async (amount, currency = 'INR', receipt = null, notes = {})
     }
 
     const options = {
-      amount: Math.round(amount * 100), // Convert to paise
+      amount: Math.round(amount * 100),
       currency,
       receipt: receipt || `receipt_${Date.now()}`,
-      notes
+      notes: notes || {}
     };
+
+    if (extra.customer_id) options.customer_id = extra.customer_id;
+    if (extra.payment_capture !== undefined) options.payment_capture = extra.payment_capture;
+    if (extra.method) options.method = extra.method;
 
     console.log('Creating Razorpay order with options:', {
       amount: options.amount,
       currency: options.currency,
-      receipt: options.receipt
+      receipt: options.receipt,
+      customer_id: options.customer_id || null
     });
 
     const order = await razorpay.orders.create(options);
@@ -57,7 +62,8 @@ const createOrder = async (amount, currency = 'INR', receipt = null, notes = {})
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
-      receipt: order.receipt
+      receipt: order.receipt,
+      customerId: options.customer_id || null
     };
   } catch (error) {
     console.error('❌ Razorpay create order error:', {
@@ -334,6 +340,145 @@ const getQRCodePayments = async (id) => {
   }
 };
 
+function getPublicKeyId() {
+  return process.env.RAZORPAY_KEY_ID || null;
+}
+
+/**
+ * Ensure Razorpay Customer for a user profile.
+ */
+const ensureCustomer = async ({ name, email, contact, failExistingId = null }) => {
+  try {
+    if (!razorpay) return { success: false, error: 'Razorpay not initialized' };
+    if (failExistingId) {
+      try {
+        const existing = await razorpay.customers.fetch(failExistingId);
+        if (existing?.id) return { success: true, customerId: existing.id, customer: existing };
+      } catch (_) { /* recreate below */ }
+    }
+
+    const payload = {
+      name: name || 'WBI User',
+      contact: contact ? String(contact).replace(/\D/g, '').slice(-10) : undefined,
+      email: email || undefined,
+      fail_existing: 0
+    };
+
+    const customer = await razorpay.customers.create(payload);
+    return { success: true, customerId: customer.id, customer };
+  } catch (error) {
+    // Razorpay returns existing customer id in some conflict cases
+    const existingId = error?.error?.metadata?.customer_id || error?.metadata?.customer_id;
+    if (existingId) return { success: true, customerId: existingId };
+    console.error('[razorpay] ensureCustomer:', error.message || error);
+    return { success: false, error: error.description || error.message };
+  }
+};
+
+const createVerificationOrder = async ({ amount = 1, receipt, notes = {}, customerId }) => {
+  return createOrder(
+    amount,
+    'INR',
+    receipt || `verify_${Date.now()}`,
+    { purpose: 'instrument_verify', ...notes },
+    { customer_id: customerId }
+  );
+};
+
+const fetchCustomerTokens = async (customerId) => {
+  try {
+    if (!razorpay) return { success: false, error: 'Razorpay not initialized', tokens: [] };
+    const result = await razorpay.customers.fetchTokens(customerId);
+    return { success: true, tokens: result.items || result || [] };
+  } catch (error) {
+    console.error('[razorpay] fetchCustomerTokens:', error.message);
+    return { success: false, error: error.message, tokens: [] };
+  }
+};
+
+const fetchToken = async (customerId, tokenId) => {
+  try {
+    if (!razorpay) return { success: false, error: 'Razorpay not initialized' };
+    const token = await razorpay.customers.fetchToken(customerId, tokenId);
+    return { success: true, token };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+const deleteToken = async (customerId, tokenId) => {
+  try {
+    if (!razorpay) return { success: false, error: 'Razorpay not initialized' };
+    await razorpay.customers.deleteToken(customerId, tokenId);
+    return { success: true };
+  } catch (error) {
+    console.error('[razorpay] deleteToken:', error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Create a payment using a saved token (recurring / authorized).
+ */
+const createTokenPayment = async ({ amount, currency = 'INR', customerId, tokenId, orderId, email, contact, notes = {} }) => {
+  try {
+    if (!razorpay) return { success: false, error: 'Razorpay not initialized' };
+    const axios = require('axios');
+    const auth = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
+    const body = {
+      amount: Math.round(Number(amount) * 100),
+      currency,
+      order_id: orderId,
+      customer_id: customerId,
+      token: tokenId,
+      email: email || undefined,
+      contact: contact || undefined,
+      notes,
+      recurring: '1'
+    };
+    const response = await axios.post('https://api.razorpay.com/v1/payments/create/recurring', body, {
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }
+    });
+    return { success: true, payment: response.data };
+  } catch (error) {
+    const msg = error.response?.data?.error?.description || error.message;
+    console.error('[razorpay] createTokenPayment:', msg);
+    return { success: false, error: msg };
+  }
+};
+
+const verifyWebhookSignature = (rawBody, signature) => {
+  const crypto = require('crypto');
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  if (!secret || !rawBody || !signature) return false;
+  const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody));
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+  try {
+    const a = Buffer.from(expected);
+    const b = Buffer.from(String(signature));
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+};
+
+const fetchSettlements = async ({ count = 20, skip = 0 } = {}) => {
+  try {
+    if (!razorpay) return { success: false, error: 'Razorpay not initialized', items: [] };
+    const axios = require('axios');
+    const auth = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
+    const response = await axios.get('https://api.razorpay.com/v1/settlements', {
+      headers: { Authorization: `Basic ${auth}` },
+      params: { count, skip }
+    });
+    return { success: true, items: response.data?.items || [] };
+  } catch (error) {
+    const msg = error.response?.data?.error?.description || error.message;
+    return { success: false, error: msg, items: [] };
+  }
+};
+
 module.exports = {
   createOrder,
   verifyPayment,
@@ -343,6 +488,15 @@ module.exports = {
   refundPayment,
   createQRCode,
   getQRCodePayments,
+  ensureCustomer,
+  createVerificationOrder,
+  fetchCustomerTokens,
+  fetchToken,
+  deleteToken,
+  createTokenPayment,
+  verifyWebhookSignature,
+  fetchSettlements,
+  getPublicKeyId,
   isTestMode: () => isTestMode
 };
 

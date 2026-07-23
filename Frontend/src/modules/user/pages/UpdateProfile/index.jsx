@@ -387,21 +387,7 @@ const UpdateProfile = () => {
           <button
             onClick={handleSave}
             disabled={isLoading || isSaving}
-            className="w-full text-white font-bold py-3.5 rounded-xl active:scale-98 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              background: `linear-gradient(135deg, ${themeColors.button} 0%, ${themeColors.icon} 100%)`,
-              boxShadow: '0 4px 12px rgba(0, 166, 166, 0.4)',
-            }}
-            onMouseEnter={(e) => {
-              if (!isLoading && !isSaving) {
-                e.target.style.boxShadow = '0 6px 16px rgba(0, 166, 166, 0.5)';
-                e.target.style.transform = 'translateY(-1px)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.boxShadow = '0 4px 12px rgba(0, 166, 166, 0.4)';
-              e.target.style.transform = 'translateY(0)';
-            }}
+            className="w-full text-white font-bold py-3.5 rounded-xl active:scale-95 transition-all shadow-[0_4px_12px_rgba(16,175,165,0.4)] hover:shadow-[0_6px_16px_rgba(16,175,165,0.5)] bg-gradient-to-r from-[#10AFA5] to-[#0D9488] disabled:opacity-50 disabled:cursor-not-allowed hover:-translate-y-0.5"
           >
             {isSaving ? 'Saving...' : 'Save Changes'}
           </button>

@@ -107,9 +107,9 @@ const CustomerReviews = ({ serviceId = 'all' }) => {
   };
 
   return (
-    <section className="py-2 px-4 mb-6 relative">
+    <section className="pt-0 pb-2 px-4 mb-6 relative">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-[20px] font-bold text-[#0F172A] tracking-tight">Customer Reviews</h2>
+        <h2 className="text-xl font-bold text-black">Customer Reviews</h2>
         <button 
           className="text-[14px] font-medium flex items-center gap-1 active:opacity-70 transition-opacity"
           style={{ color: brandColor }}

@@ -213,7 +213,21 @@ const Account = () => {
               </button>
             </div>
             <h2 className="text-xl font-bold text-gray-900">{userProfile.name}</h2>
-            <p className="text-sm text-gray-500">{userProfile.email || userProfile.phone || 'No email linked'}</p>
+            <p className="text-sm text-gray-500 max-w-[250px] truncate text-center">
+              {(() => {
+                const contact = userProfile.phone ? formatPhoneNumber(userProfile.phone) : userProfile.email;
+                if (!contact) return 'No contact linked';
+                
+                // If it's a long email, truncate the username part smartly
+                if (contact.includes('@') && contact.length > 25) {
+                  const [username, domain] = contact.split('@');
+                  if (username.length > 10) {
+                    return `${username.substring(0, 10)}...@${domain}`;
+                  }
+                }
+                return contact;
+              })()}
+            </p>
           </motion.div>
 
           {/* Stats Row */}

@@ -21,15 +21,11 @@ const WhyChooseWBI = ({ data }) => {
 
   return (
     <section className="py-4 px-4 mb-6">
-      {/* Section Title with bottom bar */}
-      <div className="flex flex-col items-start mb-6">
-        <h2 className="text-[20px] font-black text-[#0F172A] tracking-tight">
+      {/* Section Title matching Real service experiences */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-black">
           {title}
         </h2>
-        <div 
-          className="h-[3px] w-8 rounded mt-1.5"
-          style={{ backgroundColor: brandColor }}
-        />
       </div>
 
       {/* Responsive list of cards */}

@@ -151,6 +151,13 @@ app.post(
   payoutWebhookController.cashfreePayoutWebhook
 );
 
+const { handlePaymentsWebhook } = require('./controllers/paymentControllers/razorpayPaymentsWebhook.controller');
+app.post(
+  '/api/webhooks/razorpay/payments',
+  express.raw({ type: 'application/json' }),
+  handlePaymentsWebhook
+);
+
 // Body parser middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -317,6 +324,7 @@ app.use('/api/home-sections', require('./routes/public-routes/homeSections.route
 app.use('/api/users/auth', require('./routes/user-routes/auth.routes'));
 app.use('/api/users', require('./routes/user-routes/profile.routes'));
 app.use('/api/user/wallet', require('./routes/user-routes/userWallet.routes'));
+app.use('/api/user/payment-methods', require('./routes/user-routes/userPaymentMethod.routes'));
 app.use('/api/user/home', require('./routes/user-routes/home.routes'));
 app.use('/api/users/bookings', require('./routes/user-routes/booking.routes'));
 app.use('/api/users', require('./routes/user-routes/cart.routes'));
@@ -456,6 +464,7 @@ app.use('/api/admin', require('./routes/admin-routes/homePageManagement.routes')
 app.use('/api/admin', require('./routes/admin-routes/homeSectionsAdmin.routes'));
 app.use('/api/admin', require('./routes/admin-routes/bookingManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/paymentManagement.routes'));
+app.use('/api/admin/payment-config', require('./routes/admin-routes/adminPaymentConfig.routes'));
 app.use('/api/admin', require('./routes/admin-routes/transactionManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/upload.routes'));
 app.use('/api/admin', require('./routes/admin-routes/planManagement.routes'));

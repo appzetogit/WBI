@@ -23,7 +23,7 @@ const createPaymentOrder = async (req, res) => {
     }
 
     const userId = req.user.id;
-    const { bookingId } = req.body;
+    const { bookingId, paymentMethodId } = req.body;
 
     // Get booking
     const booking = await Booking.findOne({ _id: bookingId, userId });
@@ -43,6 +43,28 @@ const createPaymentOrder = async (req, res) => {
       });
     }
 
+    let customerId = null;
+    let savedMethod = null;
+    try {
+      const userPaymentMethodService = require('../../services/userPaymentMethod.service');
+      const config = await userPaymentMethodService.getPublicConfig();
+      if (!config.onlineEnabled) {
+        return res.status(400).json({
+          success: false,
+          message: 'Online payments are currently disabled'
+        });
+      }
+      const user = await User.findById(userId);
+      if (user) {
+        customerId = await userPaymentMethodService.ensureUserCustomer(user).catch(() => null);
+      }
+      if (paymentMethodId) {
+        savedMethod = await userPaymentMethodService.getMethodForCharge(userId, paymentMethodId);
+      }
+    } catch (e) {
+      console.warn('[createPaymentOrder] method config:', e.message);
+    }
+
     // Create Razorpay order
     console.log('Creating Razorpay order with amount:', booking.finalAmount);
     const orderResult = await createOrder(
@@ -52,8 +74,10 @@ const createPaymentOrder = async (req, res) => {
       {
         bookingId: booking._id.toString(),
         userId: userId.toString(),
-        bookingNumber: booking.bookingNumber
-      }
+        bookingNumber: booking.bookingNumber,
+        paymentMethodId: paymentMethodId ? String(paymentMethodId) : ''
+      },
+      customerId ? { customer_id: customerId } : {}
     );
 
     console.log('Razorpay order result:', orderResult);
@@ -79,7 +103,11 @@ const createPaymentOrder = async (req, res) => {
         amount: orderResult.amount / 100, // Convert back to rupees
         currency: orderResult.currency,
         key: process.env.RAZORPAY_KEY_ID,
-        bookingId: booking._id
+        bookingId: booking._id,
+        customerId,
+        paymentMethodId: savedMethod?.id || null,
+        preferredMethodType: savedMethod?.type || null,
+        save: true
       }
     });
   } catch (error) {

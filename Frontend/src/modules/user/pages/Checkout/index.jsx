@@ -12,6 +12,7 @@ import { bookingService } from '../../../../services/bookingService';
 import { paymentService } from '../../../../services/paymentService';
 import { cartService } from '../../../../services/cartService';
 import { configService } from '../../../../services/configService';
+import userPaymentMethodService from '../../../../services/userPaymentMethodService';
 import { getPlans } from '../../services/planService';
 import { userAuthService } from '../../../../services/authService';
 import { useCart } from '../../../../context/CartContext';
@@ -53,6 +54,9 @@ const Checkout = () => {
   const [searchingVendors, setSearchingVendors] = useState(false);
   const [showVendorModal, setShowVendorModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('online'); // 'online' | 'pay_at_home'
+  const [savedPayMethods, setSavedPayMethods] = useState([]);
+  const [payConfig, setPayConfig] = useState(null);
+  const [selectedSavedMethodId, setSelectedSavedMethodId] = useState(null);
 
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -68,6 +72,18 @@ const Checkout = () => {
         .then(() => setRazorpayLoaded(true))
         .catch(err => console.error('Failed to load Razorpay:', err));
     });
+    userPaymentMethodService.list()
+      .then((res) => {
+        if (res.success) {
+          setSavedPayMethods((res.data?.methods || []).filter((m) => m.type !== 'cod_preference'));
+          setPayConfig(res.data?.config || null);
+          const def = (res.data?.methods || []).find((m) => m.isDefault && m.type !== 'cod_preference');
+          if (def) setSelectedSavedMethodId(def.id);
+          const preferCod = (res.data?.methods || []).some((m) => m.type === 'cod_preference' && m.status === 'active');
+          if (preferCod && res.data?.config?.cod?.enabled) setPaymentMethod('pay_at_home');
+        }
+      })
+      .catch(() => { /* non-blocking */ });
   }, []);
 
   // Load user data and cart
@@ -692,7 +708,10 @@ const Checkout = () => {
 
       // Create Razorpay order
       toast.loading('Creating payment order...');
-      const orderResponse = await paymentService.createOrder(bookingRequest._id);
+      const orderResponse = await paymentService.createOrder(
+        bookingRequest._id,
+        selectedSavedMethodId || null
+      );
 
       if (!orderResponse.success) {
         toast.dismiss();
@@ -702,8 +721,8 @@ const Checkout = () => {
 
       toast.dismiss();
 
-      // Get Razorpay key
-      const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
+      // Prefer key from backend; fall back to Vite env
+      const razorpayKey = orderResponse.data.key || import.meta.env.VITE_RAZORPAY_KEY_ID;
       if (!razorpayKey) {
         toast.error('Razorpay key not configured');
         return;
@@ -721,6 +740,7 @@ const Checkout = () => {
         order_id: orderResponse.data.orderId,
         name: 'WBI',
         description: `Payment for ${bookingRequest.serviceName || 'service'}`,
+        customer_id: orderResponse.data.customerId || undefined,
         handler: async function (response) {
           try {
             toast.loading('Verifying payment...');
@@ -1392,6 +1412,61 @@ const Checkout = () => {
             </div>
           </div>
         </div>
+
+        {/* Payment method (when paying) */}
+        {totalAmount > 0 && (
+          <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6 space-y-2">
+            <h3 className="text-sm font-bold text-slate-900 mb-2">Payment method</h3>
+            {payConfig?.onlineEnabled !== false && (
+              <button
+                type="button"
+                onClick={() => { setPaymentMethod('online'); setSelectedSavedMethodId(null); }}
+                className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-medium ${
+                  paymentMethod === 'online' && !selectedSavedMethodId
+                    ? 'border-teal-500 bg-teal-50 text-teal-900'
+                    : 'border-gray-100 text-gray-700'
+                }`}
+              >
+                Pay online (UPI / Card / Net Banking / Wallet)
+              </button>
+            )}
+            {savedPayMethods.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => { setPaymentMethod('online'); setSelectedSavedMethodId(m.id); }}
+                className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-medium ${
+                  paymentMethod === 'online' && selectedSavedMethodId === m.id
+                    ? 'border-teal-500 bg-teal-50 text-teal-900'
+                    : 'border-gray-100 text-gray-700'
+                }`}
+              >
+                Saved: {m.maskedDisplay}
+                {m.isDefault ? ' · Default' : ''}
+              </button>
+            ))}
+            {payConfig?.cod?.enabled !== false && (
+              <button
+                type="button"
+                onClick={() => { setPaymentMethod('pay_at_home'); setSelectedSavedMethodId(null); }}
+                className={`w-full text-left px-3 py-2.5 rounded-xl border text-sm font-medium ${
+                  paymentMethod === 'pay_at_home'
+                    ? 'border-teal-500 bg-teal-50 text-teal-900'
+                    : 'border-gray-100 text-gray-700'
+                }`}
+              >
+                Cash / UPI on Delivery
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate('/user/manage-payment-methods')}
+              className="text-xs font-semibold text-teal-700 pt-1"
+            >
+              Manage payment methods
+            </button>
+          </div>
+        )}
 
         {/* Important Note regarding Base Price */}
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6 flex items-start gap-4 shadow-sm">

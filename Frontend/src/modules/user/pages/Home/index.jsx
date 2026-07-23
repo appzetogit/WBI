@@ -461,7 +461,11 @@ const Home = () => {
     const targetSlug = category.slug || category.id;
     if (targetSlug) {
       console.log('[NAVIGATING_TO_CATEGORY]', targetSlug);
-      navigate(`/user/categories/${targetSlug}`);
+      if (category.isService) {
+        navigate(`/user/service/${targetSlug}`);
+      } else {
+        navigate(`/user/categories/${targetSlug}`);
+      }
     } else {
       toast.error('Service not found');
     }
@@ -762,7 +766,7 @@ const Home = () => {
 
               {/* 7. How It Works */}
               {homeContent?.howItWorks?.isActive && (
-                <div className="relative z-10 mt-6">
+                <div className="relative z-10 mt-2">
                   <Suspense fallback={<div className="h-40 bg-slate-50 animate-pulse rounded-2xl mx-4" />}>
                     <HowItWorks 
                       data={{
@@ -779,7 +783,7 @@ const Home = () => {
               )}
 
               {/* 6. Customer Reviews */}
-              <div className="relative z-10 mt-2">
+              <div className="relative z-10 mt-0">
                 <Suspense fallback={<div className="h-40 bg-gray-50 animate-pulse rounded-2xl mx-4" />}>
                   <CustomerReviews serviceId="all" />
                 </Suspense>
@@ -905,6 +909,7 @@ const Home = () => {
             onClose={() => setIsSearchOpen(false)}
             categories={categories}
             onCategoryClick={handleCategoryClick}
+            onServiceClick={handleServiceClick}
           />
         )}
       </Suspense>

@@ -93,7 +93,7 @@ const RecentBookings = () => {
   return (
     <div className="mb-4 px-4 mt-2">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-[18px] font-bold text-[#0F172A] tracking-tight">
+        <h2 className="text-xl font-bold text-black">
           Recent Bookings
         </h2>
         <button 

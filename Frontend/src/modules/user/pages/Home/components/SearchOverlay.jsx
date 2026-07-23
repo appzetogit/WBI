@@ -31,7 +31,7 @@ const toAssetUrl = (url) => {
   return `${base}${clean.startsWith('/') ? '' : '/'}${clean}`;
 };
 
-const SearchOverlay = ({ isOpen, onClose, categories = [], onCategoryClick }) => {
+const SearchOverlay = ({ isOpen, onClose, categories = [], onCategoryClick, onServiceClick }) => {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -61,29 +61,30 @@ const SearchOverlay = ({ isOpen, onClose, categories = [], onCategoryClick }) =>
           ).map(s => ({
             id: s._id,
             title: s.name,
-            category: s.name
+            category: s.name,
+            slug: s.slug
           }));
           setTrendingServices(filtered.slice(0, 5));
         } else {
           // Fallback to project-specific trending services if API returns empty
           console.log('Using fallback trending services');
           setTrendingServices([
-            { id: 'trend-1', title: 'AC Repair & Service', category: 'AC & Appliance' },
-            { id: 'trend-2', title: 'Geyser Repair', category: 'Geyser' },
-            { id: 'trend-3', title: 'Microwave Repair', category: 'Microwave' },
-            { id: 'trend-4', title: 'LED TV Repair', category: 'LED' },
-            { id: 'trend-5', title: 'RO Water Purifier Service', category: 'RO' }
+            { id: 'trend-1', title: 'AC Repair & Service', category: 'AC & Appliance', slug: 'ac-repair' },
+            { id: 'trend-2', title: 'Geyser Repair', category: 'Geyser', slug: 'geyser-repair' },
+            { id: 'trend-3', title: 'Microwave Repair', category: 'Microwave', slug: 'microwave-repair' },
+            { id: 'trend-4', title: 'LED TV Repair', category: 'LED', slug: 'led-tv-repair' },
+            { id: 'trend-5', title: 'RO Water Purifier Service', category: 'RO', slug: 'ro-water-purifier-service' }
           ]);
         }
       } catch (error) {
         console.error("Failed to load trending services", error);
         // Fallback on error too
         setTrendingServices([
-          { id: 'trend-1', title: 'AC Repair & Service', category: 'AC & Appliance' },
-          { id: 'trend-2', title: 'Geyser Repair', category: 'Geyser' },
-          { id: 'trend-3', title: 'Microwave Repair', category: 'Microwave' },
-          { id: 'trend-4', title: 'LED TV Repair', category: 'LED' },
-          { id: 'trend-5', title: 'RO Water Purifier Service', category: 'RO' }
+          { id: 'trend-1', title: 'AC Repair & Service', category: 'AC & Appliance', slug: 'ac-repair' },
+          { id: 'trend-2', title: 'Geyser Repair', category: 'Geyser', slug: 'geyser-repair' },
+          { id: 'trend-3', title: 'Microwave Repair', category: 'Microwave', slug: 'microwave-repair' },
+          { id: 'trend-4', title: 'LED TV Repair', category: 'LED', slug: 'led-tv-repair' },
+          { id: 'trend-5', title: 'RO Water Purifier Service', category: 'RO', slug: 'ro-water-purifier-service' }
         ]);
       }
     };
@@ -157,7 +158,13 @@ const SearchOverlay = ({ isOpen, onClose, categories = [], onCategoryClick }) =>
       return;
     }
 
-    // 2. Handle Service/Brand Click
+    // 2. Handle Service Click directly via onServiceClick if available
+    if (onServiceClick && (item.slug || item.id)) {
+      onServiceClick(item);
+      return;
+    }
+
+    // 3. Fallback: Handle Service/Brand Click using category lookup
     let catId = item.categoryId || item.targetCategoryId || item.categoryId;
     let category = null;
 

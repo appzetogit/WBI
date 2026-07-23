@@ -39,7 +39,7 @@ const MostBookedServices = React.memo(({ services, onServiceClick, onAddClick, o
   return (
     <div className="mb-6 px-4 mt-4">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[20px] font-bold text-[#0F172A] tracking-tight">
+        <h2 className="text-xl font-bold text-black">
           Most booked services
         </h2>
         <button 

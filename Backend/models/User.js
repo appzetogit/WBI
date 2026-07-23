@@ -134,6 +134,13 @@ const userSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  /** Razorpay Customers API id for saved instruments */
+  razorpayCustomerId: {
+    type: String,
+    default: null,
+    index: true,
+    sparse: true
+  },
   loginSessionId: {
     type: String,
     default: null

@@ -28,28 +28,24 @@ const HowItWorks = ({ steps = [], isLoading = false, data = null }) => {
   if (!displaySteps || displaySteps.length === 0) return null;
 
   return (
-    <section className="py-4 px-4 mb-6 relative overflow-hidden">
-      {/* Section Title with bottom bar */}
-      <div className="flex flex-col items-start mb-6">
-        <h2 className="text-[20px] font-black text-[#0F172A] tracking-tight">
+    <section className="pt-1 pb-4 px-4 mb-2 relative overflow-hidden">
+      {/* Section Title matching Real service experiences */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-black">
           {sectionTitle}
         </h2>
-        <div 
-          className="h-[3px] w-8 rounded mt-1.5"
-          style={{ backgroundColor: brandColor }}
-        />
       </div>
 
-      <div className="relative">
+      <div className="relative mt-2">
         {/* Dotted connecting line background */}
         <div 
-          className="absolute top-[28px] left-[12%] right-[12%] h-[1px] z-0" 
+          className="absolute top-[24px] left-[15%] right-[15%] h-[1px] z-0" 
           style={{
-            backgroundImage: `linear-gradient(to right, ${brandColor} 33%, transparent 0%)`,
+            backgroundImage: `linear-gradient(to right, ${brandColor} 40%, transparent 0%)`,
             backgroundPosition: 'bottom',
-            backgroundSize: '10px 1px',
+            backgroundSize: '8px 1px',
             backgroundRepeat: 'repeat-x',
-            opacity: 0.3
+            opacity: 0.2
           }}
         />
 
@@ -59,12 +55,12 @@ const HowItWorks = ({ steps = [], isLoading = false, data = null }) => {
             return (
               <div 
                 key={step._id || index} 
-                className="min-w-[125px] w-[125px] flex-shrink-0 flex flex-col items-center text-center snap-center relative"
+                className="min-w-[110px] w-[110px] flex-shrink-0 flex flex-col items-center text-center snap-center relative group"
               >
                 {/* Icon Circle */}
                 <div 
-                  className="w-14 h-14 rounded-full border bg-white flex items-center justify-center relative shadow-sm transition-transform duration-300 hover:scale-105"
-                  style={{ borderColor: `${brandColor}30` }} // border with opacity
+                  className="w-12 h-12 rounded-full border bg-white flex items-center justify-center relative shadow-[0_2px_8px_rgba(35,176,167,0.06)] transition-all duration-300 group-hover:shadow-[0_4px_16px_rgba(35,176,167,0.12)] group-hover:-translate-y-1"
+                  style={{ borderColor: `${brandColor}20` }} 
                 >
                   {step.iconUrl ? (
                     <img 
@@ -72,19 +68,19 @@ const HowItWorks = ({ steps = [], isLoading = false, data = null }) => {
                       loading="lazy" 
                       src={step.iconUrl} 
                       alt={step.title} 
-                      className="w-6 h-6 object-contain animate-fadeIn" 
+                      className="w-5 h-5 object-contain animate-fadeIn transition-transform duration-300 group-hover:scale-110" 
                     />
                   ) : (
                     <DynamicFiIcon 
                       name={step.iconName || 'FiSearch'} 
-                      className="w-6 h-6" 
+                      className="w-5 h-5 transition-transform duration-300 group-hover:scale-110" 
                       style={{ color: brandColor }} 
                     />
                   )}
                   
                   {/* Number Badge */}
                   <div 
-                    className="absolute -bottom-2 bg-[#23b0a7] text-white w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black border-2 border-white shadow-sm"
+                    className="absolute -bottom-[6px] text-white w-[18px] h-[18px] rounded-full flex items-center justify-center text-[8px] font-black border-2 border-white shadow-sm transition-transform duration-300 group-hover:scale-110"
                     style={{ backgroundColor: brandColor }}
                   >
                     {step.stepNumber || (index + 1)}

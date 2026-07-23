@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiChevronRight, FiMoreHorizontal } from 'react-icons/fi';
 import api from '../../../../../services/api';
 import ServiceIconRenderer from '../../../components/common/ServiceIconRenderer';
+import { getServiceImage } from '../../../../../utils/serviceImages';
 
 // We rely on ServiceIconRenderer for all icons to maintain a consistent aesthetic
 
@@ -73,8 +74,8 @@ const OurServicesSection = () => {
 
   return (
     <section className="py-4 bg-transparent relative z-10">
-      <div className="px-4 flex justify-between items-center mb-3">
-        <h2 className="text-[18px] font-extrabold text-[#0F172A] tracking-tight">Our Services</h2>
+      <div className="px-4 flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-black">Our Services</h2>
         <button 
           onClick={() => navigate('/user/services')}
           className="text-[11px] font-bold text-[#10AFA5] border border-[#10AFA5]/20 bg-[#E5F3F2] px-2.5 py-1 rounded-full active:scale-95 transition-transform"
@@ -133,21 +134,28 @@ const OurServicesSection = () => {
           >
             {activeServices.length > 0 ? (
               activeServices.map((service, index) => {
+                const isOneTime = service.type === 'one_time';
                 return (
                   <div
                     key={service.serviceId}
                     onClick={() => handleServiceClick(service)}
-                    className="bg-white rounded-xl p-2.5 shadow-sm border border-gray-100 flex flex-col items-center justify-center min-w-[92px] max-w-[92px] snap-center flex-shrink-0 cursor-pointer active:scale-[0.98] transition-transform"
+                    className={`bg-white rounded-[16px] p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-gray-100 flex flex-col items-center justify-center min-w-[100px] max-w-[100px] snap-center flex-shrink-0 cursor-pointer hover:border-[#10AFA5]/30 hover:shadow-[0_4px_16px_rgba(16,175,165,0.08)] active:scale-[0.96] transition-all duration-200 ${isOneTime ? 'bg-gradient-to-b from-white to-[#F8FCFC]' : ''}`}
                   >
-                    <div className="w-12 h-12 mb-1.5 relative flex items-center justify-center shrink-0 rounded-full overflow-hidden shadow-sm border border-gray-50">
-                      <ServiceIconRenderer categoryName={service.name} className="w-full h-full object-cover drop-shadow-sm" />
+                    <div className={`w-14 h-14 mb-2 relative flex items-center justify-center shrink-0 rounded-2xl overflow-hidden shadow-sm ${isOneTime ? 'border border-[#10AFA5]/20 p-0.5 bg-white' : 'border border-gray-50'}`}>
+                      {isOneTime ? (
+                        <div className="w-full h-full rounded-xl overflow-hidden">
+                          <img src={getServiceImage(service.name)} className="w-full h-full object-cover transition-transform duration-300 hover:scale-110" alt={service.name} />
+                        </div>
+                      ) : (
+                        <ServiceIconRenderer categoryName={service.name} className="w-full h-full object-cover drop-shadow-sm" />
+                      )}
                     </div>
-                    <h3 className="text-[10px] font-bold text-[#0F172A] text-center leading-tight mb-1 line-clamp-2 min-h-[26px] flex items-center">
+                    <h3 className="text-[10px] font-bold text-[#0F172A] text-center leading-[1.2] mb-1 line-clamp-2 min-h-[24px] flex items-center">
                       {service.name}
                     </h3>
-                    <div className="flex items-center gap-1 text-[9px] font-medium text-gray-400">
+                    <div className="flex items-center gap-1 text-[9px] font-bold text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded-md">
                       <span className="text-[#F59E0B] flex items-center gap-0.5">⭐ {service.rating || '4.8'}</span>
-                      <span>({service.reviewCount || '230'})</span>
+                      <span className="text-gray-400 font-medium">({service.reviewCount || '230'})</span>
                     </div>
                   </div>
                 )
@@ -160,10 +168,10 @@ const OurServicesSection = () => {
             {activeServices.length > 0 && (
               <div
                 onClick={() => navigate('/user/services')}
-                className="bg-gray-50 rounded-xl p-2.5 shadow-sm border border-gray-100 flex flex-col items-center justify-center min-w-[92px] max-w-[92px] snap-center flex-shrink-0 cursor-pointer active:scale-[0.98] transition-transform"
+                className="bg-gray-50 rounded-[16px] p-2.5 shadow-sm border border-gray-100 flex flex-col items-center justify-center min-w-[100px] max-w-[100px] snap-center flex-shrink-0 cursor-pointer active:scale-[0.98] transition-transform hover:bg-gray-100"
               >
-                <div className="w-8 h-8 rounded-full bg-white shadow-sm flex items-center justify-center mb-2 text-[#10AFA5]">
-                  <FiChevronRight className="w-4 h-4" />
+                <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center mb-2 text-[#10AFA5] group-hover:scale-110 transition-transform">
+                  <FiChevronRight className="w-5 h-5" />
                 </div>
                 <span className="text-[10px] font-bold text-[#10AFA5] text-center">View All<br/>Services</span>
               </div>
