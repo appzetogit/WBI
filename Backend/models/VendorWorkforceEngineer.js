@@ -61,6 +61,12 @@ const vendorWorkforceEngineerSchema = new mongoose.Schema({
   capacity: { type: Number, default: 100 },
   utilization: { type: Number, default: 0 },
   nextAvailableAt: Date,
+  linkedEngineerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Engineer',
+    default: null,
+    index: true
+  },
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });
 
@@ -83,5 +89,9 @@ vendorWorkforceEngineerSchema.pre('save', async function (next) {
 
 vendorWorkforceEngineerSchema.index({ vendorId: 1, status: 1, availability: 1 });
 vendorWorkforceEngineerSchema.index({ vendorId: 1, serviceCategoryCode: 1 });
+vendorWorkforceEngineerSchema.index(
+  { vendorId: 1, linkedEngineerId: 1 },
+  { unique: true, partialFilterExpression: { linkedEngineerId: { $type: 'objectId' } } }
+);
 
 module.exports = mongoose.model('VendorWorkforceEngineer', vendorWorkforceEngineerSchema);

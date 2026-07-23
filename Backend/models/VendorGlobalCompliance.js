@@ -19,6 +19,7 @@ const vendorGlobalComplianceSchema = new mongoose.Schema({
     index: true
   },
   documentNumber: { type: String, default: '' },
+  documentUrl: { type: String, default: '' },
   issuedBy: { type: String, default: '' },
   issuedAt: Date,
   expiresAt: Date,
@@ -26,9 +27,22 @@ const vendorGlobalComplianceSchema = new mongoose.Schema({
   mandatory: { type: Boolean, default: true },
   lastReminderAt: Date,
   notes: { type: String, default: '' },
+  verifiedBy: { type: mongoose.Schema.Types.ObjectId, default: null },
+  verifiedAt: Date,
+  auditHistory: [{
+    action: String,
+    actorType: { type: String, default: 'system' },
+    actorId: mongoose.Schema.Types.ObjectId,
+    notes: String,
+    at: { type: Date, default: Date.now }
+  }],
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });
 
 vendorGlobalComplianceSchema.index({ vendorId: 1, status: 1, expiresAt: 1 });
+vendorGlobalComplianceSchema.index(
+  { vendorId: 1, requirementCode: 1 },
+  { unique: true, partialFilterExpression: { demoTag: null } }
+);
 
 module.exports = mongoose.model('VendorGlobalCompliance', vendorGlobalComplianceSchema);

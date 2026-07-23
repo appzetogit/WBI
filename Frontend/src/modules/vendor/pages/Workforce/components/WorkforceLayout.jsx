@@ -10,7 +10,31 @@ import useWorkforceCounts from '../../../hooks/useWorkforceCounts';
 const Inner = () => {
   const { triggerRefresh } = useWorkforceOps();
   const { refresh } = useWorkforceCounts();
-  const handleRefresh = () => { triggerRefresh(); refresh(); };
+  const [syncing, setSyncing] = React.useState(false);
+
+  const handleRefresh = React.useCallback(() => {
+    triggerRefresh();
+    refresh();
+  }, [triggerRefresh, refresh]);
+
+  React.useEffect(() => {
+    const onOps = () => handleRefresh();
+    window.addEventListener('vendorOpsUpdated', onOps);
+    return () => window.removeEventListener('vendorOpsUpdated', onOps);
+  }, [handleRefresh]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const { syncWorkforce } = await import('../../../services/workforceOpsService');
+      await syncWorkforce();
+      handleRefresh();
+    } catch (e) {
+      alert(e.response?.data?.message || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   return (
     <div className="min-h-full bg-gray-50/80">
@@ -27,9 +51,20 @@ const Inner = () => {
               Engineers, teams, skills, assignments, attendance & certifications — driven by your registered services.
             </p>
           </div>
-          <button onClick={handleRefresh} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 shadow-sm">
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing…' : 'Sync Linked'}
+            </button>
+            <button type="button" onClick={handleRefresh} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 shadow-sm">
+              <RefreshCw className="h-4 w-4" /> Refresh
+            </button>
+          </div>
         </div>
         <div className="mb-6"><WorkforceStatCards /></div>
         <div className="mb-4"><FilterBar onApply={triggerRefresh} /></div>

@@ -5,7 +5,22 @@ const BASE = '/vendor/finance';
 export const fetchFinanceCounts = () => api.get(`${BASE}/counts`);
 export const fetchEarningsByService = () => api.get(`${BASE}/earnings-by-service`);
 export const fetchWallet = (params = {}) => api.get(`${BASE}/wallet`, { params });
-export const requestWithdrawal = (amount) => api.post(`${BASE}/wallet/withdraw`, { amount });
+export const requestWithdrawal = (payload) =>
+  api.post(`${BASE}/wallet/withdraw`, typeof payload === 'number' ? { amount: payload } : payload);
+export const fetchWithdrawEligibility = () => api.get(`${BASE}/withdraw/eligibility`);
+export const quoteWithdrawal = (payload) => api.post(`${BASE}/withdraw/quote`, payload);
+export const sendWithdrawOtp = () => api.post(`${BASE}/withdraw/otp`);
+export const fetchBankAccounts = () => api.get(`${BASE}/withdraw/banks`);
+export const upsertBankAccount = (payload) => api.post(`${BASE}/withdraw/banks`, payload);
+export const verifyBankAccount = (bankId) => api.post(`${BASE}/withdraw/banks/${bankId}/verify`);
+export const fetchWithdrawals = (params = {}) => api.get(`${BASE}/withdrawals`, { params });
+export const fetchWithdrawal = (id) => api.get(`${BASE}/withdrawals/${id}`);
+export const cancelWithdrawal = (id) => api.post(`${BASE}/withdrawals/${id}/cancel`);
+export const downloadWithdrawalReceipt = (id) =>
+  api.get(`${BASE}/withdrawals/${id}/receipt`, { responseType: 'blob' });
+export const exportFinanceLedger = (params = {}) =>
+  api.get(`${BASE}/wallet/export`, { params, responseType: 'blob' });
+export const syncFinanceData = () => api.post(`${BASE}/sync`);
 
 export const fetchClientReceivables = (params = {}) => api.get(`${BASE}/client-receivables`, { params });
 export const fetchB2BReceivables = (params = {}) => api.get(`${BASE}/b2b-receivables`, { params });
@@ -14,6 +29,10 @@ export const updateReceivable = (id, data) => api.patch(`${BASE}/receivables/${i
 export const fetchQuotations = (params = {}) => api.get(`${BASE}/quotations`, { params });
 export const fetchInvoices = (params = {}) => api.get(`${BASE}/invoices`, { params });
 export const updateFinanceDocument = (id, data) => api.patch(`${BASE}/documents/${id}`, data);
+export const downloadFinanceDocument = (id) =>
+  api.get(`${BASE}/documents/${id}/download`, { responseType: 'blob' });
+export const createInvoicePayOrder = (id, data = {}) => api.post(`${BASE}/invoices/${id}/pay-order`, data);
+export const verifyInvoicePayment = (id, data) => api.post(`${BASE}/invoices/${id}/verify-payment`, data);
 
 export const fetchPaymentMilestones = (params = {}) => api.get(`${BASE}/milestones`, { params });
 export const updatePaymentMilestone = (id, data) => api.patch(`${BASE}/milestones/${id}`, data);

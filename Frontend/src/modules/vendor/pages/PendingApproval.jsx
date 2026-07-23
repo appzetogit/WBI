@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   FiCheck, FiFileText, FiShield,
   FiDollarSign, FiBookOpen, FiTruck, FiArrowRight,
-  FiAlertCircle
+  FiAlertCircle, FiGlobe
 } from 'react-icons/fi';
 import Logo from '../../../components/common/Logo';
 import api from '../../../services/api';

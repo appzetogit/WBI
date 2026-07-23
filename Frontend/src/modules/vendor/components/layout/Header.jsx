@@ -32,23 +32,37 @@ const Header = memo(({
     }
   }, [notificationCount]);
 
-  // Fetch unread count
+  // Fetch unread count from Notification Center (live events)
   useEffect(() => {
     const fetchUnreadCount = async () => {
+      try {
+        const res = await api.get('/vendor/global/counts');
+        if (res.data.success && typeof res.data.data?.unreadNotifications === 'number') {
+          setCount(res.data.data.unreadNotifications);
+          return;
+        }
+      } catch {
+        /* fall through to classic */
+      }
       try {
         const res = await api.get('/notifications/vendor');
         if (res.data.success && typeof res.data.unreadCount === 'number') {
           setCount(res.data.unreadCount);
         }
-      } catch (error) {
+      } catch {
         // Silent fail
       }
     };
 
     if (showNotifications) {
       fetchUnreadCount();
-      const interval = setInterval(fetchUnreadCount, 60000); // Poll every minute
-      return () => clearInterval(interval);
+      const interval = setInterval(fetchUnreadCount, 60000);
+      const onUpdate = () => fetchUnreadCount();
+      window.addEventListener('vendorNotificationsUpdated', onUpdate);
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('vendorNotificationsUpdated', onUpdate);
+      };
     }
   }, [showNotifications]);
 

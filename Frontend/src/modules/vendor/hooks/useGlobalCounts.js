@@ -22,7 +22,16 @@ const useGlobalCounts = () => {
   useEffect(() => {
     refresh();
     timer.current = setInterval(refresh, 60000);
-    return () => clearInterval(timer.current);
+
+    const onUpdate = () => refresh();
+    window.addEventListener('vendorNotificationsUpdated', onUpdate);
+    window.addEventListener('focus', onUpdate);
+
+    return () => {
+      clearInterval(timer.current);
+      window.removeEventListener('vendorNotificationsUpdated', onUpdate);
+      window.removeEventListener('focus', onUpdate);
+    };
   }, [refresh]);
 
   return { counts, loading, refresh };

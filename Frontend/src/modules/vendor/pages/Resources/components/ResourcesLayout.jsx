@@ -10,7 +10,17 @@ import useResourcesCounts from '../../../hooks/useResourcesCounts';
 const Inner = () => {
   const { triggerRefresh } = useResourcesOps();
   const { refresh } = useResourcesCounts();
-  const handleRefresh = () => { triggerRefresh(); refresh(); };
+
+  const handleRefresh = React.useCallback(() => {
+    triggerRefresh();
+    refresh();
+  }, [triggerRefresh, refresh]);
+
+  React.useEffect(() => {
+    const onOps = () => handleRefresh();
+    window.addEventListener('vendorOpsUpdated', onOps);
+    return () => window.removeEventListener('vendorOpsUpdated', onOps);
+  }, [handleRefresh]);
 
   return (
     <div className="min-h-full bg-gray-50/80">
@@ -27,7 +37,7 @@ const Inner = () => {
               Capacity, inventory, tools, warehouses & installed assets — driven by your registered services.
             </p>
           </div>
-          <button onClick={handleRefresh} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 shadow-sm">
+          <button type="button" onClick={handleRefresh} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 shadow-sm">
             <RefreshCw className="h-4 w-4" /> Refresh
           </button>
         </div>

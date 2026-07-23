@@ -168,9 +168,21 @@ const VendorSignup = () => {
   const handleSubmit = async () => {
     setIsLoading(true);
     try {
-      const res = await api.post('/vendor/onboarding/submit', formData);
+      const submitOnce = () => api.post('/vendor/onboarding/submit', formData);
+      let res;
+      try {
+        res = await submitOnce();
+      } catch (firstErr) {
+        // Backend may repair inviteLinkToken unique index and ask for one retry
+        if (firstErr.response?.data?.code === 'INDEX_REPAIRED_RETRY') {
+          toast('Fixing registration indexes… retrying submit', { icon: '🔄' });
+          res = await submitOnce();
+        } else {
+          throw firstErr;
+        }
+      }
+
       if (res.data.success) {
-        // Save minimal vendor data for the pending approval workflow
         localStorage.setItem('vendorData', JSON.stringify({
           _id: res.data.vendorId,
           name: formData.ownerName || 'Partner',
@@ -178,7 +190,7 @@ const VendorSignup = () => {
           bankStatus: 'pending',
           inductionStatus: 'pending'
         }));
-        
+
         toast.success('Registration submitted successfully! Pending approval.');
         navigate('/vendor/pending-approval');
       } else {

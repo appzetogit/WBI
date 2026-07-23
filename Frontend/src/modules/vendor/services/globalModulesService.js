@@ -7,9 +7,18 @@ export const fetchPerformance = (params = {}) => api.get(`${BASE}/performance`, 
 
 export const fetchCompliance = (params = {}) => api.get(`${BASE}/compliance`, { params });
 export const updateCompliance = (id, data) => api.patch(`${BASE}/compliance/${id}`, data);
+export const syncCompliance = () => api.post(`${BASE}/compliance/sync`);
+export const uploadComplianceDocument = (id, formData) =>
+  api.post(`${BASE}/compliance/${id}/upload`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
 
 export const fetchGlobalNotifications = (params = {}) => api.get(`${BASE}/notifications`, { params });
 export const updateGlobalNotification = (id, data) => api.patch(`${BASE}/notifications/${id}`, data);
+export const bulkUpdateNotifications = (data) => api.post(`${BASE}/notifications/bulk`, data);
+export const markAllNotificationsRead = () => api.post(`${BASE}/notifications/read-all`);
+export const fetchNotificationPreferences = () => api.get(`${BASE}/notification-preferences`);
+export const updateNotificationPreferences = (data) => api.patch(`${BASE}/notification-preferences`, data);
 
 export const fetchSupportConfig = (params = {}) => api.get(`${BASE}/support/config`, { params });
 export const fetchSupportTickets = (params = {}) => api.get(`${BASE}/support`, { params });
@@ -42,6 +51,7 @@ export const statusColors = {
   normal: 'bg-blue-50 text-blue-700 border-blue-100',
   medium: 'bg-blue-50 text-blue-700 border-blue-100',
   high: 'bg-amber-50 text-amber-700 border-amber-100',
+  critical: 'bg-red-100 text-red-800 border-red-200',
   urgent: 'bg-red-50 text-red-700 border-red-100',
   open: 'bg-amber-50 text-amber-700 border-amber-100',
   assigned: 'bg-blue-50 text-blue-700 border-blue-100',

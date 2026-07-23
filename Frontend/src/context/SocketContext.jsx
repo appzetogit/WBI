@@ -245,10 +245,32 @@ export const SocketProvider = ({ children }) => {
           data={data}
           onClick={() => {
             toast.dismiss(t.id);
-            // Optional: navigate based on relatedId
+            if (userType === 'vendor') {
+              const actionUrl = data.actionUrl || data.data?.actionUrl || data.data?.link;
+              if (actionUrl) {
+                if (actionUrl.startsWith('http') || actionUrl.startsWith('/')) {
+                  navigate(actionUrl.startsWith('http') ? actionUrl : actionUrl);
+                } else {
+                  const path = location.pathname.split('/').slice(0, 3).join('/') || '/vendor';
+                  navigate(`${path}/${actionUrl.replace(/^\//, '')}`);
+                }
+                return;
+              }
+              if (data.module === 'finance' || data.relatedType === 'withdrawal' || data.relatedType === 'invoice') {
+                const path = location.pathname.split('/').slice(0, 3).join('/') || '/vendor';
+                navigate(`${path}/finance/wallet`);
+                return;
+              }
+              if (data.relatedId && (data.relatedType === 'booking' || data.type?.includes('booking'))) {
+                navigate(`/vendor/booking/${data.relatedId}`);
+                return;
+              }
+              const path = location.pathname.split('/').slice(0, 3).join('/') || '/vendor';
+              navigate(`${path}/notifications`);
+              return;
+            }
             if (data.relatedId) {
-              if (userType === 'vendor') navigate(`/vendor/booking/${data.relatedId}`);
-              else if (userType === 'worker') navigate(`/worker/job/${data.relatedId}`);
+              if (userType === 'worker') navigate(`/worker/job/${data.relatedId}`);
               else if (userType === 'engineer') {
                 const d = data.data || {};
                 if (d.isOpsJob === '1' || d.isOpsJob === true || data.relatedType === 'vendor_ops_job') {

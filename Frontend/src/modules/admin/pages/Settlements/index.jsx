@@ -730,7 +730,10 @@ const SettlementManagement = () => {
               </div>
               <div className="text-right">
                 <p className="text-3xl font-bold text-green-600">₹{request.amount?.toLocaleString()}</p>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mt-1">Requested Amount</p>
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mt-1">{request.status || 'pending'}</p>
+                {request.source === 'finance_wallet' && (
+                  <p className="text-[10px] text-blue-600 font-semibold">Finance wallet</p>
+                )}
               </div>
             </div>
 
@@ -758,12 +761,32 @@ const SettlementManagement = () => {
             </div>
 
             <div className="flex gap-2">
-              <button
-                onClick={() => openApproveWithdrawal(request)}
-                className="flex-1 py-2.5 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm hover:bg-green-700 hover:shadow transform active:scale-95 transition-all"
-              >
-                Approve & Pay
-              </button>
+              {request.status === 'failed' ? (
+                <button
+                  onClick={async () => {
+                    try {
+                      setActionLoading(true);
+                      await adminSettlementService.retryWithdrawal(request._id);
+                      toast.success('Retry queued');
+                      loadData();
+                    } catch {
+                      toast.error('Retry failed');
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  className="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold text-sm"
+                >
+                  Retry Payout
+                </button>
+              ) : (
+                <button
+                  onClick={() => openApproveWithdrawal(request)}
+                  className="flex-1 py-2.5 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm hover:bg-green-700 hover:shadow transform active:scale-95 transition-all"
+                >
+                  {request.status === 'awaiting_manual_transfer' ? 'Enter UTR & Settle' : 'Approve & Pay'}
+                </button>
+              )}
               <button
                 onClick={() => openRejectWithdrawal(request)}
                 className="flex-1 py-2.5 bg-white border border-red-200 text-red-600 rounded-lg font-bold text-sm hover:bg-red-50 active:scale-95 transition-all"

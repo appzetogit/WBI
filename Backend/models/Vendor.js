@@ -324,12 +324,9 @@ const vendorSchema = new mongoose.Schema({
   /** Engineer signup linking — WBI-{YEAR}-{6 chars} e.g. WBI-2026-X7K9M2 */
   uniqueCompanyCode: {
     type: String,
-    default: null,
     trim: true,
-    uppercase: true,
-    sparse: true,
-    unique: true,
-    index: true
+    uppercase: true
+    // Unique via partial index below — do NOT store null (breaks unique indexes)
   },
   codeStatus: {
     type: String,
@@ -351,14 +348,11 @@ const vendorSchema = new mongoose.Schema({
   }],
   inviteLinkToken: {
     type: String,
-    default: null,
-    sparse: true,
-    unique: true,
-    index: true
+    trim: true
+    // Unique via partial index below — omit field when unused (never set null)
   },
   inviteLinkExpiresAt: {
-    type: Date,
-    default: null
+    type: Date
   },
 
   profilePhoto: {
@@ -583,8 +577,40 @@ vendorSchema.index({ 'wallet.earnings': -1 });
 vendorSchema.index({ geoLocation: '2dsphere' }); // Fast geo queries
 vendorSchema.index({ isOnline: 1, availability: 1, approvalStatus: 1 }); // Compound index for vendor search
 
+// Partial unique indexes — multiple vendors may omit these fields.
+// Storing null under a sparse unique index still collides (only one null allowed).
+vendorSchema.index(
+  { uniqueCompanyCode: 1 },
+  {
+    unique: true,
+    name: 'uniqueCompanyCode_partial_unique',
+    partialFilterExpression: {
+      uniqueCompanyCode: { $type: 'string', $gt: '' }
+    }
+  }
+);
+vendorSchema.index(
+  { inviteLinkToken: 1 },
+  {
+    unique: true,
+    name: 'inviteLinkToken_partial_unique',
+    partialFilterExpression: {
+      inviteLinkToken: { $type: 'string', $gt: '' }
+    }
+  }
+);
+
 // Hash password before saving (skip if already a bcrypt hash)
 vendorSchema.pre('save', async function (next) {
+  // Never persist empty unique optional fields as null (E11000 on unique indexes).
+  // Sparse unique indexes still index explicit null — omit the field instead.
+  ['inviteLinkToken', 'uniqueCompanyCode', 'inviteLinkExpiresAt', 'googleId', 'appleId'].forEach((key) => {
+    if (this[key] == null || this[key] === '') {
+      this[key] = undefined;
+      if (this._doc) delete this._doc[key];
+    }
+  });
+
   if (!this.isModified('password') || !this.password) {
     return next();
   }

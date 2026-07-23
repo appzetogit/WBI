@@ -109,7 +109,20 @@ const adminSettlementService = {
    * Reject a withdrawal
    */
   rejectWithdrawal: async (withdrawalId, rejectionReason) => {
-    const response = await api.post(`/admin/settlements/withdrawals/${withdrawalId}/reject`, { rejectionReason });
+    const response = await api.post(`/admin/settlements/withdrawals/${withdrawalId}/reject`, {
+      reason: rejectionReason,
+      rejectionReason
+    });
+    return response.data;
+  },
+
+  retryWithdrawal: async (withdrawalId) => {
+    const response = await api.post(`/admin/settlements/withdrawals/${withdrawalId}/retry`);
+    return response.data;
+  },
+
+  markWithdrawalPaid: async (withdrawalId, data) => {
+    const response = await api.post(`/admin/settlements/withdrawals/${withdrawalId}/mark-paid`, data);
     return response.data;
   }
 };

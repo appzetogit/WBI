@@ -139,6 +139,18 @@ app.post(
   joiningFeeWebhook
 );
 
+const payoutWebhookController = require('./controllers/vendorControllers/payoutWebhookController');
+app.post(
+  '/api/webhooks/razorpayx/payouts',
+  express.raw({ type: 'application/json' }),
+  payoutWebhookController.razorpayxPayoutWebhook
+);
+app.post(
+  '/api/webhooks/cashfree/payouts',
+  express.json({ type: 'application/json' }),
+  payoutWebhookController.cashfreePayoutWebhook
+);
+
 // Body parser middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));

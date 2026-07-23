@@ -52,7 +52,12 @@ const authenticate = async (req, res, next) => {
         break;
       case USER_ROLES.VENDOR:
         user = await Vendor.findById(decoded.userId).select('-password').lean();
-        if (user && user.approvalStatus !== 'approved') {
+        
+        // Allow unapproved vendors to access specific onboarding routes
+        const vendorAllowedPaths = ['/activate-account', '/vendors/profile'];
+        const isVendorAllowedPath = vendorAllowedPaths.some(p => req.originalUrl.includes(p));
+
+        if (user && user.approvalStatus !== 'approved' && !isVendorAllowedPath) {
           return res.status(403).json({
             success: false,
             message: 'Your vendor account is pending approval or has been rejected.'

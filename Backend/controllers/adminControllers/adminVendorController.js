@@ -78,7 +78,7 @@ const getVendorDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const vendor = await Vendor.findById(id).select('-password');
+    const vendor = await Vendor.findById(id).select('-password').lean();
 
     if (!vendor) {
       return res.status(404).json({
@@ -87,41 +87,113 @@ const getVendorDetails = async (req, res) => {
       });
     }
 
-    // Get vendor stats from VendorBill (single source of truth)
-    const totalBookings = await Booking.countDocuments({ vendorId: vendor._id });
-    const completedBookings = await Booking.countDocuments({ vendorId: vendor._id, status: BOOKING_STATUS.COMPLETED });
+    let VendorBank;
+    let VendorDocument;
+    try { VendorBank = require('../../models/VendorBank'); } catch (_) { VendorBank = null; }
+    try { VendorDocument = require('../../models/VendorDocument'); } catch (_) { VendorDocument = null; }
 
-    const earningsResult = await VendorBill.aggregate([
-      {
-        $match: {
-          vendorId: vendor._id,
-          status: 'paid'
+    const [bankAccounts, vaultDocuments, totalBookings, completedBookings, earningsResult] = await Promise.all([
+      VendorBank
+        ? VendorBank.find({ vendorId: vendor._id })
+          .select('-accountNumberEncrypted')
+          .sort({ isPrimary: -1, updatedAt: -1 })
+          .lean()
+        : Promise.resolve([]),
+      VendorDocument
+        ? VendorDocument.find({ vendorId: vendor._id }).sort({ uploadedAt: -1 }).lean()
+        : Promise.resolve([]),
+      Booking.countDocuments({ vendorId: vendor._id }),
+      Booking.countDocuments({ vendorId: vendor._id, status: BOOKING_STATUS.COMPLETED }),
+      VendorBill.aggregate([
+        { $match: { vendorId: vendor._id, status: 'paid' } },
+        {
+          $group: {
+            _id: null,
+            totalEarnings: { $sum: '$vendorTotalEarning' },
+            totalRevenue: { $sum: '$grandTotal' }
+          }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          totalEarnings: { $sum: '$vendorTotalEarning' },
-          totalRevenue: { $sum: '$grandTotal' }
-        }
-      }
+      ])
     ]);
 
-    const bookingStats = [{
-      totalBookings,
-      completedBookings,
-      totalEarnings: earningsResult[0]?.totalEarnings || 0,
-      totalRevenue: earningsResult[0]?.totalRevenue || 0
-    }];
+    const otherLabels = ['GST Certificate', 'Company Registration', 'Cancelled Cheque', 'Work Order / Portfolio'];
+    const otherDocs = (vendor.otherDocuments || []).map((url, idx) => ({
+      label: otherLabels[idx] || `Document ${idx + 1}`,
+      url,
+      source: 'otherDocuments'
+    })).filter((d) => d.url);
+
+    const profileDocs = [
+      { label: 'PAN Card', url: vendor.pan?.document, number: vendor.pan?.number, source: 'pan' },
+      { label: 'Aadhaar Front', url: vendor.aadhar?.document, number: vendor.aadhar?.number, source: 'aadhar' },
+      { label: 'Aadhaar Back', url: vendor.aadhar?.backDocument, source: 'aadharBack' },
+      { label: 'Incorporation Certificate', url: vendor.incorporationCertificate, source: 'incorporation' },
+      { label: 'PF Document', url: vendor.pfDocument, source: 'pf' },
+      { label: 'ESI Document', url: vendor.esiDocument, source: 'esi' },
+      { label: 'Profile Photo', url: vendor.profilePhoto, source: 'profile' },
+      ...otherDocs
+    ].filter((d) => d.url);
+
+    const vaultDocs = (vaultDocuments || []).map((d) => ({
+      label: d.title || d.documentType || 'Document',
+      url: d.documentUrl,
+      number: d.documentNumber || null,
+      status: d.status,
+      type: d.type,
+      documentType: d.documentType,
+      source: 'vault',
+      _id: d._id
+    })).filter((d) => d.url);
+
+    let resolveDocumentPreviewUrl = null;
+    let isRealFileUrl = null;
+    try {
+      ({ resolveDocumentPreviewUrl, isRealFileUrl } = require('../../utils/documentPreviewUrl'));
+    } catch (_) { /* optional */ }
+
+    const seen = new Set();
+    const documents = [...profileDocs, ...vaultDocs]
+      .map((d) => {
+        let previewUrl = d.url;
+        if (resolveDocumentPreviewUrl) {
+          const resolved = resolveDocumentPreviewUrl(d.url, null);
+          if (resolved?.previewUrl) previewUrl = resolved.previewUrl;
+        }
+        if (isRealFileUrl && !isRealFileUrl(previewUrl) && !isRealFileUrl(d.url)) {
+          return null;
+        }
+        return {
+          ...d,
+          previewUrl: previewUrl || d.url,
+          fileUrl: d.url
+        };
+      })
+      .filter(Boolean)
+      .filter((d) => {
+        const key = String(d.fileUrl || d.url);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+    const primaryBank = bankAccounts.find((b) => b.isPrimary) || bankAccounts[0] || null;
 
     res.status(200).json({
       success: true,
       data: {
-        vendor,
-        stats: bookingStats[0] || {
-          totalBookings: 0,
-          completedBookings: 0,
-          totalEarnings: 0
+        vendor: {
+          ...vendor,
+          bankAccounts,
+          primaryBank,
+          documents
+        },
+        bankAccounts,
+        documents,
+        stats: {
+          totalBookings,
+          completedBookings,
+          totalEarnings: earningsResult[0]?.totalEarnings || 0,
+          totalRevenue: earningsResult[0]?.totalRevenue || 0
         }
       }
     });

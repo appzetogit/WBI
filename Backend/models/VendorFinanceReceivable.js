@@ -26,6 +26,9 @@ const vendorFinanceReceivableSchema = new mongoose.Schema({
     index: true
   },
   lastReminderAt: Date,
+  sourceContractId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorContract', default: null, index: true },
+  sourceQuotationId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorFinanceDocument', default: null },
+  sourceMilestoneId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorFinanceMilestone', default: null },
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });
 

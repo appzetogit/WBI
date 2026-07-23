@@ -3,6 +3,7 @@ import api from '../../../services/api';
 const BASE = '/vendor/workforce';
 
 export const fetchWFCounts = () => api.get(`${BASE}/counts`);
+export const syncWorkforce = () => api.post(`${BASE}/sync`);
 export const fetchEngineers = (params = {}) => api.get(`${BASE}/engineers`, { params });
 export const updateEngineer = (id, data) => api.patch(`${BASE}/engineers/${id}`, data);
 

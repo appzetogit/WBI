@@ -172,7 +172,29 @@ const settingsSchema = new mongoose.Schema({
   isOnlinePaymentEnabled: {
     type: Boolean,
     default: true
-  }
+  },
+
+  // Vendor payout / withdrawal policy (admin-configurable)
+  payoutProvider: {
+    type: String,
+    enum: ['manual', 'razorpayx', 'cashfree'],
+    default: 'manual'
+  },
+  withdrawalEnabled: { type: Boolean, default: true },
+  minWithdrawalAmount: { type: Number, default: 100, min: 1 },
+  maxWithdrawalAmount: { type: Number, default: 500000, min: 1 },
+  dailyWithdrawalLimit: { type: Number, default: 1000000, min: 1 },
+  autoApproveMaxAmount: { type: Number, default: 5000, min: 0 },
+  requireWithdrawalOtp: { type: Boolean, default: true },
+  requireVerifiedBank: { type: Boolean, default: true },
+  allowUpiWithdrawal: { type: Boolean, default: true },
+  allowBankWithdrawal: { type: Boolean, default: true },
+  settlementSchedule: {
+    type: String,
+    enum: ['Instant', 'T+1', 'T+2', 'Weekly'],
+    default: 'T+1'
+  },
+  gstOnPlatformFee: { type: Number, default: 18, min: 0, max: 100 }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Settings', settingsSchema);

@@ -50,7 +50,20 @@ exports.updateSettings = async (req, res, next) => {
       // Booking Timing
       maxSearchTime, waveDuration, searchRadius,
       // Payment Control
-      isOnlinePaymentEnabled
+      isOnlinePaymentEnabled,
+      // Vendor payout policy
+      payoutProvider,
+      withdrawalEnabled,
+      minWithdrawalAmount,
+      maxWithdrawalAmount,
+      dailyWithdrawalLimit,
+      autoApproveMaxAmount,
+      requireWithdrawalOtp,
+      requireVerifiedBank,
+      allowUpiWithdrawal,
+      allowBankWithdrawal,
+      settlementSchedule,
+      gstOnPlatformFee
     } = req.body;
 
     let settings = await Settings.findOne({ type: 'global' });
@@ -117,6 +130,19 @@ exports.updateSettings = async (req, res, next) => {
       if (waveDuration !== undefined) settings.waveDuration = waveDuration;
       if (searchRadius !== undefined) settings.searchRadius = searchRadius;
       if (isOnlinePaymentEnabled !== undefined) settings.isOnlinePaymentEnabled = isOnlinePaymentEnabled;
+
+      if (payoutProvider !== undefined) settings.payoutProvider = payoutProvider;
+      if (withdrawalEnabled !== undefined) settings.withdrawalEnabled = withdrawalEnabled;
+      if (minWithdrawalAmount !== undefined) settings.minWithdrawalAmount = minWithdrawalAmount;
+      if (maxWithdrawalAmount !== undefined) settings.maxWithdrawalAmount = maxWithdrawalAmount;
+      if (dailyWithdrawalLimit !== undefined) settings.dailyWithdrawalLimit = dailyWithdrawalLimit;
+      if (autoApproveMaxAmount !== undefined) settings.autoApproveMaxAmount = autoApproveMaxAmount;
+      if (requireWithdrawalOtp !== undefined) settings.requireWithdrawalOtp = requireWithdrawalOtp;
+      if (requireVerifiedBank !== undefined) settings.requireVerifiedBank = requireVerifiedBank;
+      if (allowUpiWithdrawal !== undefined) settings.allowUpiWithdrawal = allowUpiWithdrawal;
+      if (allowBankWithdrawal !== undefined) settings.allowBankWithdrawal = allowBankWithdrawal;
+      if (settlementSchedule !== undefined) settings.settlementSchedule = settlementSchedule;
+      if (gstOnPlatformFee !== undefined) settings.gstOnPlatformFee = gstOnPlatformFee;
 
       await settings.save();
     }

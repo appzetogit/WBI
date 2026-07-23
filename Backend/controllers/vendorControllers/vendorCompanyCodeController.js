@@ -90,10 +90,18 @@ exports.regenerateCompanyCode = async (req, res) => {
     vendor.codeStatus = 'active';
     vendor.codeGeneratedAt = new Date();
     vendor.codeRegeneratedCount = (vendor.codeRegeneratedCount || 0) + 1;
-    // Invalidate old invite (scoped to previous code era)
-    vendor.inviteLinkToken = null;
-    vendor.inviteLinkExpiresAt = null;
+    // Invalidate old invite — omit fields (do not set null; unique index collision)
+    vendor.set('inviteLinkToken', undefined);
+    vendor.set('inviteLinkExpiresAt', undefined);
+    if (vendor._doc) {
+      delete vendor._doc.inviteLinkToken;
+      delete vendor._doc.inviteLinkExpiresAt;
+    }
     await vendor.save();
+    await Vendor.updateOne(
+      { _id: vendor._id },
+      { $unset: { inviteLinkToken: '', inviteLinkExpiresAt: '' } }
+    );
 
     res.status(200).json({
       success: true,

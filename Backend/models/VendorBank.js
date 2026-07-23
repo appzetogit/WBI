@@ -47,6 +47,23 @@ const vendorBankSchema = new mongoose.Schema({
     enum: ['pending', 'verified', 'rejected'],
     default: 'pending'
   },
+  bankName: {
+    type: String,
+    default: ''
+  },
+  isPrimary: {
+    type: Boolean,
+    default: false
+  },
+  method: {
+    type: String,
+    enum: ['bank', 'upi'],
+    default: 'bank'
+  },
+  providerRef: {
+    type: String,
+    default: ''
+  },
   verifiedAt: {
     type: Date,
     default: null
@@ -56,5 +73,8 @@ const vendorBankSchema = new mongoose.Schema({
     default: null
   }
 }, { timestamps: true });
+
+vendorBankSchema.index({ vendorId: 1, isPrimary: -1 });
+vendorBankSchema.index({ vendorId: 1, verificationStatus: 1 });
 
 module.exports = mongoose.model('VendorBank', vendorBankSchema);

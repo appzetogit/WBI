@@ -44,6 +44,18 @@ const vendorFinanceDocumentSchema = new mongoose.Schema({
   },
   convertedToProject: { type: Boolean, default: false },
   paymentEligible: { type: Boolean, default: false },
+  paidAmount: { type: Number, default: 0 },
+  paidAt: Date,
+  razorpayOrderId: { type: String, default: '' },
+  razorpayPaymentId: { type: String, default: '' },
+  paymentIdempotencyKey: { type: String, default: '' },
+  escrowReleased: { type: Boolean, default: false },
+  commissionAmount: { type: Number, default: 0 },
+  tdsAmount: { type: Number, default: 0 },
+  netSettledAmount: { type: Number, default: 0 },
+  sourceProposalId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorProposal', default: null, index: true },
+  sourceMilestoneId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorFinanceMilestone', default: null, index: true },
+  sourceContractId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorContract', default: null, index: true },
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });
 

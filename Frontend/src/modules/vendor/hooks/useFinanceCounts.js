@@ -30,7 +30,12 @@ const useFinanceCounts = () => {
   useEffect(() => {
     refresh();
     timer.current = setInterval(refresh, 60000);
-    return () => clearInterval(timer.current);
+    const onLive = () => refresh();
+    window.addEventListener('vendor-finance-updated', onLive);
+    return () => {
+      clearInterval(timer.current);
+      window.removeEventListener('vendor-finance-updated', onLive);
+    };
   }, [refresh]);
 
   return { counts, loading, refresh };

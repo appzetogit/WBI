@@ -71,19 +71,25 @@ const Performance = () => {
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm xl:col-span-2">
               <h2 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800"><BarChart3 className="w-4 h-4" /> Revenue Trend & SLA</h2>
-              <div className="flex items-end h-52 gap-3">
-                {charts.map((point) => (
-                  <div key={point.label} className="flex flex-col items-center justify-end flex-1 h-full gap-2">
-                    <div className="w-full bg-blue-100 rounded-t-lg" style={{ height: `${Math.max(8, ((point.revenue || 0) / maxRevenue) * 100)}%` }} />
-                    <span className="text-[10px] text-gray-400">{point.label}</span>
-                  </div>
-                ))}
-              </div>
+              {charts.length === 0 ? (
+                <p className="flex items-center justify-center h-52 text-sm text-gray-400">No revenue history yet. Charts populate from completed finance transactions.</p>
+              ) : (
+                <div className="flex items-end h-52 gap-3">
+                  {charts.map((point) => (
+                    <div key={point.label} className="flex flex-col items-center justify-end flex-1 h-full gap-2">
+                      <div className="w-full bg-blue-100 rounded-t-lg" style={{ height: `${Math.max(8, ((point.revenue || 0) / maxRevenue) * 100)}%` }} title={`₹${point.revenue || 0} · SLA ${point.sla || 0}%`} />
+                      <span className="text-[10px] text-gray-400">{point.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
               <h2 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800"><Award className="w-4 h-4" /> Dynamic Service KPIs</h2>
               <div className="space-y-3">
-                {(s.dynamicKpis || []).map((kpi) => (
+                {(s.dynamicKpis || []).length === 0 ? (
+                  <p className="text-sm text-gray-400">No service KPIs configured yet.</p>
+                ) : (s.dynamicKpis || []).map((kpi) => (
                   <div key={kpi.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{kpi.label}</p>
@@ -98,6 +104,9 @@ const Performance = () => {
 
           <div className="p-5 bg-white border border-gray-200 rounded-xl shadow-sm">
             <h2 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-800"><Users className="w-4 h-4" /> Engineer Performance</h2>
+            {(s.engineers || []).length === 0 ? (
+              <p className="py-8 text-sm text-center text-gray-400">No workforce engineers yet. Performance appears when engineers are added under Workforce.</p>
+            ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="text-xs text-left text-gray-500 uppercase bg-gray-50">
@@ -117,6 +126,7 @@ const Performance = () => {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         </div>
       )}

@@ -33,7 +33,9 @@ const categoryFilter = async (filter, vid, category) => {
 const getCounts = async (req, res) => {
   try {
     const vid = vendorId(req);
+    const withdrawSvc = require('../../services/vendorWithdrawal.service');
     const wallet = await VendorFinanceWallet.findOne({ vendorId: vid }).lean();
+    const srEscrow = await withdrawSvc.getEscrowHeldFromServiceRequests(vid);
     const [clientPending, b2bPending, quotations, invoicesDue, milestonesDue] = await Promise.all([
       VendorFinanceReceivable.countDocuments({ vendorId: vid, clientType: 'individual', status: { $in: ['pending', 'partial', 'overdue'] } }),
       VendorFinanceReceivable.countDocuments({ vendorId: vid, clientType: 'b2b', status: { $in: ['pending', 'partial', 'overdue'] } }),
@@ -41,11 +43,14 @@ const getCounts = async (req, res) => {
       VendorFinanceDocument.countDocuments({ vendorId: vid, documentType: 'invoice', status: { $in: ['issued', 'partial', 'overdue'] } }),
       VendorFinanceMilestone.countDocuments({ vendorId: vid, status: { $in: ['due', 'qa_pending', 'approval_pending', 'invoice_ready', 'invoiced'] } })
     ]);
+    const financeEscrow = wallet?.escrowBalance || 0;
     res.json({
       success: true,
       data: {
         availableBalance: wallet?.availableBalance || 0,
-        escrowBalance: wallet?.escrowBalance || 0,
+        escrowBalance: financeEscrow + (srEscrow.amount || 0),
+        financeEscrowBalance: financeEscrow,
+        serviceRequestEscrow: srEscrow.amount || 0,
         clientPending,
         b2bPending,
         quotations,
@@ -190,11 +195,21 @@ const getEarningsByService = async (req, res) => {
 const getWallet = async (req, res) => {
   try {
     const vid = vendorId(req);
+    const withdrawSvc = require('../../services/vendorWithdrawal.service');
     const wallet = await VendorFinanceWallet.findOneAndUpdate(
       { vendorId: vid },
       { $setOnInsert: { vendorId: vid } },
       { new: true, upsert: true }
     ).lean();
+    const srEscrow = await withdrawSvc.getEscrowHeldFromServiceRequests(vid);
+    const financeEscrow = Number(wallet?.escrowBalance) || 0;
+    const enrichedWallet = {
+      ...wallet,
+      financeEscrowBalance: financeEscrow,
+      serviceRequestEscrow: srEscrow.amount || 0,
+      serviceRequestEscrowCount: srEscrow.count || 0,
+      escrowBalance: financeEscrow + (srEscrow.amount || 0)
+    };
     const { page, limit, skip } = paging(req);
     const filter = { vendorId: vid };
     if (req.query.type) filter.type = req.query.type;
@@ -215,41 +230,168 @@ const getWallet = async (req, res) => {
       VendorFinanceTransaction.find(filter).sort({ occurredAt: -1 }).skip(skip).limit(limit).lean(),
       VendorFinanceTransaction.countDocuments(filter)
     ]);
-    res.json({ success: true, data: { wallet, transactions }, pagination: pagination(page, limit, total) });
+    res.json({ success: true, data: { wallet: enrichedWallet, transactions }, pagination: pagination(page, limit, total) });
   } catch (error) {
     console.error('finance getWallet:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch wallet' });
   }
 };
 
+const getWithdrawEligibility = async (req, res) => {
+  try {
+    const data = await require('../../services/vendorWithdrawal.service').getWithdrawEligibility(vendorId(req));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('finance getWithdrawEligibility:', error);
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to load eligibility' });
+  }
+};
+
+const quoteWithdrawal = async (req, res) => {
+  try {
+    const config = await require('../../services/vendorPayoutConfig.service').getPayoutConfig();
+    const fees = require('../../services/vendorPayoutConfig.service').calculatePayoutFees(req.body.amount || req.query.amount, config);
+    res.json({ success: true, data: { fees, config: {
+      minWithdrawalAmount: config.minWithdrawalAmount,
+      maxWithdrawalAmount: config.maxWithdrawalAmount,
+      settlementSchedule: config.settlementSchedule,
+      payoutProvider: config.payoutProvider
+    } } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to quote fees' });
+  }
+};
+
+const listBankAccounts = async (req, res) => {
+  try {
+    const banks = await require('../../services/vendorWithdrawal.service').listBanks(vendorId(req));
+    res.json({ success: true, data: banks });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to list banks' });
+  }
+};
+
+const upsertBankAccount = async (req, res) => {
+  try {
+    const bank = await require('../../services/vendorWithdrawal.service').addOrUpdateBank(vendorId(req), req.body || {});
+    res.status(201).json({ success: true, data: bank });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to save bank' });
+  }
+};
+
+const verifyBankAccount = async (req, res) => {
+  try {
+    const bank = await require('../../services/vendorWithdrawal.service').verifyBankAccount(
+      vendorId(req),
+      req.params.bankId
+    );
+    res.json({ success: true, data: bank });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Bank verification failed' });
+  }
+};
+
+const sendWithdrawOtp = async (req, res) => {
+  try {
+    const data = await require('../../services/vendorWithdrawal.service').sendWithdrawalOtp(vendorId(req));
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to send OTP' });
+  }
+};
+
 const requestWithdrawal = async (req, res) => {
   try {
     const vid = vendorId(req);
-    const amount = Number(req.body.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, message: 'Valid withdrawal amount is required' });
-    }
-    const wallet = await VendorFinanceWallet.findOne({ vendorId: vid });
-    if (!wallet || wallet.availableBalance < amount) {
-      return res.status(400).json({ success: false, message: 'Insufficient available balance' });
-    }
-    wallet.availableBalance -= amount;
-    wallet.processingWithdrawal += amount;
-    await wallet.save();
-    const transaction = await new VendorFinanceTransaction({
-      vendorId: vid,
-      type: 'withdrawal',
-      amount,
-      description: 'Bank withdrawal request',
-      balanceAfter: wallet.availableBalance,
-      status: 'processing',
-      serviceCategoryCode: req.body.categoryCode ? String(req.body.categoryCode).toUpperCase() : '',
-      source: 'withdrawal'
-    }).save();
-    res.status(201).json({ success: true, data: { wallet, transaction } });
+    const withdrawSvc = require('../../services/vendorWithdrawal.service');
+    const result = await withdrawSvc.createWithdrawalRequest(vid, {
+      amount: req.body.amount,
+      bankAccountId: req.body.bankAccountId || req.body.bankId,
+      method: req.body.method || 'bank',
+      otp: req.body.otp,
+      idempotencyKey: req.body.idempotencyKey || req.get('Idempotency-Key'),
+      notes: req.body.notes || ''
+    });
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
     console.error('finance requestWithdrawal:', error);
-    res.status(500).json({ success: false, message: 'Failed to request withdrawal' });
+    res.status(error.status || 500).json({
+      success: false,
+      message: error.message || 'Failed to request withdrawal'
+    });
+  }
+};
+
+const listWithdrawals = async (req, res) => {
+  try {
+    const data = await require('../../services/vendorWithdrawal.service').listVendorWithdrawals(vendorId(req), {
+      page: Number(req.query.page) || 1,
+      limit: Number(req.query.limit) || 20,
+      status: req.query.status
+    });
+    res.json({ success: true, ...data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || 'Failed to list withdrawals' });
+  }
+};
+
+const getWithdrawal = async (req, res) => {
+  try {
+    const data = await require('../../services/vendorWithdrawal.service').getWithdrawalDetail(
+      vendorId(req),
+      req.params.id
+    );
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Not found' });
+  }
+};
+
+const cancelWithdrawal = async (req, res) => {
+  try {
+    const data = await require('../../services/vendorWithdrawal.service').cancelWithdrawal(
+      vendorId(req),
+      req.params.id
+    );
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Cancel failed' });
+  }
+};
+
+const downloadWithdrawalReceipt = async (req, res) => {
+  try {
+    const w = await require('../../services/vendorWithdrawal.service').getWithdrawalDetail(
+      vendorId(req),
+      req.params.id
+    );
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Withdrawal Receipt</title>
+<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:640px;margin:40px auto;color:#111}
+h1{font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px}
+td{padding:8px;border-bottom:1px solid #eee;font-size:13px}.muted{color:#666}</style></head><body>
+<h1>Withdrawal Settlement Receipt</h1>
+<p class="muted">Reference: ${w._id}</p>
+<table>
+<tr><td>Status</td><td><strong>${w.status}</strong></td></tr>
+<tr><td>Gross Amount</td><td>₹${w.amount}</td></tr>
+<tr><td>TDS (${w.tdsRate || 0}%)</td><td>₹${w.tdsAmount || 0}</td></tr>
+<tr><td>Platform Fee</td><td>₹${w.platformFeeAmount || 0}</td></tr>
+<tr><td>GST on Fee</td><td>₹${w.gstOnFee || 0}</td></tr>
+<tr><td>Net Payout</td><td><strong>₹${w.netAmount || w.amount}</strong></td></tr>
+<tr><td>UTR / Reference</td><td>${w.transactionReference || '—'}</td></tr>
+<tr><td>Gateway</td><td>${w.gatewayProvider || '—'} ${w.gatewayPayoutId || ''}</td></tr>
+<tr><td>Account</td><td>${w.bankDetails?.accountHolderName || ''} · ${w.bankDetails?.accountNumberMasked || w.bankDetails?.upiId || ''}</td></tr>
+<tr><td>Requested</td><td>${w.createdAt ? new Date(w.createdAt).toLocaleString('en-IN') : '—'}</td></tr>
+<tr><td>Paid At</td><td>${w.paidAt ? new Date(w.paidAt).toLocaleString('en-IN') : '—'}</td></tr>
+</table>
+${(w.timeline || []).map((e) => `<p class="muted">${new Date(e.at).toLocaleString('en-IN')} — ${e.status}: ${e.message}</p>`).join('')}
+</body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="withdrawal-${w._id}.html"`);
+    res.send(html);
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Receipt failed' });
   }
 };
 
@@ -360,6 +502,7 @@ const getDocuments = (documentType) => async (req, res) => {
 const updateDocument = async (req, res) => {
   try {
     const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
     const doc = await VendorFinanceDocument.findOne({ _id: req.params.id, vendorId: vid });
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
     const { action } = req.body;
@@ -372,18 +515,27 @@ const updateDocument = async (req, res) => {
     };
     const invoiceMap = { issue: 'issued', cancel: 'cancelled', mark_paid: 'paid' };
     if (doc.documentType === 'quotation' && quotationMap[action]) doc.status = quotationMap[action];
-    if (doc.documentType === 'invoice' && invoiceMap[action]) doc.status = invoiceMap[action];
+    if (doc.documentType === 'invoice' && invoiceMap[action]) {
+      doc.status = invoiceMap[action];
+      if (action === 'issue') doc.paymentEligible = true;
+    }
     if (action === 'convert' && doc.documentType === 'quotation') {
-      if (doc.status !== 'approved') {
-        return res.status(400).json({ success: false, message: 'Only approved quotations can be converted' });
-      }
-      doc.convertedToProject = true;
+      const result = await lifecycle.convertQuotationToProject(vid, doc._id);
+      return res.json({ success: true, data: result.document, meta: { milestones: result.milestones?.length || 0 } });
+    }
+    if (action === 'release_escrow' && doc.documentType === 'invoice') {
+      const result = await lifecycle.releaseInvoiceEscrow(vid, doc._id, {
+        commissionRate: Number(req.body.commissionRate) || 5,
+        tdsRate: Number(req.body.tdsRate) || 0
+      });
+      return res.json({ success: true, data: result.invoice, meta: result });
     }
     await doc.save();
+    lifecycle.emitFinance(vid, 'finance:documentUpdated', { documentId: doc._id, status: doc.status });
     res.json({ success: true, data: doc });
   } catch (error) {
     console.error('finance updateDocument:', error);
-    res.status(500).json({ success: false, message: 'Failed to update document' });
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to update document' });
   }
 };
 
@@ -417,6 +569,7 @@ const getMilestones = async (req, res) => {
 const updateMilestone = async (req, res) => {
   try {
     const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
     const item = await VendorFinanceMilestone.findOne({ _id: req.params.id, vendorId: vid });
     if (!item) return res.status(404).json({ success: false, message: 'Milestone not found' });
     const { action } = req.body;
@@ -430,15 +583,13 @@ const updateMilestone = async (req, res) => {
       item.clientApproved = true;
       item.status = 'invoice_ready';
     } else if (action === 'invoice') {
-      if (!item.qaApproved || !item.clientApproved) {
-        return res.status(400).json({ success: false, message: 'QA and client approval are required' });
-      }
-      item.invoiceNumber = `AUTO-${item.milestoneCode}`;
-      item.status = 'invoiced';
+      const result = await lifecycle.generateInvoiceFromMilestone(vid, item._id);
+      return res.json({ success: true, data: result.milestone, invoice: result.invoice });
     } else if (action === 'pay') {
       if (item.status !== 'invoiced') {
         return res.status(400).json({ success: false, message: 'Milestone must be invoiced first' });
       }
+      // Manual offline pay (ledger credit) — prefer Razorpay invoice pay for production clients
       item.status = 'paid';
       item.paidAt = new Date();
       await postVendorFinanceLedger({
@@ -454,10 +605,85 @@ const updateMilestone = async (req, res) => {
       });
     }
     await item.save();
+    lifecycle.emitFinance(vid, 'finance:milestoneUpdated', { milestoneId: item._id, status: item.status });
     res.json({ success: true, data: item });
   } catch (error) {
     console.error('finance updateMilestone:', error);
-    res.status(500).json({ success: false, message: 'Failed to update payment milestone' });
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to update payment milestone' });
+  }
+};
+
+const syncFinance = async (req, res) => {
+  try {
+    const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
+    const data = await lifecycle.syncVendorFinance(vid);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('finance syncFinance:', error);
+    res.status(500).json({ success: false, message: error.message || 'Failed to sync finance data' });
+  }
+};
+
+const exportLedger = async (req, res) => {
+  try {
+    const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
+    const csv = await lifecycle.exportLedgerCsv(vid, {
+      category: req.query.category,
+      status: req.query.status,
+      search: req.query.search
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="vendor-finance-ledger-${Date.now()}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error('finance exportLedger:', error);
+    res.status(500).json({ success: false, message: 'Failed to export ledger' });
+  }
+};
+
+const downloadDocument = async (req, res) => {
+  try {
+    const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
+    const html = await lifecycle.getInvoiceHtml(vid, req.params.id);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (error) {
+    console.error('finance downloadDocument:', error);
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to render document' });
+  }
+};
+
+const createInvoicePayOrder = async (req, res) => {
+  try {
+    const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
+    const data = await lifecycle.createInvoicePaymentOrder(vid, req.params.id, {
+      idempotencyKey: req.body.idempotencyKey || req.get('Idempotency-Key')
+    });
+    res.status(201).json({ success: true, data });
+  } catch (error) {
+    console.error('finance createInvoicePayOrder:', error);
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to create payment order' });
+  }
+};
+
+const verifyInvoicePay = async (req, res) => {
+  try {
+    const vid = vendorId(req);
+    const lifecycle = require('../../services/vendorFinanceLifecycle.service');
+    const data = await lifecycle.verifyInvoicePayment(vid, {
+      invoiceId: req.params.id,
+      razorpay_order_id: req.body.razorpay_order_id,
+      razorpay_payment_id: req.body.razorpay_payment_id,
+      razorpay_signature: req.body.razorpay_signature
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('finance verifyInvoicePay:', error);
+    res.status(error.status || 500).json({ success: false, message: error.message || 'Failed to verify payment' });
   }
 };
 
@@ -465,7 +691,17 @@ module.exports = {
   getCounts,
   getWallet,
   getEarningsByService,
+  getWithdrawEligibility,
+  quoteWithdrawal,
+  listBankAccounts,
+  upsertBankAccount,
+  verifyBankAccount,
+  sendWithdrawOtp,
   requestWithdrawal,
+  listWithdrawals,
+  getWithdrawal,
+  cancelWithdrawal,
+  downloadWithdrawalReceipt,
   getClientReceivables: getReceivables('individual'),
   getB2BReceivables: getReceivables('b2b'),
   updateReceivable,
@@ -473,5 +709,10 @@ module.exports = {
   getInvoices: getDocuments('invoice'),
   updateDocument,
   getMilestones,
-  updateMilestone
+  updateMilestone,
+  syncFinance,
+  exportLedger,
+  downloadDocument,
+  createInvoicePayOrder,
+  verifyInvoicePay
 };

@@ -1,7 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, FileText, RefreshCw, Search, ShieldAlert, UploadCloud } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, ExternalLink, FileText, RefreshCw, Search, ShieldAlert, UploadCloud } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import { useVendorConfig } from '../../context/VendorConfigContext';
-import { fetchCompliance, updateCompliance, statusColors } from '../../services/globalModulesService';
+import {
+  fetchCompliance, updateCompliance, syncCompliance, uploadComplianceDocument, statusColors
+} from '../../services/globalModulesService';
 import EmptyState from '../BusinessIntake/components/EmptyState';
 import Pagination from '../BusinessIntake/components/Pagination';
 
@@ -16,16 +19,26 @@ const Compliance = () => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, pages: 1, total: 0, limit: PAGE });
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [uploadingId, setUploadingId] = useState(null);
+  const fileRefs = useRef({});
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchCompliance({ page, limit: PAGE, search: search || undefined, category: filters.category || undefined, status: filters.status || undefined });
+      const res = await fetchCompliance({
+        page,
+        limit: PAGE,
+        search: search || undefined,
+        category: filters.category || undefined,
+        status: filters.status || undefined
+      });
       setData(res.data.data || []);
       setStats(res.data.stats || []);
       setPagination(res.data.pagination || { page: 1, pages: 1, total: 0, limit: PAGE });
-    } catch {
+    } catch (error) {
       setData([]);
+      toast.error(error.response?.data?.message || 'Failed to load compliance');
     } finally {
       setLoading(false);
     }
@@ -34,12 +47,43 @@ const Compliance = () => {
   useEffect(() => { setPage(1); }, [search, filters]);
   useEffect(() => { load(); }, [load]);
 
+  const refresh = async () => {
+    setSyncing(true);
+    try {
+      await syncCompliance();
+      await load();
+      toast.success('Compliance synced from service templates');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const act = async (id, action) => {
     try {
       await updateCompliance(id, { action });
+      toast.success(`Marked as ${action}`);
       load();
     } catch (error) {
-      alert(error.response?.data?.message || 'Action failed');
+      toast.error(error.response?.data?.message || 'Action failed');
+    }
+  };
+
+  const onUpload = async (doc, file) => {
+    if (!file) return;
+    setUploadingId(doc._id);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      if (doc.documentNumber) form.append('documentNumber', doc.documentNumber);
+      await uploadComplianceDocument(doc._id, form);
+      toast.success('Document uploaded — pending verification');
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Upload failed');
+    } finally {
+      setUploadingId(null);
     }
   };
 
@@ -57,7 +101,9 @@ const Compliance = () => {
           </h1>
           <p className="mt-1.5 ml-[46px] text-sm text-gray-500">Dynamic legal, tax, license, insurance and certification rules by service.</p>
         </div>
-        <button onClick={load} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white border border-gray-200 rounded-lg"><RefreshCw className="w-4 h-4" /> Refresh</button>
+        <button type="button" onClick={refresh} disabled={syncing} className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white border border-gray-200 rounded-lg disabled:opacity-60">
+          <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'Syncing…' : 'Refresh'}
+        </button>
       </div>
 
       <div className="p-5 mb-5 bg-white border border-gray-200 rounded-xl shadow-sm">
@@ -68,7 +114,7 @@ const Compliance = () => {
           </div>
           <span className="text-2xl font-bold text-gray-900">{progress}%</span>
         </div>
-        <div className="h-2 overflow-hidden bg-gray-100 rounded-full"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${progress}%` }} /></div>
+        <div className="h-2 overflow-hidden bg-gray-100 rounded-full"><div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${progress}%` }} /></div>
         {complianceDocs.length > 0 && (
           <div className="mt-4">
             <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Required for your services</p>
@@ -101,7 +147,7 @@ const Compliance = () => {
       {loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{[1, 2, 3, 4].map((i) => <div key={i} className="h-40 bg-gray-100 rounded-xl animate-pulse" />)}</div>
       ) : data.length === 0 ? (
-        <EmptyState icon={ShieldAlert} title="No compliance requirements" description="Compliance templates are generated from selected services." />
+        <EmptyState icon={ShieldAlert} title="No compliance requirements" description="Click Refresh to generate requirements from your approved services." />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -117,7 +163,7 @@ const Compliance = () => {
                         <p className="text-xs text-gray-500">{doc.serviceCategoryName || 'Platform'} · {doc.category}</p>
                       </div>
                     </div>
-                    <span className={`h-fit text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${statusColors[doc.status] || statusColors.pending}`}>{doc.status.replace(/_/g, ' ')}</span>
+                    <span className={`h-fit text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${statusColors[doc.status] || statusColors.pending}`}>{String(doc.status || '').replace(/_/g, ' ')}</span>
                   </div>
                   <div className="flex flex-wrap gap-2 mt-3 text-xs text-gray-500">
                     <span>{doc.documentNumber || 'No document number'}</span>
@@ -125,9 +171,41 @@ const Compliance = () => {
                     {doc.mandatory && <span className="px-2 py-0.5 text-red-700 bg-red-50 rounded-full">Mandatory</span>}
                   </div>
                   <div className="flex flex-wrap gap-2 mt-4">
-                    {doc.status !== 'verified' && <button onClick={() => act(doc._id, 'verify')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg"><CheckCircle2 className="w-3 h-3" /> Verify</button>}
-                    {(doc.status === 'expired' || doc.status === 'renewal_required' || soon) && <button onClick={() => act(doc._id, 'renew')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 rounded-lg"><UploadCloud className="w-3 h-3" /> Renew</button>}
-                    {doc.status === 'pending' && <button onClick={() => act(doc._id, 'remind')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg"><AlertCircle className="w-3 h-3" /> Reminder</button>}
+                    <input
+                      ref={(el) => { fileRefs.current[doc._id] = el; }}
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => onUpload(doc, e.target.files?.[0])}
+                    />
+                    <button
+                      type="button"
+                      disabled={uploadingId === doc._id}
+                      onClick={() => fileRefs.current[doc._id]?.click()}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 rounded-lg disabled:opacity-60"
+                    >
+                      <UploadCloud className="w-3 h-3" /> {uploadingId === doc._id ? 'Uploading…' : 'Upload'}
+                    </button>
+                    {doc.documentUrl && (
+                      <a href={doc.documentUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg">
+                        <ExternalLink className="w-3 h-3" /> View
+                      </a>
+                    )}
+                    {doc.status !== 'verified' && doc.documentUrl && (
+                      <button type="button" onClick={() => act(doc._id, 'verify')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg">
+                        <CheckCircle2 className="w-3 h-3" /> Verify
+                      </button>
+                    )}
+                    {(doc.status === 'expired' || doc.status === 'renewal_required' || soon) && (
+                      <button type="button" onClick={() => act(doc._id, 'renew')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 rounded-lg">
+                        Mark renew
+                      </button>
+                    )}
+                    {doc.status === 'pending' && (
+                      <button type="button" onClick={() => act(doc._id, 'remind')} className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg">
+                        <AlertCircle className="w-3 h-3" /> Reminder
+                      </button>
+                    )}
                   </div>
                 </div>
               );

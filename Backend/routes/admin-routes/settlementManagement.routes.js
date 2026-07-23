@@ -17,7 +17,9 @@ const {
   // Withdrawals
   getWithdrawalRequests,
   approveWithdrawal,
-  rejectWithdrawal
+  rejectWithdrawal,
+  retryWithdrawal,
+  markWithdrawalPaid
 } = require('../../controllers/adminControllers/settlementController');
 
 // Dashboard summary
@@ -62,5 +64,7 @@ router.post(
 router.get('/withdrawals', authenticate, isAdmin, getWithdrawalRequests);
 router.post('/withdrawals/:withdrawalId/approve', authenticate, isAdmin, approveWithdrawal);
 router.post('/withdrawals/:withdrawalId/reject', authenticate, isAdmin, rejectWithdrawal);
+router.post('/withdrawals/:withdrawalId/retry', authenticate, isAdmin, retryWithdrawal);
+router.post('/withdrawals/:withdrawalId/mark-paid', authenticate, isAdmin, markWithdrawalPaid);
 
 module.exports = router;

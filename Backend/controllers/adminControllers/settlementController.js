@@ -537,13 +537,17 @@ module.exports = {
       const { page = 1, limit = 20 } = req.query;
       const skip = (parseInt(page) - 1) * parseInt(limit);
 
-      const withdrawals = await Withdrawal.find({ status: 'pending' })
+      const statusFilter = req.query.status
+        ? String(req.query.status).split(',')
+        : ['pending', 'processing', 'awaiting_manual_transfer', 'failed'];
+
+      const withdrawals = await Withdrawal.find({ status: { $in: statusFilter } })
         .populate('vendorId', 'name businessName phone wallet.earnings')
         .sort({ createdAt: 1 })
         .skip(skip)
         .limit(parseInt(limit));
 
-      const total = await Withdrawal.countDocuments({ status: 'pending' });
+      const total = await Withdrawal.countDocuments({ status: { $in: statusFilter } });
 
       res.status(200).json({
         success: true,
@@ -566,15 +570,37 @@ module.exports = {
       const { transactionReference, notes } = req.body;
       const adminId = req.user.id;
 
+      const withdrawal = await Withdrawal.findById(withdrawalId);
+      if (!withdrawal) return res.status(404).json({ success: false, message: 'Withdrawal not found' });
+
+      // Finance Master Wallet withdrawals — escrow-aware hold already applied
+      if (withdrawal.source === 'finance_wallet') {
+        if (!['pending', 'awaiting_manual_transfer', 'failed', 'approved'].includes(withdrawal.status)) {
+          return res.status(400).json({ success: false, message: `Cannot approve status ${withdrawal.status}` });
+        }
+        const withdrawSvc = require('../../services/vendorWithdrawal.service');
+        const result = await withdrawSvc.processApprovedWithdrawal(withdrawalId, {
+          adminId,
+          actorType: 'admin',
+          notes,
+          transactionReference
+        });
+        return res.status(200).json({
+          success: true,
+          message: 'Finance withdrawal processed',
+          data: result.withdrawal
+        });
+      }
+
+      if (withdrawal.status !== 'pending') {
+        return res.status(400).json({ success: false, message: 'Not pending' });
+      }
+
       // Fetch global settings for rates
       const Settings = require('../../models/Settings');
       const settings = await Settings.findOne({ type: 'global' });
       const tdsRate = settings?.tdsPercentage || 1;
       const platformFeeRate = settings?.platformFeePercentage || 1;
-
-      const withdrawal = await Withdrawal.findById(withdrawalId);
-      if (!withdrawal) return res.status(404).json({ success: false, message: 'Withdrawal not found' });
-      if (withdrawal.status !== 'pending') return res.status(400).json({ success: false, message: 'Not pending' });
 
       const vendor = await Vendor.findById(withdrawal.vendorId);
       if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
@@ -598,9 +624,10 @@ module.exports = {
       await vendor.save();
 
       // Update withdrawal with details
-      withdrawal.status = 'approved';
+      withdrawal.status = 'paid';
       withdrawal.processedBy = adminId;
       withdrawal.processedDate = new Date();
+      withdrawal.paidAt = new Date();
       withdrawal.transactionReference = transactionReference;
       withdrawal.adminNotes = notes;
       withdrawal.tdsRate = tdsRate;
@@ -608,10 +635,15 @@ module.exports = {
       withdrawal.platformFeeRate = platformFeeRate;
       withdrawal.platformFeeAmount = platformFeeAmount;
       withdrawal.netAmount = netAmount;
+      if (typeof withdrawal.pushEvent === 'function') {
+        withdrawal.pushEvent('paid', `Legacy earnings payout. UTR: ${transactionReference || 'N/A'}`, {
+          actorType: 'admin',
+          actorId: adminId
+        });
+      }
       await withdrawal.save();
 
       // Record withdrawal payout in earning tracker
-      // We pass the amount that legitimately left platform bounds to Vendor (including TDS tracking separately later if needed)
       recordWithdrawal(new Date(), grossAmount);
 
       // Send Withdrawal Approved Email
@@ -686,7 +718,7 @@ module.exports = {
       });
     } catch (error) {
       console.error('Approve withdrawal error:', error);
-      res.status(500).json({ success: false, message: error.message });
+      res.status(error.status || 500).json({ success: false, message: error.message });
     }
   },
 
@@ -694,23 +726,62 @@ module.exports = {
   rejectWithdrawal: async (req, res) => {
     try {
       const { withdrawalId } = req.params;
-      const { reason } = req.body;
+      const { reason, rejectionReason } = req.body;
       const adminId = req.user.id;
 
       const withdrawal = await Withdrawal.findById(withdrawalId);
       if (!withdrawal) return res.status(404).json({ success: false, message: 'Withdrawal not found' });
 
+      if (withdrawal.source === 'finance_wallet') {
+        const withdrawSvc = require('../../services/vendorWithdrawal.service');
+        const updated = await withdrawSvc.rejectWithdrawal(withdrawalId, {
+          adminId,
+          reason: reason || rejectionReason || 'Rejected by admin'
+        });
+        return res.status(200).json({ success: true, message: 'Withdrawal rejected', data: updated });
+      }
+
       withdrawal.status = 'rejected';
       withdrawal.processedBy = adminId;
-      withdrawal.processedAt = new Date();
-      withdrawal.rejectionReason = reason;
+      withdrawal.processedDate = new Date();
+      withdrawal.rejectionReason = reason || rejectionReason;
       await withdrawal.save();
-
-
 
       res.status(200).json({ success: true, message: 'Withdrawal rejected' });
     } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
+      res.status(error.status || 500).json({ success: false, message: error.message });
+    }
+  },
+
+  retryWithdrawal: async (req, res) => {
+    try {
+      const { withdrawalId } = req.params;
+      const adminId = req.user.id;
+      const withdrawSvc = require('../../services/vendorWithdrawal.service');
+      const result = await withdrawSvc.retryWithdrawal(withdrawalId, { adminId });
+      res.json({ success: true, data: result.withdrawal });
+    } catch (error) {
+      res.status(error.status || 500).json({ success: false, message: error.message });
+    }
+  },
+
+  markWithdrawalPaid: async (req, res) => {
+    try {
+      const { withdrawalId } = req.params;
+      const { transactionReference, notes } = req.body;
+      const adminId = req.user.id;
+      if (!transactionReference) {
+        return res.status(400).json({ success: false, message: 'UTR / transactionReference is required' });
+      }
+      const withdrawSvc = require('../../services/vendorWithdrawal.service');
+      const result = await withdrawSvc.markWithdrawalPaid(withdrawalId, {
+        utr: transactionReference,
+        adminId,
+        notes
+      });
+      res.json({ success: true, data: result.withdrawal });
+    } catch (error) {
+      res.status(error.status || 500).json({ success: false, message: error.message });
     }
   }
 };

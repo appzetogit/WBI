@@ -415,6 +415,23 @@ async function createTicket({ vendorId, body, actor, req }) {
   emitSupport('admin', 'support:ticketCreated', payload);
   emitSupport('support', 'support:ticketCreated', payload);
 
+  try {
+    const { publishVendorNotification } = require('./vendorNotificationCenter.service');
+    await publishVendorNotification({
+      vendorId,
+      type: 'support_ticket_created',
+      title: 'Support ticket created',
+      message: `${ticket.ticketCode}: ${ticket.subject}`,
+      module: 'support',
+      priority: ticket.priority === 'urgent' || ticket.priority === 'critical' ? 'high' : 'normal',
+      relatedId: ticket._id,
+      relatedType: 'support_ticket',
+      actionUrl: `support?ticketId=${ticket._id}`,
+      metadata: { ticketCode: ticket.ticketCode, status: ticket.status },
+      category: 'account'
+    });
+  } catch (_) { /* non-blocking */ }
+
   return { ok: true, data: ticket };
 }
 
@@ -517,6 +534,26 @@ async function transitionTicket({ ticket, action, message, internal, actor, req,
   emitSupport('admin', 'support:ticketUpdated', payload);
   emitSupport('support', 'support:ticketUpdated', payload);
 
+  try {
+    const { publishVendorNotification } = require('./vendorNotificationCenter.service');
+    const isResolved = ['resolved', 'closed'].includes(ticket.status);
+    await publishVendorNotification({
+      vendorId: ticket.vendorId,
+      type: isResolved ? 'support_ticket_resolved' : 'support_ticket_update',
+      title: isResolved ? 'Support ticket resolved' : 'Support ticket updated',
+      message: `${ticket.ticketCode} is now ${ticket.status}${message ? `: ${message}` : ''}`,
+      module: 'support',
+      priority: isResolved ? 'normal' : 'high',
+      relatedId: ticket._id,
+      relatedType: 'support_ticket',
+      actionUrl: `support?ticketId=${ticket._id}`,
+      metadata: { ticketCode: ticket.ticketCode, status: ticket.status, action },
+      actorType: role === 'admin' ? 'admin' : 'system',
+      actorId: actor?.id || null,
+      category: 'account'
+    });
+  } catch (_) { /* non-blocking */ }
+
   return { ok: true, data: ticket };
 }
 
@@ -552,6 +589,28 @@ async function addComment({ ticket, message, internal, attachments, actor, req }
   const payload = ticket.toObject();
   emitSupport(`vendor:${ticket.vendorId}`, 'support:ticketCommented', payload);
   emitSupport('admin', 'support:ticketCommented', payload);
+
+  if (!internal && role !== 'vendor') {
+    try {
+      const { publishVendorNotification } = require('./vendorNotificationCenter.service');
+      await publishVendorNotification({
+        vendorId: ticket.vendorId,
+        type: 'support_ticket_update',
+        title: 'New reply on support ticket',
+        message: `${ticket.ticketCode}: ${String(message).trim().slice(0, 120)}`,
+        module: 'support',
+        priority: 'high',
+        relatedId: ticket._id,
+        relatedType: 'support_ticket',
+        actionUrl: `support?ticketId=${ticket._id}`,
+        metadata: { ticketCode: ticket.ticketCode },
+        actorType: role === 'admin' ? 'admin' : 'system',
+        actorId: actor?.id || null,
+        category: 'account'
+      });
+    } catch (_) { /* non-blocking */ }
+  }
+
   return { ok: true, data: ticket };
 }
 

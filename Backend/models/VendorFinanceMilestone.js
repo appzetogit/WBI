@@ -20,6 +20,9 @@ const vendorFinanceMilestoneSchema = new mongoose.Schema({
   qaApproved: { type: Boolean, default: false },
   clientApproved: { type: Boolean, default: false },
   invoiceNumber: { type: String, default: '' },
+  invoiceDocumentId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorFinanceDocument', default: null },
+  sourceContractId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorContract', default: null, index: true },
+  sourceQuotationId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorFinanceDocument', default: null },
   status: {
     type: String,
     enum: ['upcoming', 'due', 'qa_pending', 'approval_pending', 'invoice_ready', 'invoiced', 'paid', 'blocked'],

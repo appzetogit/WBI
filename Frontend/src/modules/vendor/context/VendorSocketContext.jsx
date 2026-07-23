@@ -35,7 +35,21 @@ export const VendorSocketProvider = ({ children }) => {
       if (vendorId) {
         newSocket.emit('joinVendorRoom', vendorId);
         newSocket.emit('join', `vendor:${vendorId}`);
+        newSocket.emit('join_room', `vendor:${vendorId}`);
       }
+    });
+
+    newSocket.on('finance:updated', (data) => {
+      window.dispatchEvent(new CustomEvent('vendor-finance-updated', { detail: data }));
+    });
+    newSocket.on('finance:paymentReceived', (data) => {
+      window.dispatchEvent(new CustomEvent('vendor-finance-updated', { detail: data }));
+    });
+    newSocket.on('finance:withdrawalRequested', (data) => {
+      window.dispatchEvent(new CustomEvent('vendor-finance-updated', { detail: data }));
+    });
+    newSocket.on('finance:synced', (data) => {
+      window.dispatchEvent(new CustomEvent('vendor-finance-updated', { detail: data }));
     });
 
     newSocket.on('new_opportunity', (data) => {

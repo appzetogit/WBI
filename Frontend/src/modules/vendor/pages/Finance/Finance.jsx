@@ -8,12 +8,15 @@ import { useVendorConfig } from '../../context/VendorConfigContext';
 import useFinanceCounts from '../../hooks/useFinanceCounts';
 import useVendorBasePath from '../../hooks/useVendorBasePath';
 import {
-  fetchWallet, requestWithdrawal, fetchClientReceivables, fetchB2BReceivables,
+  fetchWallet, fetchClientReceivables, fetchB2BReceivables,
   updateReceivable, fetchQuotations, fetchInvoices, updateFinanceDocument,
-  fetchPaymentMilestones, updatePaymentMilestone, fetchEarningsByService, formatINR, statusColors
+  fetchPaymentMilestones, updatePaymentMilestone, fetchEarningsByService, formatINR, statusColors,
+  exportFinanceLedger, syncFinanceData, downloadFinanceDocument, createInvoicePayOrder, verifyInvoicePayment
 } from '../../services/financeService';
+import { toast } from 'react-hot-toast';
 import Pagination from '../BusinessIntake/components/Pagination';
 import EmptyState from '../BusinessIntake/components/EmptyState';
+import WithdrawalWizard from './WithdrawalWizard';
 
 const FinanceContext = createContext(null);
 const PAGE_SIZE = 8;
@@ -104,9 +107,31 @@ const FinanceLayout = () => {
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ category: '', status: '' });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [syncing, setSyncing] = useState(false);
   const { refresh: refreshCounts } = useFinanceCounts();
   const setFilter = useCallback((key, value) => setFilters((current) => ({ ...current, [key]: value })), []);
   const refresh = useCallback(() => { setRefreshKey((key) => key + 1); refreshCounts(); }, [refreshCounts]);
+
+  useEffect(() => {
+    const onLive = () => refresh();
+    window.addEventListener('vendor-finance-updated', onLive);
+    return () => window.removeEventListener('vendor-finance-updated', onLive);
+  }, [refresh]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setSyncing(true);
+        await syncFinanceData();
+        refresh();
+      } catch {
+        /* sync is best-effort on open */
+      } finally {
+        setSyncing(false);
+      }
+    })();
+  }, []);
+
   const value = useMemo(() => ({ search, setSearch, filters, setFilter, refreshKey, refresh }), [search, filters, setFilter, refreshKey, refresh]);
 
   return (
@@ -120,7 +145,9 @@ const FinanceLayout = () => {
             </h1>
             <p className="mt-1.5 ml-[46px] text-sm text-gray-500">Quotation → contract → milestone → QA approval → invoice → wallet → settlement.</p>
           </div>
-          <button onClick={refresh} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg shadow-sm"><RefreshCw className="w-4 h-4" /> Refresh</button>
+          <button onClick={refresh} disabled={syncing} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg shadow-sm disabled:opacity-60">
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'Syncing…' : 'Refresh'}
+          </button>
         </div>
         <FinanceStats />
         <div className="bg-white border border-b-0 border-gray-200 rounded-t-xl"><FinanceTabs /></div>
@@ -163,6 +190,9 @@ const WalletPage = () => {
   const [transactions, setTransactions] = useState([]);
   const [byService, setByService] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -187,17 +217,30 @@ const WalletPage = () => {
     }
   }, [search, filters.status, filters.category]);
   useEffect(() => { load(); }, [load, refreshKey]);
-  const withdraw = async () => {
-    const raw = window.prompt('Withdrawal amount');
-    if (!raw) return;
+
+  const exportLedger = async () => {
     try {
-      await requestWithdrawal(Number(raw));
-      load();
-      refresh();
+      setExporting(true);
+      const res = await exportFinanceLedger({
+        search: search || undefined,
+        status: filters.status || undefined,
+        category: filters.category || undefined
+      });
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vendor-finance-ledger-${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Ledger exported');
     } catch (error) {
-      alert(error.response?.data?.message || 'Withdrawal failed');
+      toast.error(error.response?.data?.message || 'Export failed');
+    } finally {
+      setExporting(false);
     }
   };
+
   return (
     <div className="space-y-4">
       <FinanceFilter statuses={['pending', 'processing', 'completed', 'failed']} />
@@ -208,21 +251,27 @@ const WalletPage = () => {
               <p className="text-sm text-gray-300">Available Balance</p>
               <p className="mt-2 text-4xl font-bold">{formatINR(wallet?.availableBalance)}</p>
               <div className="flex flex-wrap gap-3 mt-6">
-                <button onClick={withdraw} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-blue-600 rounded-lg"><ArrowDownToLine className="w-4 h-4" /> Withdraw Funds</button>
-                <button className="flex items-center gap-2 px-4 py-2 text-sm bg-white/10 rounded-lg"><Download className="w-4 h-4" /> Export Ledger</button>
+                <button onClick={() => setWithdrawOpen(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-blue-600 rounded-lg"><ArrowDownToLine className="w-4 h-4" /> Withdraw Funds</button>
+                <button onClick={exportLedger} disabled={exporting} className="flex items-center gap-2 px-4 py-2 text-sm bg-white/10 rounded-lg disabled:opacity-60"><Download className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export Ledger'}</button>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                ['Escrow', wallet?.escrowBalance],
+                ['Escrow (locked)', wallet?.escrowBalance],
                 ['Pending Settlement', wallet?.pendingSettlement],
                 ['Total Earnings', wallet?.totalEarnings],
                 ['Withdrawn', wallet?.totalWithdrawn],
                 ['Commission', wallet?.commissionDeducted],
-                ['Refunds', wallet?.refundAmount]
+                ['Processing', wallet?.processingWithdrawal]
               ].map(([label, amount]) => <div key={label} className="p-3 bg-gray-50 rounded-xl"><p className="text-sm font-bold">{formatINR(amount)}</p><p className="text-[11px] text-gray-500">{label}</p></div>)}
             </div>
           </div>
+
+          <WithdrawalWizard
+            open={withdrawOpen}
+            onClose={() => setWithdrawOpen(false)}
+            onComplete={() => { load(); refresh(); }}
+          />
 
           {/* Per registered service — earnings / pending / escrow */}
           <div>
@@ -370,11 +419,70 @@ const DocumentsPage = ({ invoices = false }) => {
   const fetcher = useCallback((params) => (invoices ? fetchInvoices(params) : fetchQuotations(params)), [invoices]);
   const { data, loading, pageInfo, setPage, load } = useList(fetcher);
   const statuses = invoices ? ['draft', 'issued', 'partial', 'paid', 'overdue', 'cancelled'] : ['draft', 'sent', 'negotiation', 'approved', 'rejected', 'expired'];
-  const act = async (id, action) => { try { await updateFinanceDocument(id, { action }); load(); } catch (error) { alert(error.response?.data?.message || 'Action failed'); } };
+  const act = async (id, action) => {
+    try {
+      await updateFinanceDocument(id, { action });
+      toast.success('Updated');
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Action failed');
+    }
+  };
+  const openPdf = async (id) => {
+    try {
+      const res = await downloadFinanceDocument(id);
+      const blob = new Blob([res.data], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'PDF failed');
+    }
+  };
+  const collectPayment = async (doc) => {
+    try {
+      const orderRes = await createInvoicePayOrder(doc._id, {
+        idempotencyKey: `pay-${doc._id}-${Date.now()}`
+      });
+      const order = orderRes.data?.data;
+      if (!order?.orderId || !order?.keyId) {
+        toast.error(orderRes.data?.message || 'Payment order failed');
+        return;
+      }
+      if (!window.Razorpay) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          script.onload = resolve;
+          script.onerror = reject;
+          document.body.appendChild(script);
+        });
+      }
+      const rzp = new window.Razorpay({
+        key: order.keyId,
+        amount: Math.round(Number(order.amount) * 100),
+        currency: order.currency || 'INR',
+        name: 'WBI Vendor Finance',
+        description: `Invoice ${order.invoiceCode}`,
+        order_id: order.orderId,
+        handler: async (response) => {
+          try {
+            await verifyInvoicePayment(doc._id, response);
+            toast.success('Payment received into escrow');
+            load();
+          } catch (error) {
+            toast.error(error.response?.data?.message || 'Payment verify failed');
+          }
+        }
+      });
+      rzp.open();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Unable to start payment');
+    }
+  };
   return (
     <div className="space-y-4">
       <FinanceFilter statuses={statuses} />
-      {loading ? <ListLoading /> : data.length === 0 ? <EmptyState icon={FileText} title={`No ${invoices ? 'invoices' : 'quotations'}`} description="Financial documents are generated from service and contract templates." /> : (
+      {loading ? <ListLoading /> : data.length === 0 ? <EmptyState icon={FileText} title={`No ${invoices ? 'invoices' : 'quotations'}`} description="Sync pulls live proposals/contracts. Approved quotations convert into payment milestones." /> : (
         <>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {data.map((doc) => <div key={doc._id} className="p-5 border border-gray-200 rounded-xl shadow-sm">
@@ -386,8 +494,13 @@ const DocumentsPage = ({ invoices = false }) => {
                 {!invoices && ['sent', 'negotiation'].includes(doc.status) && <><button onClick={() => act(doc._id, 'approve')} className="px-3 py-1.5 text-xs text-white bg-emerald-600 rounded-lg">Approve</button><button onClick={() => act(doc._id, 'reject')} className="px-3 py-1.5 text-xs text-red-700 border border-red-200 rounded-lg">Reject</button></>}
                 {!invoices && doc.status === 'approved' && !doc.convertedToProject && <button onClick={() => act(doc._id, 'convert')} className="px-3 py-1.5 text-xs font-semibold text-white bg-violet-600 rounded-lg">Convert to Project</button>}
                 {invoices && doc.status === 'draft' && <button onClick={() => act(doc._id, 'issue')} className="px-3 py-1.5 text-xs text-white bg-blue-600 rounded-lg">Issue Invoice</button>}
-                {invoices && ['issued', 'partial', 'overdue'].includes(doc.status) && <button onClick={() => act(doc._id, 'mark_paid')} className="px-3 py-1.5 text-xs text-white bg-emerald-600 rounded-lg">Mark Paid</button>}
-                <button className="flex items-center gap-1 px-3 py-1.5 text-xs border rounded-lg"><Download className="w-3 h-3" /> PDF</button>
+                {invoices && ['issued', 'partial', 'overdue'].includes(doc.status) && (
+                  <button onClick={() => collectPayment(doc)} className="px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg">Collect via Razorpay</button>
+                )}
+                {invoices && doc.status === 'paid' && !doc.escrowReleased && (
+                  <button onClick={() => act(doc._id, 'release_escrow')} className="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 rounded-lg">Release to Wallet</button>
+                )}
+                <button onClick={() => openPdf(doc._id)} className="flex items-center gap-1 px-3 py-1.5 text-xs border rounded-lg"><Download className="w-3 h-3" /> PDF</button>
               </div>
             </div>)}
           </div>
@@ -401,7 +514,15 @@ const DocumentsPage = ({ invoices = false }) => {
 const MilestonesPage = () => {
   const fetcher = useCallback((params) => fetchPaymentMilestones(params), []);
   const { data, loading, pageInfo, setPage, load } = useList(fetcher);
-  const act = async (id, action) => { try { await updatePaymentMilestone(id, { action }); load(); } catch (error) { alert(error.response?.data?.message || 'Action failed'); } };
+  const act = async (id, action) => {
+    try {
+      await updatePaymentMilestone(id, { action });
+      toast.success(action === 'invoice' ? 'Invoice generated' : 'Milestone updated');
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Action failed');
+    }
+  };
   const nextAction = {
     upcoming: ['complete', 'Complete Milestone'],
     due: ['complete', 'Complete Milestone'],

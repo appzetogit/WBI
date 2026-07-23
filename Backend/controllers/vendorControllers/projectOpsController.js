@@ -684,6 +684,19 @@ const assignEngineerToProject = async (req, res) => {
       console.warn('assignEngineer notify failed:', fcmErr.message);
     }
 
+    // Mirror into Workforce Assignments + Capacity availability
+    try {
+      const { mirrorOpsAssignment } = require('../../services/vendorWorkforceSync.service');
+      await mirrorOpsAssignment({
+        vendorId,
+        project,
+        engineer,
+        jobId: job.jobCode || job._id
+      });
+    } catch (wfErr) {
+      console.warn('workforce mirror skipped:', wfErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: `Job sent to ${engineer.name}. Waiting for engineer to accept on app.`,

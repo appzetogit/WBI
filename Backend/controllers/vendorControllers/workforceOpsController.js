@@ -1,5 +1,5 @@
 /**
- * Workforce Controller — vendor-scoped dynamic workforce engine
+ * Workforce Controller — live engineers, teams, assignments, leave, attendance
  */
 const mongoose = require('mongoose');
 const VendorWorkforceEngineer = require('../../models/VendorWorkforceEngineer');
@@ -9,32 +9,86 @@ const VendorWorkforceAttendance = require('../../models/VendorWorkforceAttendanc
 const VendorWorkforceLeave = require('../../models/VendorWorkforceLeave');
 const VendorWorkforceCertification = require('../../models/VendorWorkforceCertification');
 const Vendor = require('../../models/Vendor');
+const {
+  syncLinkedEngineers,
+  applyLeaveDecision
+} = require('../../services/vendorWorkforceSync.service');
 
 const getVendorId = (req) => req.user._id || req.user.id;
 
 const getVendorCategoryCodes = async (vendorId) => {
   const vendor = await Vendor.findById(vendorId).select('approvedServices').lean();
   if (!vendor?.approvedServices?.length) return [];
-  return vendor.approvedServices.filter((s) => s.status === 'active').map((s) => s.categoryCode).filter(Boolean);
+  return vendor.approvedServices
+    .filter((s) => s.status === 'active' || s.status === 'approved')
+    .map((s) => s.categoryCode)
+    .filter(Boolean);
 };
 
 const applyCategoryFilter = async (filter, vendorId, category) => {
   if (category) {
-    filter.serviceCategoryCode = category;
+    filter.serviceCategoryCode = String(category).toUpperCase();
     return;
   }
   const codes = await getVendorCategoryCodes(vendorId);
   if (codes.length) {
-    filter.$or = [
-      { serviceCategoryCode: { $in: codes } },
-      { serviceCategoryCode: { $exists: true } }
-    ];
+    filter.serviceCategoryCode = { $in: codes };
   }
+};
+
+const liveBase = (vendorId) => ({
+  vendorId: new mongoose.Types.ObjectId(vendorId),
+  demoTag: null
+});
+
+const ensureWorkforceSynced = async (vendorId) => {
+  try {
+    await syncLinkedEngineers(vendorId);
+  } catch (err) {
+    console.warn('[workforce sync]', err.message);
+  }
+};
+
+const refreshEngineerAvailability = async (vendorId, engineerId) => {
+  if (!engineerId) return;
+  const now = new Date();
+  const onLeave = await VendorWorkforceLeave.exists({
+    vendorId,
+    engineerId,
+    status: 'approved',
+    startDate: { $lte: now },
+    endDate: { $gte: now },
+    demoTag: null
+  });
+  if (onLeave) {
+    await VendorWorkforceEngineer.updateOne(
+      { _id: engineerId, vendorId },
+      { $set: { availability: 'leave' } }
+    );
+    return;
+  }
+  const openAsg = await VendorWorkforceAssignment.exists({
+    vendorId,
+    engineerId,
+    status: { $in: ['assigned', 'in_progress', 'escalated'] },
+    demoTag: null
+  });
+  await VendorWorkforceEngineer.updateOne(
+    { _id: engineerId, vendorId },
+    {
+      $set: openAsg
+        ? { availability: 'on_project' }
+        : { availability: 'available', todayTask: '' }
+    }
+  );
 };
 
 const getCounts = async (req, res) => {
   try {
-    const vid = new mongoose.Types.ObjectId(getVendorId(req));
+    const vendorId = getVendorId(req);
+    await ensureWorkforceSynced(vendorId);
+    const vid = new mongoose.Types.ObjectId(vendorId);
+    const base = { vendorId: vid, demoTag: null };
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
@@ -51,19 +105,22 @@ const getCounts = async (req, res) => {
       pendingLeave,
       expiringCerts
     ] = await Promise.all([
-      VendorWorkforceEngineer.countDocuments({ vendorId: vid, status: 'active' }),
-      VendorWorkforceEngineer.countDocuments({ vendorId: vid, status: 'active', availability: 'available' }),
-      VendorWorkforceTeam.countDocuments({ vendorId: vid, status: { $in: ['active', 'deployed'] } }),
-      VendorWorkforceAssignment.countDocuments({ vendorId: vid, status: { $in: ['assigned', 'in_progress', 'escalated'] } }),
-      VendorWorkforceEngineer.countDocuments({ vendorId: vid, availability: 'leave' }),
+      VendorWorkforceEngineer.countDocuments({ ...base, status: 'active' }),
+      VendorWorkforceEngineer.countDocuments({ ...base, status: 'active', availability: 'available' }),
+      VendorWorkforceTeam.countDocuments({ ...base, status: { $in: ['active', 'deployed'] } }),
+      VendorWorkforceAssignment.countDocuments({
+        ...base,
+        status: { $in: ['assigned', 'in_progress', 'escalated'] }
+      }),
+      VendorWorkforceEngineer.countDocuments({ ...base, availability: 'leave' }),
       VendorWorkforceAttendance.countDocuments({
-        vendorId: vid,
+        ...base,
         date: { $gte: todayStart, $lte: todayEnd },
         status: { $in: ['present', 'late', 'half_day'] }
       }),
-      VendorWorkforceLeave.countDocuments({ vendorId: vid, status: 'pending' }),
+      VendorWorkforceLeave.countDocuments({ ...base, status: 'pending' }),
       VendorWorkforceCertification.countDocuments({
-        vendorId: vid,
+        ...base,
         $or: [
           { verificationStatus: 'renewal_due' },
           { verificationStatus: 'expired' },
@@ -91,11 +148,23 @@ const getCounts = async (req, res) => {
   }
 };
 
+const syncWorkforce = async (req, res) => {
+  try {
+    const vendorId = getVendorId(req);
+    const result = await syncLinkedEngineers(vendorId);
+    res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    console.error('syncWorkforce:', error);
+    res.status(500).json({ success: false, message: error.message || 'Sync failed' });
+  }
+};
+
 const getEngineers = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
+    await ensureWorkforceSynced(vendorId);
     const { status, availability, category, search, city, page = 1, limit = 12, sort = 'updatedAt' } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = liveBase(vendorId);
     if (status) filter.status = status;
     if (availability) filter.availability = availability;
     if (city) filter.city = new RegExp(city, 'i');
@@ -106,15 +175,21 @@ const getEngineers = async (req, res) => {
         $or: [{ name: rx }, { employeeId: rx }, { role: rx }, { primarySkill: rx }, { city: rx }]
       }]);
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
+    const sortField = ['updatedAt', 'name', 'rating', 'performanceScore'].includes(sort) ? sort : 'updatedAt';
     const [data, total] = await Promise.all([
-      VendorWorkforceEngineer.find(filter).sort({ [sort]: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      VendorWorkforceEngineer.find(filter).sort({ [sortField]: -1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
       VendorWorkforceEngineer.countDocuments(filter)
     ]);
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) || 1 }
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
     });
   } catch (error) {
     console.error('getEngineers:', error);
@@ -127,7 +202,8 @@ const updateEngineer = async (req, res) => {
     const vendorId = getVendorId(req);
     const eng = await VendorWorkforceEngineer.findOne({
       _id: req.params.id,
-      vendorId: new mongoose.Types.ObjectId(vendorId)
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      demoTag: null
     });
     if (!eng) return res.status(404).json({ success: false, message: 'Engineer not found' });
     const { action, availability, status } = req.body;
@@ -153,7 +229,7 @@ const getTeams = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
     const { status, category, search, page = 1, limit = 12 } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = liveBase(vendorId);
     if (status) filter.status = status;
     await applyCategoryFilter(filter, vendorId, category);
     if (search?.trim()) {
@@ -162,15 +238,20 @@ const getTeams = async (req, res) => {
         $or: [{ name: rx }, { teamCode: rx }, { leaderName: rx }, { city: rx }]
       }]);
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const [data, total] = await Promise.all([
-      VendorWorkforceTeam.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      VendorWorkforceTeam.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
       VendorWorkforceTeam.countDocuments(filter)
     ]);
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) || 1 }
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
     });
   } catch (error) {
     console.error('getTeams:', error);
@@ -181,8 +262,10 @@ const getTeams = async (req, res) => {
 const getStructure = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
+    await ensureWorkforceSynced(vendorId);
     const engineers = await VendorWorkforceEngineer.find({
       vendorId: new mongoose.Types.ObjectId(vendorId),
+      demoTag: null,
       status: { $ne: 'deactivated' }
     }).select('name role department reportingManager employeeId serviceCategoryName availability status certificationLevel').lean();
 
@@ -241,8 +324,9 @@ const getStructure = async (req, res) => {
 const getSkillMatrix = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
+    await ensureWorkforceSynced(vendorId);
     const { category, search } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId), status: 'active' };
+    const filter = { ...liveBase(vendorId), status: 'active' };
     await applyCategoryFilter(filter, vendorId, category);
     if (search?.trim()) {
       const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -287,7 +371,7 @@ const getAssignments = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
     const { status, priority, category, search, page = 1, limit = 12 } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = liveBase(vendorId);
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
     await applyCategoryFilter(filter, vendorId, category);
@@ -297,15 +381,20 @@ const getAssignments = async (req, res) => {
         $or: [{ projectName: rx }, { engineerName: rx }, { task: rx }, { assignmentCode: rx }]
       }]);
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const [data, total] = await Promise.all([
-      VendorWorkforceAssignment.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      VendorWorkforceAssignment.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
       VendorWorkforceAssignment.countDocuments(filter)
     ]);
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) || 1 }
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
     });
   } catch (error) {
     console.error('getAssignments:', error);
@@ -318,7 +407,8 @@ const updateAssignment = async (req, res) => {
     const vendorId = getVendorId(req);
     const asg = await VendorWorkforceAssignment.findOne({
       _id: req.params.id,
-      vendorId: new mongoose.Types.ObjectId(vendorId)
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      demoTag: null
     });
     if (!asg) return res.status(404).json({ success: false, message: 'Assignment not found' });
     const { action, progress } = req.body;
@@ -328,6 +418,16 @@ const updateAssignment = async (req, res) => {
     else if (action === 'start') asg.status = 'in_progress';
     if (typeof progress === 'number') asg.progress = progress;
     await asg.save();
+
+    if (['complete', 'reject'].includes(action)) {
+      await refreshEngineerAvailability(vendorId, asg.engineerId);
+    } else if (['start', 'escalate'].includes(action) && asg.engineerId) {
+      await VendorWorkforceEngineer.updateOne(
+        { _id: asg.engineerId, vendorId, availability: { $ne: 'leave' } },
+        { $set: { availability: 'on_project', todayTask: asg.task || asg.projectName } }
+      );
+    }
+
     res.status(200).json({ success: true, data: asg });
   } catch (error) {
     console.error('updateAssignment:', error);
@@ -338,8 +438,9 @@ const updateAssignment = async (req, res) => {
 const getAvailability = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
+    await ensureWorkforceSynced(vendorId);
     const { category, search } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId), status: 'active' };
+    const filter = { ...liveBase(vendorId), status: 'active' };
     await applyCategoryFilter(filter, vendorId, category);
     if (search?.trim()) {
       const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
@@ -366,21 +467,26 @@ const getAttendance = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
     const { status, search, page = 1, limit = 20 } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = liveBase(vendorId);
     if (status) filter.status = status;
     if (search?.trim()) {
       const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ engineerName: rx }, { employeeId: rx }];
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const [data, total] = await Promise.all([
-      VendorWorkforceAttendance.find(filter).sort({ date: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      VendorWorkforceAttendance.find(filter).sort({ date: -1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
       VendorWorkforceAttendance.countDocuments(filter)
     ]);
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) || 1 }
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
     });
   } catch (error) {
     console.error('getAttendance:', error);
@@ -392,22 +498,27 @@ const getLeaves = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
     const { status, leaveType, search, page = 1, limit = 20 } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = liveBase(vendorId);
     if (status) filter.status = status;
     if (leaveType) filter.leaveType = leaveType;
     if (search?.trim()) {
       const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ engineerName: rx }, { employeeId: rx }, { reason: rx }];
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const [data, total] = await Promise.all([
-      VendorWorkforceLeave.find(filter).sort({ startDate: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      VendorWorkforceLeave.find(filter).sort({ startDate: -1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
       VendorWorkforceLeave.countDocuments(filter)
     ]);
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) || 1 }
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
     });
   } catch (error) {
     console.error('getLeaves:', error);
@@ -420,7 +531,8 @@ const updateLeave = async (req, res) => {
     const vendorId = getVendorId(req);
     const leave = await VendorWorkforceLeave.findOne({
       _id: req.params.id,
-      vendorId: new mongoose.Types.ObjectId(vendorId)
+      vendorId: new mongoose.Types.ObjectId(vendorId),
+      demoTag: null
     });
     if (!leave) return res.status(404).json({ success: false, message: 'Leave not found' });
     const { action, rejectionReason } = req.body;
@@ -433,8 +545,14 @@ const updateLeave = async (req, res) => {
     } else if (action === 'reject') {
       leave.status = 'rejected';
       leave.rejectionReason = rejectionReason || 'Rejected';
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid action' });
     }
     await leave.save();
+    await applyLeaveDecision(vendorId, leave, action);
+    if (action === 'reject' && leave.engineerId) {
+      await refreshEngineerAvailability(vendorId, leave.engineerId);
+    }
     res.status(200).json({ success: true, data: leave });
   } catch (error) {
     console.error('updateLeave:', error);
@@ -446,22 +564,27 @@ const getCertifications = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
     const { status, category, search, page = 1, limit = 20 } = req.query;
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = liveBase(vendorId);
     if (status) filter.verificationStatus = status;
-    if (category) filter.serviceCategoryCode = category;
+    if (category) filter.serviceCategoryCode = String(category).toUpperCase();
     if (search?.trim()) {
       const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ name: rx }, { engineerName: rx }, { certificateNumber: rx }];
     }
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
     const [data, total] = await Promise.all([
-      VendorWorkforceCertification.find(filter).sort({ expiryDate: 1 }).skip(skip).limit(parseInt(limit)).lean(),
+      VendorWorkforceCertification.find(filter).sort({ expiryDate: 1 }).skip(skip).limit(parseInt(limit, 10)).lean(),
       VendorWorkforceCertification.countDocuments(filter)
     ]);
     res.status(200).json({
       success: true,
       data,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, pages: Math.ceil(total / parseInt(limit)) || 1 }
+      pagination: {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        total,
+        pages: Math.ceil(total / parseInt(limit, 10)) || 1
+      }
     });
   } catch (error) {
     console.error('getCertifications:', error);
@@ -471,6 +594,7 @@ const getCertifications = async (req, res) => {
 
 module.exports = {
   getCounts,
+  syncWorkforce,
   getEngineers,
   updateEngineer,
   getTeams,

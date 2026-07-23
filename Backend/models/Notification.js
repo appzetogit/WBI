@@ -30,48 +30,10 @@ const notificationSchema = new mongoose.Schema({
     default: null,
     index: true
   },
-  // Notification Type
+  // Notification Type — open string so new vendor events don't fail validation
   type: {
     type: String,
     required: true,
-    enum: [
-      'booking_created',
-      'booking_request',      // New booking request to vendor
-      'booking_requested',    // New booking created confirmation to user
-      'booking_accepted',     // Vendor accepted booking
-      'booking_confirmed',
-      'booking_cancelled',
-      'booking_completed',
-      'booking_rejected',
-      'booking_rescheduled',
-      'job_accepted',
-      'job_rejected',
-      'job_cancelled',
-      'worker_assigned',
-      'worker_started',
-      'worker_completed',
-      'work_done',
-      'work_completed',       // Added for vendor self completion
-      'vendor_reached',
-      'journey_started',
-      'visit_verified',
-      'payment_received',
-      'payment_success',
-      'payment_failed',
-      'payment_refunded',
-      'review_submitted',
-      'vendor_approved',
-      'vendor_rejected',
-      'wallet_topup',
-      'payout_requested',
-      'payout_processed',
-      'scrap_listed',
-      'new_scrap_added',
-      'scrap_accepted',
-      'scrap_completed',
-      'vendor_withdrawal_request',
-      'general'
-    ],
     index: true
   },
   // Notification Content
@@ -92,7 +54,6 @@ const notificationSchema = new mongoose.Schema({
   },
   relatedType: {
     type: String,
-    enum: ['booking', 'payment', 'user', 'vendor', 'worker', 'service', 'scrap', 'withdrawal'],
     default: null
   },
   // Notification Status

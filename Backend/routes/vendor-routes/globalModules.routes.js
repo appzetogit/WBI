@@ -8,10 +8,21 @@ router.get('/counts', authenticate, ctrl.getGlobalCounts);
 router.get('/performance', authenticate, ctrl.getPerformance);
 
 router.get('/compliance', authenticate, ctrl.getCompliance);
+router.post('/compliance/sync', authenticate, ctrl.syncCompliance);
 router.patch('/compliance/:id', authenticate, ctrl.updateCompliance);
+router.post(
+  '/compliance/:id/upload',
+  authenticate,
+  require('../../middleware/uploadMiddleware').uploadGenericFile,
+  ctrl.uploadComplianceDocument
+);
 
 router.get('/notifications', authenticate, ctrl.getNotifications);
 router.patch('/notifications/:id', authenticate, ctrl.updateNotification);
+router.post('/notifications/bulk', authenticate, ctrl.bulkUpdateNotifications);
+router.post('/notifications/read-all', authenticate, ctrl.markAllNotificationsRead);
+router.get('/notification-preferences', authenticate, ctrl.getNotificationPreferences);
+router.patch('/notification-preferences', authenticate, ctrl.updateNotificationPreferences);
 
 router.get('/support/config', authenticate, ctrl.getSupportConfig);
 router.get('/support', authenticate, ctrl.getSupport);

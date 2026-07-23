@@ -491,8 +491,30 @@ const submitApplication = async (req, res) => {
     
     vendor.onboarding.status = 'SUBMITTED';
     vendor.onboarding.progressPercentage = 100;
+
+    // Strip empty unique optional fields before save (prevents E11000 on null indexes)
+    if (!vendor.inviteLinkToken) {
+      vendor.set('inviteLinkToken', undefined);
+      if (vendor._doc) delete vendor._doc.inviteLinkToken;
+    }
+    if (!vendor.uniqueCompanyCode) {
+      vendor.set('uniqueCompanyCode', undefined);
+      if (vendor._doc) delete vendor._doc.uniqueCompanyCode;
+    }
     
     await vendor.save();
+
+    const unsetFields = {};
+    if (!vendor.inviteLinkToken) {
+      unsetFields.inviteLinkToken = '';
+      unsetFields.inviteLinkExpiresAt = '';
+    }
+    if (!vendor.uniqueCompanyCode) {
+      unsetFields.uniqueCompanyCode = '';
+    }
+    if (vendor._id && Object.keys(unsetFields).length) {
+      await Vendor.updateOne({ _id: vendor._id }, { $unset: unsetFields }).catch(() => null);
+    }
     
     // Initialize model approvals to PENDING
     if (vendor.vendorModels && vendor.vendorModels.length > 0) {
@@ -507,7 +529,40 @@ const submitApplication = async (req, res) => {
     
     res.status(200).json({ success: true, message: 'Application submitted successfully', vendorId: vendor._id });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error('[submitApplication]', error);
+    if (error?.code === 11000 || /E11000|dup key/i.test(String(error?.message || ''))) {
+      const key = error?.keyPattern ? Object.keys(error.keyPattern).join(', ') : 'unique field';
+      // Self-heal index once, then ask client to retry
+      try {
+        const { ensureVendorSparseUniqueIndexes } = require('../../utils/ensureVendorSparseUniqueIndexes');
+        await ensureVendorSparseUniqueIndexes(require('mongoose').connection);
+      } catch (_) { /* non-blocking */ }
+
+      if (/inviteLinkToken|uniqueCompanyCode/i.test(String(error.message))) {
+        return res.status(409).json({
+          success: false,
+          message: 'Registration conflict on invite/company code indexes was repaired. Please submit again.',
+          code: 'INDEX_REPAIRED_RETRY'
+        });
+      }
+      if (/email/i.test(String(error.message))) {
+        return res.status(409).json({
+          success: false,
+          message: 'An account with this email already exists. Please login or use a different email.'
+        });
+      }
+      if (/phone/i.test(String(error.message))) {
+        return res.status(409).json({
+          success: false,
+          message: 'An account with this phone number already exists. Please login or use a different number.'
+        });
+      }
+      return res.status(409).json({
+        success: false,
+        message: `A vendor with this ${key} already exists. Please login or use different details.`
+      });
+    }
+    res.status(500).json({ success: false, message: error.message || 'Failed to submit application' });
   }
 };
 

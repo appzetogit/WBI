@@ -1,5 +1,6 @@
 const Vendor = require('../models/Vendor');
 const { createNotification } = require('../controllers/notificationControllers/notificationController');
+const { publishVendorNotification } = require('./vendorNotificationCenter.service');
 const { sendNotificationToVendor } = require('./firebaseAdmin');
 
 /** @typedef {'leads'|'jobs'|'payments'|'account'} VendorNotifyCategory */
@@ -8,6 +9,7 @@ const TYPE_CATEGORY = {
   client_request: 'leads',
   opportunity_new: 'leads',
   new_booking_request: 'leads',
+  booking_request: 'leads',
   ops_engineer_assigned: 'jobs',
   ops_job_accepted: 'jobs',
   ops_job_rejected: 'jobs',
@@ -17,6 +19,10 @@ const TYPE_CATEGORY = {
   payment_received: 'payments',
   payment_success: 'payments',
   payout_requested: 'payments',
+  invoice_generated: 'payments',
+  withdrawal_paid: 'payments',
+  withdrawal_approved: 'payments',
+  withdrawal_rejected: 'payments',
   general: 'account'
 };
 
@@ -42,7 +48,7 @@ function categoryAllowed(prefs, category) {
 }
 
 /**
- * In-app + vendor socket rooms + FCM (respects vendor settings).
+ * In-app Notification Center + classic Notification + sockets + FCM.
  */
 async function notifyVendor(
   vendorId,
@@ -56,7 +62,9 @@ async function notifyVendor(
     priority = null,
     category = null,
     pushType = null,
-    skipInApp = false
+    skipInApp = false,
+    module: moduleHint = null,
+    actionUrl = null
   }
 ) {
   if (!vendorId) return null;
@@ -78,10 +86,32 @@ async function notifyVendor(
       message,
       relatedId,
       relatedType,
-      data: { ...data, notifyCategory: cat },
+      data: {
+        ...data,
+        notifyCategory: cat,
+        module: moduleHint || data.module,
+        actionUrl: actionUrl || data.actionUrl || data.link
+      },
       skipPush: true,
       priority,
       pushData: { type: pushType || type, notifyCategory: cat }
+    });
+    // createNotification already bridges to Notification Center
+  } else {
+    // Center-only path
+    await publishVendorNotification({
+      vendorId,
+      type,
+      title,
+      message,
+      relatedId,
+      relatedType,
+      metadata: { ...data, notifyCategory: cat },
+      priority: priority || 'normal',
+      module: moduleHint,
+      actionUrl,
+      category: cat,
+      skipPush: true
     });
   }
 

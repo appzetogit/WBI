@@ -20,23 +20,31 @@ const getVendorCategoryCodes = async (vendorId) => {
 
 const applyCategoryFilter = async (filter, vendorId, category) => {
   if (category) {
-    filter.serviceCategoryCode = category;
+    filter.serviceCategoryCode = String(category).toUpperCase();
     return;
   }
   const codes = await getVendorCategoryCodes(vendorId);
   if (codes.length) {
-    filter.$or = [
-      { serviceCategoryCode: { $in: codes } },
-      { serviceCategoryCode: { $exists: true } }
-    ];
+    filter.serviceCategoryCode = { $in: codes };
   }
 };
 
 const rx = (s) => new RegExp(String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 
+const ensureQualitySynced = async (vendorId) => {
+  try {
+    const { syncVendorQuality } = require('../../services/vendorQualitySync.service');
+    await syncVendorQuality(vendorId);
+  } catch (err) {
+    console.warn('[quality sync]', err.message);
+  }
+};
+
 const getCounts = async (req, res) => {
   try {
     const vid = new mongoose.Types.ObjectId(getVendorId(req));
+    await ensureQualitySynced(vid);
+    const base = { vendorId: vid, demoTag: null };
     const [
       proofPending,
       qaPending,
@@ -46,13 +54,13 @@ const getCounts = async (req, res) => {
       changePending,
       openDamage
     ] = await Promise.all([
-      VendorQualityProof.countDocuments({ vendorId: vid, status: { $in: ['pending_review', 'under_review', 'resubmit_required'] } }),
-      VendorQualityReview.countDocuments({ vendorId: vid, qaStatus: 'pending' }),
-      VendorQualityApproval.countDocuments({ vendorId: vid, approvalType: 'client', status: { $in: ['pending', 'waiting_changes'] } }),
-      VendorQualityApproval.countDocuments({ vendorId: vid, approvalType: 'b2b', status: { $in: ['pending', 'waiting_changes'] } }),
-      VendorQualityIssue.countDocuments({ vendorId: vid, status: { $in: ['open', 'in_progress', 'escalated'] } }),
-      VendorQualityChangeRequest.countDocuments({ vendorId: vid, status: { $in: ['requested', 'under_approval', 'implementing'] } }),
-      VendorQualityDamage.countDocuments({ vendorId: vid, status: { $ne: 'closed' } })
+      VendorQualityProof.countDocuments({ ...base, status: { $in: ['pending_review', 'under_review', 'resubmit_required'] } }),
+      VendorQualityReview.countDocuments({ ...base, qaStatus: 'pending' }),
+      VendorQualityApproval.countDocuments({ ...base, approvalType: 'client', status: { $in: ['pending', 'waiting_changes'] } }),
+      VendorQualityApproval.countDocuments({ ...base, approvalType: 'b2b', status: { $in: ['pending', 'waiting_changes'] } }),
+      VendorQualityIssue.countDocuments({ ...base, status: { $in: ['open', 'in_progress', 'escalated'] } }),
+      VendorQualityChangeRequest.countDocuments({ ...base, status: { $in: ['requested', 'under_approval', 'implementing'] } }),
+      VendorQualityDamage.countDocuments({ ...base, status: { $ne: 'closed' } })
     ]);
     res.status(200).json({
       success: true,
@@ -75,9 +83,10 @@ const meta = (page, limit, total) => ({ page, limit, total, pages: Math.ceil(tot
 const getProofs = async (req, res) => {
   try {
     const vendorId = getVendorId(req);
+    await ensureQualitySynced(vendorId);
     const { status, category, search } = req.query;
     const { page, limit, skip } = paginate(req);
-    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+    const filter = { vendorId: new mongoose.Types.ObjectId(vendorId), demoTag: null };
     if (status) filter.status = status;
     await applyCategoryFilter(filter, vendorId, category);
     if (search?.trim()) {
@@ -104,8 +113,19 @@ const updateProof = async (req, res) => {
     else if (action === 'reject') doc.status = 'rejected';
     else if (action === 'resubmit') doc.status = 'resubmit_required';
     else if (action === 'review') doc.status = 'under_review';
+    else return res.status(400).json({ success: false, message: 'Invalid action' });
     if (notes !== undefined) doc.internalNotes = notes;
     await doc.save();
+
+    const { notifyQualityAction } = require('../../services/vendorQualitySync.service');
+    await notifyQualityAction(vendorId, {
+      type: action === 'approve' ? 'qa_approved' : action === 'reject' ? 'qa_rejected' : 'approval_pending',
+      title: `Proof ${action}`,
+      message: `${doc.proofCode || 'Proof'} for ${doc.projectName || 'project'} is now ${doc.status}`,
+      relatedId: doc._id,
+      priority: action === 'reject' ? 'high' : 'normal'
+    });
+
     res.status(200).json({ success: true, data: doc });
   } catch (error) {
     console.error('updateProof:', error);
@@ -162,6 +182,16 @@ const updateReview = async (req, res) => {
     else if (action === 'complete_rework') { doc.reworkStatus = 'completed'; }
     else if (action === 'schedule_revisit') { doc.revisitDate = new Date(Date.now() + 2 * 86400000); }
     await doc.save();
+    try {
+      const { notifyQualityAction } = require('../../services/vendorQualitySync.service');
+      await notifyQualityAction(vendorId, {
+        type: action === 'fail' ? 'quality_failed' : action === 'pass' ? 'qa_approved' : 'rework',
+        title: `QA ${action}`,
+        message: `${doc.reviewCode || 'Review'} is now ${doc.qaStatus} (rework: ${doc.reworkStatus})`,
+        relatedId: doc._id,
+        priority: action === 'fail' ? 'high' : 'normal'
+      });
+    } catch (_) { /* ignore */ }
     res.status(200).json({ success: true, data: doc });
   } catch (error) {
     console.error('updateReview:', error);

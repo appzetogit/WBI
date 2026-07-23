@@ -568,6 +568,7 @@ module.exports = {
   sendVendorEngineerJobUpdateEmail,
   sendVendorPartnerActivationEmail,
   sendServiceRequestPaymentEmail,
+  sendMailSafe,
   getAppUrl
 };
 

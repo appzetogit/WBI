@@ -50,6 +50,16 @@ const connectDB = async () => {
 
       console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
       retryCount = 0; // Reset on success
+
+      // Fix vendor signup E11000 on inviteLinkToken:null (non-blocking)
+      setImmediate(async () => {
+        try {
+          const { ensureVendorSparseUniqueIndexes } = require('../utils/ensureVendorSparseUniqueIndexes');
+          await ensureVendorSparseUniqueIndexes(conn.connection);
+        } catch (idxErr) {
+          console.warn('[DB] Vendor index repair skipped:', idxErr.message);
+        }
+      });
     } catch (error) {
       retryCount++;
 

@@ -378,7 +378,7 @@ exports.getDashboardKpis = async (req, res) => {
     const walletBalance = wallet?.availableBalance ?? wallet?.balance ?? payload.vendorProfile.walletBalance ?? 0;
     const slaAdherence = totalProjects > 0
       ? Math.min(100, Math.round((completedProjects / Math.max(totalProjects, 1)) * 100))
-      : 94;
+      : 0;
 
     const extraResults = await Promise.allSettled(
       (payload.extraKPIs || []).map(async (kpi) => ({

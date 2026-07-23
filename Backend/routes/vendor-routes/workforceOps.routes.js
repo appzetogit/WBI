@@ -3,6 +3,7 @@ const router = express.Router();
 const { authenticate } = require('../../middleware/authMiddleware');
 const {
   getCounts,
+  syncWorkforce,
   getEngineers,
   updateEngineer,
   getTeams,
@@ -18,6 +19,7 @@ const {
 } = require('../../controllers/vendorControllers/workforceOpsController');
 
 router.get('/counts', authenticate, getCounts);
+router.post('/sync', authenticate, syncWorkforce);
 
 router.get('/engineers', authenticate, getEngineers);
 router.patch('/engineers/:id', authenticate, updateEngineer);

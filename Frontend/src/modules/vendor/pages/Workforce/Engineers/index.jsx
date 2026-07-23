@@ -42,7 +42,7 @@ const Engineers = () => {
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{[1, 2, 3, 4].map((i) => <div key={i} className="h-56 bg-gray-100 rounded-xl animate-pulse" />)}</div>
       ) : data.length === 0 ? (
-        <EmptyState icon={Users} title="No engineers" description="Add engineers or seed demo data. Roles adapt to your approved services." />
+        <EmptyState icon={Users} title="No engineers" description="Approve linked company engineers, then use Sync Linked to pull them into Workforce. Capacity and availability update from assignments and leave." />
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

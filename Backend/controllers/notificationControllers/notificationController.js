@@ -69,6 +69,23 @@ const createNotification = async ({
       data
     });
 
+    // Bridge vendor notifications into the Notification Center (real-time UI source)
+    if (vendorId) {
+      try {
+        const { bridgeFromClassicNotification } = require('../../services/vendorNotificationCenter.service');
+        setImmediate(() => {
+          bridgeFromClassicNotification(notification, {
+            priority,
+            module: data?.module || null,
+            actionUrl: data?.actionUrl || data?.link || pushData?.link || null,
+            category: data?.notifyCategory || null
+          }).catch((err) => console.warn('[Notification] center bridge failed:', err.message));
+        });
+      } catch (bridgeErr) {
+        console.warn('[Notification] center bridge unavailable:', bridgeErr.message);
+      }
+    }
+
     // Check Socket Connectivity to prevent Duplicate Notifications (Push + Socket)
     let io = null;
     let room = null;

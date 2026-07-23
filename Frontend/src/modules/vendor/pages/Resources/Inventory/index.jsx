@@ -8,7 +8,7 @@ import Pagination from '../../BusinessIntake/components/Pagination';
 const PAGE = 10;
 
 const Inventory = () => {
-  const { search, filters, refreshKey } = useResourcesOps();
+  const { search, filters, refreshKey, triggerRefresh } = useResourcesOps();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -32,8 +32,14 @@ const Inventory = () => {
   useEffect(() => { load(); }, [load, refreshKey]);
 
   const act = async (id, action) => {
-    try { await updateInventory(id, { action }); load(); }
-    catch (e) { alert(e.response?.data?.message || 'Failed'); }
+    try {
+      await updateInventory(id, { action });
+      load();
+      triggerRefresh();
+      window.dispatchEvent(new Event('vendorOpsUpdated'));
+    } catch (e) {
+      alert(e.response?.data?.message || 'Failed');
+    }
   };
 
   if (loading) return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{[1, 2, 3, 4].map((i) => <div key={i} className="h-40 bg-gray-100 rounded-xl animate-pulse" />)}</div>;
