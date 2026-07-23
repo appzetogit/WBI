@@ -32,8 +32,7 @@ const b2bEnterpriseOnboardingSchema = new mongoose.Schema(
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'B2BCompany',
-      default: null,
-      index: true
+      default: null
     },
     draftToken: { type: String, sparse: true, unique: true, index: true },
     currentStep: { type: Number, default: 1, min: 1, max: 16 },

@@ -59,17 +59,19 @@ const createNotification = async ({
       return null;
     }
 
+    const sanitizeId = (id) => (id === '' ? null : id);
+    
     const notification = await Notification.create({
-      userId,
-      vendorId,
-      workerId,
-      adminId,
-      b2bUserId,
-      b2bCompanyId,
+      userId: sanitizeId(userId),
+      vendorId: sanitizeId(vendorId),
+      workerId: sanitizeId(workerId),
+      adminId: sanitizeId(adminId),
+      b2bUserId: sanitizeId(b2bUserId),
+      b2bCompanyId: sanitizeId(b2bCompanyId),
       type,
       title,
       message,
-      relatedId,
+      relatedId: sanitizeId(relatedId),
       relatedType,
       data
     });
@@ -181,7 +183,10 @@ const createNotification = async ({
 
     return notification;
   } catch (error) {
-    console.error('Create notification error:', error);
+    console.error('Create notification error:', error.message);
+    if (error.errors) {
+      console.error('Validation details:', Object.keys(error.errors).map(k => `${k}: ${error.errors[k].message}`).join(', '));
+    }
     return null;
   }
 };
