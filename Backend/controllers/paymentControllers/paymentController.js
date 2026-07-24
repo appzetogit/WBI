@@ -559,6 +559,7 @@ const processRefund = async (req, res) => {
 
     const { bookingId } = req.body;
     const { amount } = req.body; // Optional: partial refund
+    const userId = req.user?.id || req.userId;
 
     // Get booking
     const booking = await Booking.findById(bookingId);
@@ -567,6 +568,14 @@ const processRefund = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Booking not found'
+      });
+    }
+
+    // Ownership: only the booking owner may request a refund via user API
+    if (!userId || booking.userId?.toString() !== String(userId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized. You can only refund your own bookings.'
       });
     }
 

@@ -1,6 +1,10 @@
 /**
  * Seed test accounts for 6261745842 (+ worker on 6261745843 — eng/worker cannot share one mobile).
- * OTP bypass: 123456, no SMS (see utils/otpBypass.util.js).
+ * OTP bypass requires non-production AND:
+ *   ALLOW_OTP_BYPASS=true
+ *   OTP_BYPASS_PHONES=6261745842,6261745843
+ *   OTP_BYPASS_CODE=123456 (optional; default 123456)
+ * Bypass is always disabled when NODE_ENV=production.
  *
  * Usage: node scripts/seedBypassTestAccounts.js
  */

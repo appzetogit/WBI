@@ -98,7 +98,7 @@ const RecentBookings = () => {
         </h2>
         <button 
           className="text-[14px] font-semibold text-[#10AFA5] hover:opacity-80 transition-opacity flex items-center gap-0.5 cursor-pointer"
-          onClick={() => navigate('/user/bookings')}
+          onClick={() => navigate('/user/my-bookings')}
         >
           See All <span className="text-[12px] font-bold">&gt;</span>
         </button>

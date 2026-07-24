@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import AnimatedPage from '../../../components/common/AnimatedPage';
 import BottomNav from '../components/layout/BottomNav';
@@ -196,6 +196,7 @@ const UserRoutes = () => {
               <Route path="/cart" element={<AnimatedPage><ProtectedRoute userType="user"><Cart /></ProtectedRoute></AnimatedPage>} />
               <Route path="/checkout" element={<AnimatedPage><ProtectedRoute userType="user"><Checkout /></ProtectedRoute></AnimatedPage>} />
               <Route path="/my-bookings" element={<AnimatedPage><ProtectedRoute userType="user"><MyBookings /></ProtectedRoute></AnimatedPage>} />
+              <Route path="/bookings" element={<Navigate to="/user/my-bookings" replace />} />
               <Route path="/calendar" element={<AnimatedPage><ProtectedRoute userType="user"><Calendar /></ProtectedRoute></AnimatedPage>} />
               <Route path="/inbox" element={<AnimatedPage><ProtectedRoute userType="user"><Inbox /></ProtectedRoute></AnimatedPage>} />
               <Route path="/one-time-review" element={<AnimatedPage><ProtectedRoute userType="user"><ReviewBooking /></ProtectedRoute></AnimatedPage>} />

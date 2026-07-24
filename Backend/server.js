@@ -210,46 +210,27 @@ if (process.env.NODE_ENV === 'development') {
 // Rate limiting
 app.use('/api', rateLimiter);
 
-// Health check route (ALB / ops — always 200 for liveness; checks are informational)
-app.get('/health', (req, res) => {
-  const mongoose = require('mongoose');
-  const { isRedisConnected } = require('./services/redisService');
-  const {
-    TASKY_DLT_TEMPLATE_ID,
-    REGISTRATION_SMS_TEMPLATE_VERSION
-  } = require('./services/smsService');
-  const dbOk = mongoose.connection.readyState === 1;
-  const payload = {
-    success: true,
-    message: 'WBI API is running',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
-    checks: {
-      mongo: dbOk ? 'ok' : 'degraded',
-      redis: process.env.REDIS_ENABLED === 'true'
-        ? (isRedisConnected() ? 'ok' : 'degraded')
-        : 'disabled'
-    }
-  };
-  if (process.env.NODE_ENV !== 'production') {
-    const smsSender =
-      process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
-      process.env.SMS_INDIA_HUB_SENDER_ID ||
-      'WBINFS';
-    payload.smsRegistrationOtp = {
-      templateVersion: REGISTRATION_SMS_TEMPLATE_VERSION,
-      dltTemplateId:
-        process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || TASKY_DLT_TEMPLATE_ID,
-      senderId: smsSender,
-      apiKeyConfigured: Boolean(process.env.SMS_INDIA_HUB_API_KEY)
-    };
-    payload.kycAadhaarOtp = {
-      serverSessionCache: require('./constants/kycAadhaarBuild').KYC_AADHAAR_BUILD,
-      cgpeApiConfigured: Boolean(process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY)
-    };
-  }
-  res.status(200).json(payload);
+// API version header + /api/v1 alias (gateway-ready, backward compatible)
+app.use('/api', (req, res, next) => {
+  res.setHeader('X-API-Version', process.env.API_VERSION || '1');
+  next();
 });
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/v1/') || req.url === '/api/v1') {
+    req.url = req.url.replace(/^\/api\/v1/, '/api');
+  }
+  next();
+});
+
+const { liveHandler, readyHandler, healthHandler } = require('./infrastructure/health');
+
+// Ops probes (K8s / ALB / Prometheus)
+app.get('/live', liveHandler);
+app.get('/ready', readyHandler);
+app.get('/health', healthHandler);
+
+// Legacy health block removed — see infrastructure/health.js
+
 
 // Quick Redis Test Route — disabled in production (no public probe surface)
 if (process.env.NODE_ENV !== 'production') {
@@ -302,6 +283,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 // Public / Global routes
 app.use('/api/kyc', require('./routes/kyc.routes'));
+app.use('/api/registration-drafts', require('./routes/registrationDraft.routes'));
 app.use('/api', require('./routes/public-routes/categoriesQuery.routes'));
 app.use('/api/service-categories', require('./routes/public-routes/serviceCategory.routes'));
 app.use('/api/public', require('./routes/public-routes/serviceConfigPublic.routes'));
@@ -732,6 +714,18 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
     server.close(() => {
       process.exit(1);
     });
+  });
+
+  const { registerGracefulShutdown } = require('./infrastructure/gracefulShutdown');
+  registerGracefulShutdown({
+    server,
+    getRedisClose: async () => {
+      const { getRedis, isRedisConnected } = require('./services/redisService');
+      const client = getRedis();
+      if (client && isRedisConnected()) {
+        await client.quit();
+      }
+    }
   });
 } else {
   // For Vercel, create HTTP server for Socket.io

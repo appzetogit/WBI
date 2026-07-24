@@ -189,19 +189,48 @@ const initializeSocket = (server) => {
 
     // Live Tracking Events
     socket.on('join_tracking', async (bookingId) => {
-      socket.join(`booking_${bookingId}`);
-      console.log(`User ${socket.userId} joined tracking for booking_${bookingId}`);
-
-      // Disconnect Recovery: Send last known location from Redis
       try {
-        const { getLiveLocation } = require('../services/redisService');
-        const cachedLocation = await getLiveLocation(bookingId);
-        if (cachedLocation) {
-          socket.emit('live_location_update', cachedLocation);
-          console.log(`[Socket] Sent cached location to user for booking ${bookingId}`);
+        if (!bookingId || !socket.userId) return;
+
+        const Booking = require('../models/Booking');
+        const booking = await Booking.findById(bookingId)
+          .select('userId workerId vendorId')
+          .lean();
+
+        if (!booking) {
+          socket.emit('tracking_error', { message: 'Booking not found' });
+          return;
         }
-      } catch (error) {
-        console.error('[Socket] Error fetching cached location:', error);
+
+        const uid = String(socket.userId);
+        const isParticipant =
+          booking.userId?.toString() === uid ||
+          booking.workerId?.toString() === uid ||
+          booking.vendorId?.toString() === uid;
+
+        if (!isParticipant) {
+          console.warn(`[Socket] join_tracking denied user=${uid} booking=${bookingId}`);
+          socket.emit('tracking_error', { message: 'Unauthorized' });
+          return;
+        }
+
+        socket.join(`booking_${bookingId}`);
+        console.log(`User ${socket.userId} joined tracking for booking_${bookingId}`);
+
+        // Disconnect Recovery: Send last known location from Redis
+        try {
+          const { getLiveLocation } = require('../services/redisService');
+          const cachedLocation = await getLiveLocation(bookingId);
+          if (cachedLocation) {
+            socket.emit('live_location_update', cachedLocation);
+            console.log(`[Socket] Sent cached location to user for booking ${bookingId}`);
+          }
+        } catch (error) {
+          console.error('[Socket] Error fetching cached location:', error);
+        }
+      } catch (err) {
+        console.error('[Socket] join_tracking error:', err.message);
+        socket.emit('tracking_error', { message: 'Unable to join tracking' });
       }
     });
 

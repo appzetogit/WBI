@@ -12,6 +12,7 @@ import { validators } from '../../../utils/validationUtils';
 import { uploadSelfieToCloudinary, uploadToCloudinary } from '../../../utils/cloudinaryUpload';
 import optimizeCloudinaryUrl from '../../../utils/cloudinaryOptimize';
 import { loadRazorpay } from '../../../utils/loadRazorpay';
+import useRegistrationDraft from '../../../hooks/useRegistrationDraft';
 
 /** Handle 429 Too Many Requests gracefully */
 const handleApiError = (err, fallbackMsg) => {
@@ -49,6 +50,15 @@ export default function EngineerSignup() {
   /** Single-flight guard — prevents any 2 API calls running simultaneously */
   const isBusy = useRef(false);
 
+  const {
+    draftKey,
+    entityId: draftEntityId,
+    ready: draftReady,
+    restored: draftRestored,
+    scheduleSave,
+    clearDraft
+  } = useRegistrationDraft('engineer');
+
   // OTP Verification State
   const [otpSent, setOtpSent] = useState(false);
   const [otp, setOtp] = useState('');
@@ -76,7 +86,8 @@ export default function EngineerSignup() {
     uploadedDocuments: [],
     tshirtSize: '', toolsAvailable: [], otherTools: '',
     selfieUrl: null, introVideoUrl: null,
-    aadhaarNumber: '', panNumber: '', panFullName: '', panDob: ''
+    aadhaarNumber: '', panNumber: '', panFullName: '', panDob: '',
+    verifications: {}
   });
 
   const [vendorCodeValid, setVendorCodeValid] = useState(false);
@@ -101,45 +112,41 @@ export default function EngineerSignup() {
     localStorage.removeItem('engineerRefreshToken');
     localStorage.removeItem('engineerData');
 
-    const navigationEntries = window.performance.getEntriesByType('navigation');
-    const isReload = navigationEntries.length > 0 && navigationEntries[0].type === 'reload';
-
-    if (!isReload) {
-      sessionStorage.removeItem('engineerSignupDraft');
-    } else {
-      const draft = sessionStorage.getItem('engineerSignupDraft');
-      if (draft) {
-        try {
-          const parsed = JSON.parse(draft);
-          if (parsed.formData) {
-            setFormData(prev => ({ ...prev, ...parsed.formData }));
-          }
-          if (parsed.currentStep) setCurrentStep(parsed.currentStep);
-          if (parsed.isPhoneVerified) setIsPhoneVerified(parsed.isPhoneVerified);
-          if (parsed.otpSent) setOtpSent(parsed.otpSent);
-          if (parsed.isAadhaarVerified) setIsAadhaarVerified(parsed.isAadhaarVerified);
-          if (parsed.isPanVerified) setIsPanVerified(parsed.isPanVerified);
-          if (parsed.isPaymentSuccess) setIsPaymentSuccess(parsed.isPaymentSuccess);
-        } catch(e) {}
-      }
+    // Always try session cache (refresh + soft navigation) — never wipe on soft nav
+    const draft = sessionStorage.getItem('engineerSignupDraft');
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.formData) {
+          setFormData((prev) => ({ ...prev, ...parsed.formData }));
+        }
+        if (parsed.currentStep) setCurrentStep(parsed.currentStep);
+        if (parsed.isPhoneVerified) setIsPhoneVerified(parsed.isPhoneVerified);
+        if (parsed.otpSent) setOtpSent(parsed.otpSent);
+        if (parsed.isAadhaarVerified) setIsAadhaarVerified(parsed.isAadhaarVerified);
+        if (parsed.isPanVerified) setIsPanVerified(parsed.isPanVerified);
+        if (parsed.isPaymentSuccess) setIsPaymentSuccess(parsed.isPaymentSuccess);
+      } catch (e) { /* ignore */ }
     }
-    
+
     const loadConfig = async () => {
       try {
         const response = await engineerAuthService.getRegistrationConfig();
         if (response.success) {
           setConfig(response.config);
-          
+
           if (response.config.documents) {
-             const docs = response.config.documents.map(d => ({
-               key: d.key,
-               url: '',
-               backUrl: ''
-             }));
-             setFormData(p => ({ ...p, uploadedDocuments: docs }));
+            const docs = response.config.documents.map((d) => ({
+              key: d.key,
+              url: '',
+              backUrl: ''
+            }));
+            setFormData((p) => ({
+              ...p,
+              uploadedDocuments: p.uploadedDocuments?.length ? p.uploadedDocuments : docs
+            }));
           }
 
-          // Check for DigiLocker return (CGPE: code + state + codeVerifier; recordId from session/URL)
           const urlParams = new URLSearchParams(window.location.search);
           const code = urlParams.get('code');
           const state = urlParams.get('state');
@@ -168,7 +175,31 @@ export default function EngineerSignup() {
     loadConfig();
   }, []);
 
-  // Continuous auto-save to draft
+  // Restore from server registration draft once ready
+  useEffect(() => {
+    if (!draftReady || !draftRestored) return;
+    const p = draftRestored.payload || {};
+    setFormData((prev) => ({
+      ...prev,
+      ...p,
+      tempEntityId: draftRestored.entityId || draftEntityId || prev.tempEntityId,
+      verifications: p.verifications || prev.verifications || {}
+    }));
+    if (draftRestored.currentStep != null) setCurrentStep(Number(draftRestored.currentStep) || draftRestored.currentStep);
+    if (p.isPhoneVerified) setIsPhoneVerified(true);
+    if (p.otpSent) setOtpSent(true);
+    if (p.isPaymentSuccess) setIsPaymentSuccess(true);
+  }, [draftReady, draftRestored, draftEntityId]);
+
+  // Keep tempEntityId aligned with draft entity
+  useEffect(() => {
+    if (!draftEntityId) return;
+    setFormData((prev) =>
+      prev.tempEntityId === draftEntityId ? prev : { ...prev, tempEntityId: draftEntityId }
+    );
+  }, [draftEntityId]);
+
+  // Continuous auto-save to session + server draft
   useEffect(() => {
     sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
       formData,
@@ -179,7 +210,20 @@ export default function EngineerSignup() {
       isPanVerified,
       isPaymentSuccess
     }));
-  }, [formData, currentStep, isPhoneVerified, otpSent, isAadhaarVerified, isPanVerified, isPaymentSuccess]);
+    scheduleSave({
+      formData: {
+        ...formData,
+        isPhoneVerified,
+        otpSent,
+        isAadhaarVerified,
+        isPanVerified,
+        isPaymentSuccess
+      },
+      currentStep,
+      phone: formData.phone || formData.mobile,
+      email: formData.email
+    });
+  }, [formData, currentStep, isPhoneVerified, otpSent, isAadhaarVerified, isPanVerified, isPaymentSuccess, scheduleSave]);
 
   const completeDigiLockerVerification = async (payload, stepStr) => {
     setVerifyingAadhaar(true);
@@ -853,6 +897,7 @@ export default function EngineerSignup() {
       const response = await engineerAuthService.register(payload);
       if (response.success) {
         sessionStorage.removeItem('engineerSignupDraft');
+        await clearDraft();
         toast.success(
           <div className="flex flex-col">
             <span className="font-bold">Welcome Onboard!</span>
@@ -1133,7 +1178,9 @@ export default function EngineerSignup() {
                   role="engineer" 
                   mobileNumber={formData.phone || formData.mobile}
                   entityId={formData.tempEntityId}
+                  draftId={draftKey}
                   redirectUrl={`${window.location.origin}${window.location.pathname}?step=${additionalDetailsStep}`}
+                  initialVerifications={formData.verifications || {}}
                   onBeforeDigiLockerInitiate={() => {
                     sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
                       formData,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { FiArrowLeft, FiShoppingCart, FiTrash2, FiMinus, FiPlus, FiPhone, FiHome, FiClock, FiEdit2, FiCheckCircle, FiInfo } from 'react-icons/fi';
@@ -57,6 +57,8 @@ const Checkout = () => {
   const [savedPayMethods, setSavedPayMethods] = useState([]);
   const [payConfig, setPayConfig] = useState(null);
   const [selectedSavedMethodId, setSelectedSavedMethodId] = useState(null);
+  const [paymentInFlight, setPaymentInFlight] = useState(false);
+  const paymentGuard = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(null);
@@ -700,6 +702,9 @@ const Checkout = () => {
 
   // Proceed to payment after vendor acceptance
   const handleOnlinePayment = async () => {
+    if (paymentGuard.current) return;
+    paymentGuard.current = true;
+    setPaymentInFlight(true);
     try {
       if (!acceptedVendor || !bookingRequest) {
         toast.error('No vendor selected or booking not created');
@@ -798,10 +803,16 @@ const Checkout = () => {
     } catch (error) {
       toast.dismiss();
       toast.error('Failed to process payment');
+    } finally {
+      paymentGuard.current = false;
+      setPaymentInFlight(false);
     }
   };
 
   const handlePayAtHome = async () => {
+    if (paymentGuard.current) return;
+    paymentGuard.current = true;
+    setPaymentInFlight(true);
     try {
       if (!bookingRequest) return;
       toast.loading('Confirming booking...');
@@ -830,10 +841,14 @@ const Checkout = () => {
     } catch (error) {
       toast.dismiss();
       toast.error('Failed to process request');
+    } finally {
+      paymentGuard.current = false;
+      setPaymentInFlight(false);
     }
   };
 
   const handlePayment = async () => {
+    if (paymentGuard.current) return;
     if (totalAmount === 0) {
       // Free booking covered by plan
       toast.success('Booking confirmed!');
@@ -1620,7 +1635,7 @@ const Checkout = () => {
               (houseNumber || addressDetails) ?
                 (currentStep === 'payment' ? handlePayment : handleSearchVendors) :
                 handleProceed}
-            disabled={searchingVendors}
+            disabled={searchingVendors || paymentInFlight}
             className="w-full text-white py-3 rounded-lg text-base font-semibold transition-colors disabled:opacity-50 shadow-lg shadow-teal-500/30"
             style={{ backgroundColor: themeColors.button }}
           >

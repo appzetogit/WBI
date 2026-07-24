@@ -7,6 +7,7 @@ const kycController = require('../controllers/kycController');
 
 // 1. Get document rules
 router.get('/document-rules', kycController.getDocumentRules);
+router.get('/status', kycController.getVerificationStatus);
 
 // 2. DigiLocker flow
 router.post('/digilocker/initiate', kycController.initiateDigiLocker);

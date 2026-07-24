@@ -1,6 +1,8 @@
 const Cart = require('../../models/Cart');
 const Service = require('../../models/UserService');
 const { validationResult } = require('express-validator');
+const { resolveLineUnitPrice, lineTotal } = require('../../utils/cartPricing.util');
+
 
 /**
  * Get user's cart
@@ -92,25 +94,29 @@ const addToCart = async (req, res) => {
       item => item.title === title && (!serviceId || item.serviceId?.toString() === serviceId)
     );
 
+    const qtyAdd = Math.max(1, parseInt(serviceCount, 10) || 1);
+    const trustedUnit = resolveLineUnitPrice({ service, card, clientUnitPrice: unitPrice, clientPrice: price });
+
+    let savedItem;
     if (existingItemIndex !== -1) {
-      // Update quantity if item exists
       const existingItem = cart.items[existingItemIndex];
-      const newCount = (existingItem.serviceCount || 1) + (serviceCount || 1);
-      const newPrice = existingItem.unitPrice * newCount;
+      const unit = existingItem.unitPrice ?? trustedUnit;
+      const newCount = (existingItem.serviceCount || 1) + qtyAdd;
 
       cart.items[existingItemIndex].serviceCount = newCount;
-      cart.items[existingItemIndex].price = newPrice;
+      cart.items[existingItemIndex].unitPrice = unit;
+      cart.items[existingItemIndex].price = lineTotal(unit, newCount);
+      savedItem = cart.items[existingItemIndex];
     } else {
-      // Add new item
       const newItem = {
         title,
         description: description || '',
         icon: icon || '',
         category,
-        price: price || unitPrice || 0,
+        unitPrice: trustedUnit,
+        price: lineTotal(trustedUnit, qtyAdd),
         originalPrice: originalPrice || null,
-        unitPrice: unitPrice || price || 0,
-        serviceCount: serviceCount || 1,
+        serviceCount: qtyAdd,
         rating: rating || '4.8',
         reviews: reviews || '10k+',
         vendorId: vendorId || null,
@@ -119,21 +125,20 @@ const addToCart = async (req, res) => {
         card: card || null
       };
 
-      // Only add serviceId and categoryId if they are provided
       if (serviceId) newItem.serviceId = serviceId;
       if (categoryId) newItem.categoryId = categoryId;
 
-      console.log(`[AddToCart] Adding new item: ${title}`);
       cart.items.push(newItem);
+      savedItem = newItem;
     }
 
     await cart.save();
-    console.log(`[AddToCart] Cart saved. Total items: ${cart.items.length}`);
 
     res.status(200).json({
       success: true,
       message: 'Item added to cart',
-      data: cart.items
+      data: savedItem,
+      cartItems: cart.items
     });
   } catch (error) {
     console.error('Add to cart error:', error);

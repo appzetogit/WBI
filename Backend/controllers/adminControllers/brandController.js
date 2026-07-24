@@ -193,7 +193,8 @@ const createBrand = async (req, res) => {
       discountPrice,
       page,
       sections,
-      cityIds
+      cityIds,
+      isPopular
     } = req.body;
 
     // Validate cities if provided
@@ -277,6 +278,7 @@ const createBrand = async (req, res) => {
       page: sanitizedPage,
       sections: sanitizedSections,
       cityIds: cityIds || [],
+      isPopular: isPopular === true,
       status: SERVICE_STATUS.ACTIVE,
       createdBy: req.user.id
     });
@@ -296,6 +298,7 @@ const createBrand = async (req, res) => {
         logo: brand.logo,
         badge: brand.badge,
         routePath: brand.routePath,
+        isPopular: brand.isPopular,
         page: brand.page,
         sections: brand.sections,
         createdAt: brand.createdAt,
@@ -349,7 +352,8 @@ const updateBrand = async (req, res) => {
       page,
       sections,
       status,
-      cityIds: updateCityIds
+      cityIds: updateCityIds,
+      isPopular
     } = req.body;
 
     const categoryIds = providedCategoryIds || (categoryId ? [categoryId] : undefined);
@@ -426,6 +430,7 @@ const updateBrand = async (req, res) => {
       }
     }
     if (status !== undefined) brand.status = status;
+    if (isPopular !== undefined) brand.isPopular = isPopular === true;
 
     await brand.save();
 
@@ -444,6 +449,7 @@ const updateBrand = async (req, res) => {
         logo: brand.logo,
         badge: brand.badge,
         routePath: brand.routePath,
+        isPopular: brand.isPopular,
         page: brand.page,
         sections: brand.sections,
         createdAt: brand.createdAt,

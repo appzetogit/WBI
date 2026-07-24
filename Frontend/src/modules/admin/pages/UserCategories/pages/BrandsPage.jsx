@@ -14,6 +14,7 @@ const brandSchema = z.object({
   categoryIds: z.array(z.string()).min(1, "Select at least one category"),
   iconUrl: z.string().optional(),
   badge: z.string().optional(),
+  isPopular: z.boolean().optional(),
 });
 
 const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
@@ -37,6 +38,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
     badge: "",
     categoryIds: [],
     cityIds: [],
+    isPopular: false,
   });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -111,6 +113,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
             page: svc.page || {},
             sections: svc.sections || [],
             cityIds: (svc.cityIds || []).map(id => getStrId(id)).filter(Boolean),
+            isPopular: svc.isPopular || false,
           };
         });
       }
@@ -164,6 +167,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
       badge: service.badge || "",
       categoryIds: service.categoryIds || (service.categoryId ? [service.categoryId] : []),
       cityIds: service.cityIds || [],
+      isPopular: service.isPopular || false,
     });
   }, [editingId, services, selectedCity]);
 
@@ -175,6 +179,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
       badge: "",
       categoryIds: [],
       cityIds: selectedCity ? [selectedCity] : [],
+      isPopular: false,
     });
     setIsModalOpen(false);
   };
@@ -225,7 +230,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
       return;
     }
 
-    const { title, categoryIds, iconUrl, badge } = validationResult.data;
+    const { title, categoryIds, iconUrl, badge, isPopular } = validationResult.data;
     const slug = slugify(title);
 
     try {
@@ -239,6 +244,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
         badge: badge || null,
         // Add cityId if selected, using form state which is synchronized
         cityIds: form.cityIds,
+        isPopular: form.isPopular,
         // Default empty structures for legacy compatibility
         page: { banners: [], paymentOffers: [], serviceCategoriesGrid: [] },
         sections: []
@@ -306,6 +312,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
     categoryId: brand.categoryId ? String(brand.categoryId) : null,
     iconUrl: brand.iconUrl || "",
     badge: brand.badge || "",
+    isPopular: brand.isPopular || false,
     routePath: brand.routePath || `/user/${brand.slug}`,
     cityIds: brand.cityIds || [],
   });
@@ -381,7 +388,7 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
                   <th className="text-left py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider w-20">Icon</th>
                   <th className="text-left py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Name</th>
                   <th className="text-left py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Categories</th>
-                  <th className="text-left py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Badge</th>
+                  <th className="text-left py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status/Badge</th>
                   <th className="text-center py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Services</th>
                   <th className="text-right py-4 px-4 text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Actions</th>
                 </tr>
@@ -437,11 +444,17 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
                         </div>
                       </td>
                       <td className="py-4 px-4">
-                        {s.badge ? (
-                          <span className="inline-block px-2 py-1 text-xs font-semibold bg-purple-100 text-purple-700 rounded">{s.badge}</span>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
+                        <div className="flex flex-col gap-1 items-start">
+                          {s.isPopular && (
+                            <span className="inline-flex px-2 py-0.5 text-[10px] font-bold bg-orange-100 text-orange-700 border border-orange-200 rounded">Popular</span>
+                          )}
+                          {s.badge && (
+                            <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-purple-100 text-purple-700 border border-purple-200 rounded">{s.badge}</span>
+                          )}
+                          {!s.isPopular && !s.badge && (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-4 px-4 text-center">
                         <button
@@ -546,6 +559,19 @@ const BrandsPage = ({ catalog, setCatalog, selectedCity }) => {
               value={form.badge}
               onChange={(e) => setForm({ ...form, badge: e.target.value })}
             />
+          </div>
+
+          <div className="flex items-center space-x-2 pt-2">
+            <input
+              type="checkbox"
+              id="isPopular"
+              checked={form.isPopular}
+              onChange={(e) => setForm({ ...form, isPopular: e.target.checked })}
+              className="w-4 h-4 text-primary-600 bg-gray-100 border-gray-300 rounded focus:ring-primary-500"
+            />
+            <label htmlFor="isPopular" className="text-sm font-bold text-gray-700">
+              Mark as Popular (Shows on Home Page "Popular Brands" section)
+            </label>
           </div>
 
           <div className="pt-4 flex justify-end gap-3 border-t border-gray-100 mt-4">

@@ -1090,11 +1090,38 @@ export const StepProjectPortfolio = ({ data, updateData }) => (
 );
 
 export const StepDocuments = ({ data, updateData }) => {
-  const handleFile = (field, e) => {
-    const file = e.target.files[0];
-    if (file) {
-      // Mock upload behavior - in real app, you'd upload to S3 and save URL
-      updateData({ [field]: file.name });
+  const [uploading, setUploading] = React.useState({});
+
+  const handleFile = async (field, e) => {
+    const file = e.target.files?.[0];
+    if (e?.target) e.target.value = '';
+    if (!file) return;
+
+    setUploading((p) => ({ ...p, [field]: true }));
+    try {
+      const { uploadToCloudinary } = await import('../../../../utils/cloudinaryUpload');
+      const url = await uploadToCloudinary(file, 'vendor_registration');
+      updateData({ [field]: url });
+      toast.success(`${field.replace('Url', '')} uploaded`);
+    } catch (err) {
+      // Fallback: vendor multipart upload API
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await api.post('/vendor/upload', form, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        if (res.data?.success && res.data?.url) {
+          updateData({ [field]: res.data.url });
+          toast.success('Document uploaded');
+        } else {
+          throw new Error(res.data?.message || 'Upload failed');
+        }
+      } catch (e2) {
+        toast.error(e2?.response?.data?.message || e2.message || 'Upload failed');
+      }
+    } finally {
+      setUploading((p) => ({ ...p, [field]: false }));
     }
   };
   
@@ -1102,16 +1129,25 @@ export const StepDocuments = ({ data, updateData }) => {
   const notProprietor = data.incorporationType !== 'Proprietorship';
 
   const DocumentCard = ({ field, label, subtext }) => {
-    const isUploaded = !!data[field];
+    const isUploaded = !!data[field] && String(data[field]).startsWith('http');
+    const isBusy = !!uploading[field];
+    const displayName = isUploaded
+      ? String(data[field]).split('/').pop()?.slice(0, 28)
+      : data[field];
     return (
       <div className={`p-4 border-2 rounded-xl text-center flex flex-col items-center justify-center h-32 transition-colors cursor-pointer relative ${isUploaded ? 'border-[#0D8A72] bg-teal-50' : 'border-dashed border-gray-300 bg-gray-50 hover:border-[#0D8A72] hover:bg-gray-100'}`}>
-        <input type="file" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={e => handleFile(field, e)} title={isUploaded ? "Click to change document" : "Upload document"} />
+        <input type="file" accept="image/*,.pdf" className="absolute inset-0 opacity-0 cursor-pointer z-10" onChange={e => handleFile(field, e)} title={isUploaded ? "Click to change document" : "Upload document"} disabled={isBusy} />
         
-        {isUploaded ? (
+        {isBusy ? (
+          <>
+            <FiLoader className="w-8 h-8 mb-2 text-[#0D8A72] animate-spin" />
+            <span className="text-sm font-bold text-[#0D8A72]">Uploading…</span>
+          </>
+        ) : isUploaded ? (
           <>
             <FiCheckCircle className="w-8 h-8 mb-2 text-[#0D8A72]" />
             <span className="text-sm font-bold text-[#0D8A72]">Uploaded Successfully</span>
-            <span className="text-xs text-teal-700 mt-1 truncate w-full px-2">{data[field] !== 'mock_url_from_s3' ? data[field] : 'Document_Saved.pdf'}</span>
+            <span className="text-xs text-teal-700 mt-1 truncate w-full px-2">{displayName}</span>
           </>
         ) : (
           <>

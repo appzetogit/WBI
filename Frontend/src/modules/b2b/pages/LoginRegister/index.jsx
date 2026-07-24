@@ -10,12 +10,22 @@ import api from '../../../../services/api';
 import toast from 'react-hot-toast';
 import truckImg from '../../../../assets/b2b_warehouse_truck.png';
 import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
+import useRegistrationDraft, { genObjectId } from '../../../../hooks/useRegistrationDraft';
 
 const LoginRegister = ({ defaultTab = 'login' }) => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const {
+    draftKey,
+    entityId: draftEntityId,
+    ready: draftReady,
+    restored: draftRestored,
+    scheduleSave,
+    clearDraft
+  } = useRegistrationDraft('b2b');
   
   // Login states
   const [loginEmailOrMobile, setLoginEmailOrMobile] = useState('');
@@ -30,6 +40,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
 
   // Multi-step Registration states
   const [currentStep, setCurrentStep] = useState(1);
+  const [tempEntityId, setTempEntityId] = useState(() => genObjectId());
   
   // Step 1: Company Details
   const [companyName, setCompanyName] = useState('');
@@ -82,6 +93,63 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
   useEffect(() => {
     setActiveTab(defaultTab);
   }, [defaultTab]);
+
+  useEffect(() => {
+    if (!draftReady || !draftRestored) return;
+    const p = draftRestored.payload || {};
+    if (draftRestored.entityId) setTempEntityId(draftRestored.entityId);
+    else if (draftEntityId) setTempEntityId(draftEntityId);
+    if (draftRestored.currentStep != null) setCurrentStep(Number(draftRestored.currentStep) || 1);
+    if (p.companyName) setCompanyName(p.companyName);
+    if (p.gstNumber) setGstNumber(p.gstNumber);
+    if (p.panNumber) setPanNumber(p.panNumber);
+    if (p.tanNumber) setTanNumber(p.tanNumber);
+    if (p.cinNumber) setCinNumber(p.cinNumber);
+    if (p.logoUrl) setLogoUrl(p.logoUrl);
+    if (p.companyAddress) setCompanyAddress(p.companyAddress);
+    if (p.billingAddress) setBillingAddress(p.billingAddress);
+    if (p.authName) setAuthName(p.authName);
+    if (p.authDesignation) setAuthDesignation(p.authDesignation);
+    if (p.authEmail) setAuthEmail(p.authEmail);
+    if (p.authPhone) setAuthPhone(p.authPhone);
+    if (p.authAltPhone) setAuthAltPhone(p.authAltPhone);
+    if (Array.isArray(p.branches)) setBranches(p.branches);
+    if (p.verifications) setVerifications(p.verifications);
+  }, [draftReady, draftRestored, draftEntityId]);
+
+  useEffect(() => {
+    if (draftEntityId && tempEntityId !== draftEntityId) setTempEntityId(draftEntityId);
+  }, [draftEntityId, tempEntityId]);
+
+  useEffect(() => {
+    if (activeTab !== 'register') return;
+    scheduleSave({
+      currentStep,
+      phone: authPhone,
+      email: authEmail,
+      formData: {
+        companyName,
+        gstNumber,
+        panNumber,
+        tanNumber,
+        cinNumber,
+        logoUrl,
+        companyAddress,
+        billingAddress,
+        authName,
+        authDesignation,
+        authEmail,
+        authPhone,
+        authAltPhone,
+        branches,
+        verifications
+      }
+    });
+  }, [
+    activeTab, currentStep, companyName, gstNumber, panNumber, tanNumber, cinNumber,
+    logoUrl, companyAddress, billingAddress, authName, authDesignation, authEmail,
+    authPhone, authAltPhone, branches, verifications, scheduleSave
+  ]);
 
   // Handle same address copy
   const handleAddressCheckbox = (checked) => {
@@ -268,6 +336,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
     try {
       const res = await api.post('/b2b/register', payload);
       if (res.data.success) {
+        await clearDraft();
         toast.success('Registration request submitted successfully!');
         setCurrentStep(5); // Review and submitted state
         // Clear forms
@@ -1134,6 +1203,9 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                         ref={kycRef}
                         role="b2b" 
                         mobileNumber={authPhone}
+                        entityId={tempEntityId}
+                        draftId={draftKey}
+                        initialVerifications={verifications || {}}
                         onComplete={(data) => setVerifications(data)}
                       />
                     </div>

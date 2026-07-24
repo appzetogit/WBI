@@ -1,6 +1,7 @@
 const Notification = require('../../models/Notification');
 const { validationResult } = require('express-validator');
 const { sendNotificationToUser, sendNotificationToVendor, sendNotificationToWorker } = require('../../services/firebaseAdmin');
+const { buildNotificationOwnerQuery } = require('../../utils/notificationQuery.util');
 
 /**
  * Create notification (internal use)
@@ -426,15 +427,9 @@ const markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.userRole || req.user.role;
 
-    // Build query based on user role
-    let query = { _id: id };
-    if (userRole === 'USER') query.userId = userId;
-    else if (userRole === 'VENDOR') query.vendorId = userId;
-    else if (userRole === 'WORKER' || userRole === 'ENGINEER') query.workerId = userId;
-    else if (userRole === 'ADMIN') query.adminId = userId;
-    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
+    const query = buildNotificationOwnerQuery(userId, userRole, { _id: id });
 
     const notification = await Notification.findOne(query);
 
@@ -469,15 +464,9 @@ const markAsRead = async (req, res) => {
 const markAllAsRead = async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.userRole || req.user.role;
 
-    // Build query based on user role
-    let query = { isRead: false };
-    if (userRole === 'USER') query.userId = userId;
-    else if (userRole === 'VENDOR') query.vendorId = userId;
-    else if (userRole === 'WORKER' || userRole === 'ENGINEER') query.workerId = userId;
-    else if (userRole === 'ADMIN') query.adminId = userId;
-    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
+    const query = buildNotificationOwnerQuery(userId, userRole, { isRead: false });
 
     await Notification.updateMany(query, {
       isRead: true,
@@ -504,15 +493,9 @@ const deleteNotification = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.userRole || req.user.role;
 
-    // Build query based on user role
-    let query = { _id: id };
-    if (userRole === 'USER') query.userId = userId;
-    else if (userRole === 'VENDOR') query.vendorId = userId;
-    else if (userRole === 'WORKER' || userRole === 'ENGINEER') query.workerId = userId;
-    else if (userRole === 'ADMIN') query.adminId = userId;
-    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
+    const query = buildNotificationOwnerQuery(userId, userRole, { _id: id });
 
     const notification = await Notification.findOneAndDelete(query);
 
@@ -542,16 +525,11 @@ const deleteNotification = async (req, res) => {
 const deleteAllNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
-    const userRole = req.user.role;
+    const userRole = req.userRole || req.user.role;
 
-    // Build query based on user role to ensure they only delete their own notifications
-    let query = {};
-    if (userRole === 'USER' || userRole === 'user') query.userId = userId;
-    else if (userRole === 'VENDOR' || userRole === 'vendor') query.vendorId = userId;
-    else if (userRole === 'WORKER' || userRole === 'worker' || userRole === 'ENGINEER' || userRole === 'engineer') query.workerId = userId;
-    else if (userRole === 'ADMIN' || userRole === 'admin' || userRole === 'super_admin') query.adminId = userId;
-    else if (userRole === 'B2B' || userRole === 'b2b') query.b2bUserId = userId;
-    else {
+    const query = buildNotificationOwnerQuery(userId, userRole, {});
+
+    if (query._id === null) {
       console.log('Role mismatch in deleteAllNotifications:', userRole);
       return res.status(403).json({
         success: false,

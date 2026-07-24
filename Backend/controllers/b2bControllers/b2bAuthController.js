@@ -104,19 +104,31 @@ const registerCompany = async (req, res) => {
       documents
     } = req.body;
 
-    // 1. Check if email or phone is already registered
-    const existingCompany = await B2BCompany.findOne({
-      $or: [
-        { email: email.toLowerCase().trim() },
-        { phone: phone.trim() }
-      ]
-    });
+    // 1. Check for duplicates dynamically
+    const orConditions = [];
+    if (email) orConditions.push({ email: email.toLowerCase().trim() });
+    if (phone) orConditions.push({ phone: phone.trim() });
+    if (gstNumber) orConditions.push({ gstNumber: gstNumber.trim() });
+    if (panNumber) orConditions.push({ panNumber: panNumber.trim() });
 
-    if (existingCompany) {
-      return res.status(400).json({
-        success: false,
-        message: 'A B2B company is already registered with this email or phone number'
-      });
+    if (orConditions.length > 0) {
+      const existingCompany = await B2BCompany.findOne({ $or: orConditions });
+
+      if (existingCompany) {
+        if (email && existingCompany.email === email.toLowerCase().trim()) {
+          return res.status(400).json({ success: false, message: 'A B2B company is already registered with this email address' });
+        }
+        if (phone && existingCompany.phone === phone.trim()) {
+          return res.status(400).json({ success: false, message: 'A B2B company is already registered with this phone number' });
+        }
+        if (gstNumber && existingCompany.gstNumber === gstNumber.trim()) {
+          return res.status(400).json({ success: false, message: 'A B2B company is already registered with this GSTIN' });
+        }
+        if (panNumber && existingCompany.panNumber === panNumber.trim()) {
+          return res.status(400).json({ success: false, message: 'A B2B company is already registered with this PAN' });
+        }
+        return res.status(400).json({ success: false, message: 'A B2B company is already registered with these details' });
+      }
     }
 
     // 2. Hash password

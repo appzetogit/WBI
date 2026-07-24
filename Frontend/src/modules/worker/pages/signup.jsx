@@ -9,6 +9,7 @@ import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import ValidatedInput from '../../../components/common/ValidatedInput';
 import { validators } from '../../../utils/validationUtils';
 import { z } from "zod";
+import useRegistrationDraft from '../../../hooks/useRegistrationDraft';
 
 const generateObjectId = () => {
   const timestamp = Math.floor(new Date().getTime() / 1000).toString(16);
@@ -24,6 +25,15 @@ export default function WorkerSignup() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const kycRef = React.useRef(null);
 
+  const {
+    draftKey,
+    entityId: draftEntityId,
+    ready: draftReady,
+    restored: draftRestored,
+    scheduleSave,
+    clearDraft
+  } = useRegistrationDraft('worker');
+
   const [formData, setFormData] = useState({
     tempEntityId: generateObjectId(),
     name: '',
@@ -31,7 +41,8 @@ export default function WorkerSignup() {
     password: '',
     serviceCategories: [],
     subServices: [],
-    address: { city: '', pincode: '' }
+    address: { city: '', pincode: '' },
+    verifications: {}
   });
 
   const [validationState, setValidationState] = useState({});
@@ -57,6 +68,34 @@ export default function WorkerSignup() {
     };
     loadConfig();
   }, []);
+
+  useEffect(() => {
+    if (!draftReady || !draftRestored) return;
+    const p = draftRestored.payload || {};
+    setFormData((prev) => ({
+      ...prev,
+      ...p,
+      tempEntityId: draftRestored.entityId || draftEntityId || prev.tempEntityId,
+      verifications: p.verifications || prev.verifications || {}
+    }));
+    if (draftRestored.currentStep != null) setCurrentStep(Number(draftRestored.currentStep) || 1);
+  }, [draftReady, draftRestored, draftEntityId]);
+
+  useEffect(() => {
+    if (!draftEntityId) return;
+    setFormData((prev) =>
+      prev.tempEntityId === draftEntityId ? prev : { ...prev, tempEntityId: draftEntityId }
+    );
+  }, [draftEntityId]);
+
+  useEffect(() => {
+    scheduleSave({
+      formData,
+      currentStep,
+      phone: formData.phone,
+      email: formData.email
+    });
+  }, [formData, currentStep, scheduleSave]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -204,6 +243,7 @@ export default function WorkerSignup() {
 
       const response = await workerAuthService.register(payload);
       if (response.success) {
+        await clearDraft();
         toast.success(
           <div className="flex flex-col">
             <span className="font-bold">Welcome Onboard!</span>
@@ -404,6 +444,8 @@ export default function WorkerSignup() {
                   role="worker" 
                   mobileNumber={formData.phone}
                   entityId={formData.tempEntityId}
+                  draftId={draftKey}
+                  initialVerifications={formData.verifications || {}}
                   onComplete={(verifications) => setFormData(prev => ({ ...prev, verifications }))}
                 />
               </div>

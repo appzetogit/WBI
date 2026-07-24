@@ -28,7 +28,7 @@ const Footer = () => {
     {
       title: 'Company',
       links: [
-        { label: 'About Us', path: '/user/about-WBI' },
+        { label: 'About Us', path: '/user/about-wbi' },
         { label: 'Help & Support', path: '/user/help-support' },
         { label: 'Cancellation Policy', path: '/user/cancellation-policy' },
         { label: 'Terms & Conditions', path: '#' },

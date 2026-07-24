@@ -4,6 +4,19 @@ const OneTimeService = require('../../models/OneTimeService');
 const ServicePackage = require('../../models/ServicePackage');
 const Settings = require('../../models/Settings');
 
+function getRequestUserId(req) {
+  return req.user?.id || req.userId;
+}
+
+function assertDraftOwner(draft, req, res) {
+  const userId = getRequestUserId(req);
+  if (!userId || !draft?.userId || draft.userId.toString() !== String(userId)) {
+    res.status(403).json({ success: false, message: 'Unauthorized access to this draft.' });
+    return false;
+  }
+  return true;
+}
+
 /**
  * Recalculate pricing for a draft dynamically
  */
@@ -100,6 +113,7 @@ exports.getReviewDraft = async (req, res) => {
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
+    if (!assertDraftOwner(draft, req, res)) return;
 
     // Query populated packages and sub-services manually
     const rawDraft = await BookingDraft.findById(draftId).lean();
@@ -122,15 +136,9 @@ exports.getReviewDraft = async (req, res) => {
     const draftObj = draft.toObject();
     draftObj.packageIds = populatedItems;
 
-    // Mock vendor data for demonstration
-    if (!draftObj.vendorInfo || !draftObj.vendorInfo.vendorId) {
-       draftObj.vendorInfo = {
-         name: "Acme Services",
-         rating: 4.8,
-         jobsCompleted: 154,
-         verified: true,
-         supportNumber: "+91 9876543210"
-       };
+    // Do not invent vendor data — client shows searching / unassigned state
+    if (!draftObj.vendorInfo?.vendorId) {
+      draftObj.vendorInfo = null;
     }
 
     res.status(200).json({
@@ -155,6 +163,7 @@ exports.updateDraft = async (req, res) => {
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
+    if (!assertDraftOwner(draft, req, res)) return;
 
     if (specialInstructions !== undefined) draft.specialInstructions = specialInstructions;
     if (gatePassInfo !== undefined) draft.gatePassInfo = gatePassInfo;
@@ -216,24 +225,26 @@ const parseSlotTimes = (dateObj, timeSlotStr) => {
 exports.confirmReview = async (req, res) => {
   try {
     const { draftId } = req.body;
+    const userId = getRequestUserId(req);
 
     const draft = await BookingDraft.findById(draftId).populate('serviceId');
     if (!draft) {
       return res.status(404).json({ success: false, message: 'Draft not found' });
     }
+    if (!assertDraftOwner(draft, req, res)) return;
 
     if (draft.status === 'converted') {
-      const Booking = require('../../models/Booking');
-      // Prevent duplicate booking creation, but return success so the UI can proceed
-      const existingBooking = await Booking.findOne({ userId: draft.userId, serviceId: draft.serviceId._id }).sort({ createdAt: -1 });
-      if (existingBooking) {
-        return res.status(200).json({ 
-          success: true, 
-          bookingId: existingBooking._id,
-          message: 'Booking already confirmed.' 
+      if (draft.convertedBookingId) {
+        return res.status(200).json({
+          success: true,
+          bookingId: draft.convertedBookingId,
+          message: 'Booking already confirmed.'
         });
       }
-      return res.status(400).json({ success: false, message: 'Booking already confirmed for this draft. Please check your bookings page.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Booking already confirmed for this draft. Please check your bookings page.'
+      });
     }
 
     // Validation
@@ -270,6 +281,27 @@ exports.confirmReview = async (req, res) => {
     const workerPayout = pricing.packageTotal - workerCommission;
     const platformEarning = workerCommission + (pricing.platformFee || 29) + (pricing.visitCharge || 49);
 
+    // Create Razorpay order before persisting booking (fail closed — never invent order_ ids)
+    const razorpayService = require('../../services/razorpayService');
+    const orderResult = await razorpayService.createOrder(
+      pricing.finalAmount,
+      'INR',
+      `draft_${draftId}`,
+      {
+        draftId: String(draftId),
+        userId: String(userId),
+        purpose: 'booking_confirm'
+      }
+    );
+
+    if (!orderResult.success || !orderResult.orderId) {
+      console.error('[Razorpay] Order creation failed in confirmation:', orderResult.error);
+      return res.status(502).json({
+        success: false,
+        message: 'Unable to create payment order. Please try again.'
+      });
+    }
+
     const booking = new Booking({
       userId: draft.userId,
       serviceId: draft.serviceId._id,
@@ -297,6 +329,7 @@ exports.confirmReview = async (req, res) => {
       status: isScheduled ? 'scheduled' : 'pending',
       paymentStatus: 'pending',
       paymentMethod: 'razorpay',
+      razorpayOrderId: orderResult.orderId,
       subTotal: pricing.packageTotal,
       platformFee: pricing.platformFee || 29,
       workerPayout: workerPayout,
@@ -308,35 +341,11 @@ exports.confirmReview = async (req, res) => {
       userPayableAmount: pricing.finalAmount
     });
 
-    // Create Razorpay Order
-    try {
-      const crypto = require('crypto');
-      const Razorpay = require('razorpay');
-      const razorpay = new Razorpay({
-        key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_mock',
-        key_secret: process.env.RAZORPAY_KEY_SECRET || 'mock_secret'
-      });
-      const options = {
-        amount: Math.round(pricing.finalAmount * 100),
-        currency: 'INR',
-        receipt: booking._id.toString(),
-        notes: {
-          bookingId: booking._id.toString(),
-          userId: draft.userId.toString()
-        }
-      };
-      const order = await razorpay.orders.create(options);
-      booking.razorpayOrderId = order.id;
-    } catch (rzpErr) {
-      console.warn('[Razorpay] Order creation failed in confirmation, using sandbox placeholder:', rzpErr.message);
-      const crypto = require('crypto');
-      booking.razorpayOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
-    }
-
     await booking.save();
 
-    // Convert draft status
+    // Convert draft status and link booking for idempotent re-confirm
     draft.status = 'converted';
+    draft.convertedBookingId = booking._id;
     await draft.save();
 
     // Trigger Socket.io real-time events for dynamic UI sync
@@ -424,8 +433,12 @@ exports.confirmReview = async (req, res) => {
 exports.liveCheck = async (req, res) => {
   try {
     const { draftId } = req.params;
-    
-    // In a real scenario, this checks redis/database for changes
+    const draft = await BookingDraft.findById(draftId).select('userId status').lean();
+    if (!draft) {
+      return res.status(404).json({ success: false, message: 'Draft not found' });
+    }
+    if (!assertDraftOwner(draft, req, res)) return;
+
     res.status(200).json({
       success: true,
       data: {

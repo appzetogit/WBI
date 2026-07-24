@@ -101,5 +101,14 @@ export const kycService = {
     } catch (error) {
       throw error.response?.data || { success: false, message: 'Selfie verification failed' };
     }
+  },
+
+  getStatus: async (role, entityId) => {
+    try {
+      const response = await api.get('/kyc/status', { params: { role, entityId } });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || { success: false, message: 'Failed to load KYC status' };
+    }
   }
 };

@@ -12,12 +12,16 @@ const { getIO } = require('../../sockets');
 const { sendNotificationToUser, sendNotificationToWorker } = require('../../services/firebaseAdmin');
 const { getRedis, isRedisConnected } = require('../../services/redisService');
 const Razorpay = require('razorpay');
+const razorpayService = require('../../services/razorpayService');
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_mock',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || 'mock_secret'
-});
+function getRazorpayClient() {
+  const key_id = process.env.RAZORPAY_KEY_ID;
+  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+  if (!key_id || !key_secret) return null;
+  return new Razorpay({ key_id, key_secret });
+}
+
+const razorpay = getRazorpayClient();
 
 // Helper for transition logging
 async function logBookingEvent(bookingId, statusFrom, statusTo, triggeredBy, actorId, remarks = null, metadata = {}) {
@@ -168,7 +172,16 @@ exports.createBooking = async (req, res) => {
 
     const booking = await Booking.create(bookingData);
 
-    // 4. Create Razorpay Order
+    // 4. Create Razorpay Order (fail closed — never invent order_ ids)
+    const rzpClient = razorpay || getRazorpayClient();
+    if (!rzpClient) {
+      await Booking.findByIdAndDelete(booking._id);
+      return res.status(503).json({
+        success: false,
+        message: 'Payment gateway is not configured.'
+      });
+    }
+
     let razorpayOrderId = null;
     try {
       const options = {
@@ -180,17 +193,18 @@ exports.createBooking = async (req, res) => {
           userId: userId.toString()
         }
       };
-      const order = await razorpay.orders.create(options);
+      const order = await rzpClient.orders.create(options);
       razorpayOrderId = order.id;
 
       booking.razorpayOrderId = razorpayOrderId;
       await booking.save();
     } catch (rzpErr) {
-      console.warn('[Razorpay] Order creation failed, running in sandbox/mock mode:', rzpErr.message);
-      // Fallback order id for development
-      razorpayOrderId = `order_${crypto.randomBytes(8).toString('hex')}`;
-      booking.razorpayOrderId = razorpayOrderId;
-      await booking.save();
+      console.error('[Razorpay] Order creation failed:', rzpErr.message);
+      await Booking.findByIdAndDelete(booking._id);
+      return res.status(502).json({
+        success: false,
+        message: 'Unable to create payment order. Please try again.'
+      });
     }
 
     await logBookingEvent(booking._id, null, 'pending', 'user', userId, 'Booking created. Awaiting worker matching.');
@@ -532,41 +546,53 @@ exports.verifyPayment = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
 
-    // 1. Signature validation
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'mock_secret';
-    const generatedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest('hex');
+    if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
+      return res.status(400).json({ success: false, message: 'Payment credentials are required.' });
+    }
 
-    const isValidSignature = generatedSignature === razorpaySignature;
-    if (!isValidSignature && !razorpayOrderId.startsWith('order_')) {
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      console.error('[Razorpay] RAZORPAY_KEY_SECRET is not configured');
+      return res.status(503).json({ success: false, message: 'Payment gateway is not configured.' });
+    }
+
+    // 1. Signature validation (always required — no order_ bypass)
+    const isValidSignature = razorpayService.verifyPayment(
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature
+    );
+    if (!isValidSignature) {
       return res.status(400).json({ success: false, message: 'Invalid payment signature. Fraud attempt blocked.' });
     }
 
-    // 2. Fetch payment details if not running mock mode
-    let paymentCaptured = true;
-    if (!razorpayOrderId.startsWith('order_')) {
-      try {
-        const paymentDetails = await razorpay.payments.fetch(razorpayPaymentId);
-        if (paymentDetails.status !== 'captured') {
-          paymentCaptured = false;
-        }
-      } catch (err) {
-        console.warn('[Razorpay] Payment fetch failed, bypassing check for testing:', err.message);
-      }
+    // Bind payment to the booking's order when present
+    if (booking.razorpayOrderId && booking.razorpayOrderId !== razorpayOrderId) {
+      return res.status(400).json({ success: false, message: 'Payment order does not match this booking.' });
     }
 
-    if (!paymentCaptured) {
+    // 2. Confirm capture on Razorpay (fail closed)
+    const paymentDetails = await razorpayService.getPaymentDetails(razorpayPaymentId);
+    if (!paymentDetails.success || !paymentDetails.payment) {
+      return res.status(400).json({
+        success: false,
+        message: paymentDetails.error || 'Unable to verify payment with gateway.'
+      });
+    }
+    const gatewayStatus = paymentDetails.payment.status;
+    if (gatewayStatus !== 'captured' && gatewayStatus !== 'authorized') {
       return res.status(400).json({ success: false, message: 'Payment is not captured on Razorpay gateway.' });
+    }
+    if (paymentDetails.payment.order_id && paymentDetails.payment.order_id !== razorpayOrderId) {
+      return res.status(400).json({ success: false, message: 'Payment does not belong to this order.' });
     }
 
     // 3. Trigger Razorpay Route Auto-Split transfer
+    const rzp = razorpay || getRazorpayClient();
     const worker = await Worker.findById(booking.workerId);
     let transferProcessed = false;
-    if (worker && worker.razorpayLinkedAccountId) {
+    if (rzp && worker && worker.razorpayLinkedAccountId) {
       try {
-        await razorpay.payments.transfer(razorpayPaymentId, {
+        await rzp.payments.transfer(razorpayPaymentId, {
           transfers: [{
             account: worker.razorpayLinkedAccountId,
             amount: Math.round(booking.workerPayout * 100), // convert to paise
@@ -816,14 +842,33 @@ exports.submitRating = async (req, res) => {
 exports.razorpayWebhook = async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'];
-    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || 'mock_webhook_secret';
-    
-    // Validate signature
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+    if (!webhookSecret) {
+      console.error('[Razorpay Webhook] RAZORPAY_WEBHOOK_SECRET is not configured');
+      return res.status(503).send('Webhook not configured');
+    }
+
+    if (!signature) {
+      return res.status(400).send('Missing signature');
+    }
+
+    // Prefer raw body when available (express.json verify); fall back to serialized body
+    const rawBody = req.rawBody
+      ? (Buffer.isBuffer(req.rawBody) ? req.rawBody.toString('utf8') : String(req.rawBody))
+      : JSON.stringify(req.body);
+
     const hmac = crypto.createHmac('sha256', webhookSecret);
-    hmac.update(JSON.stringify(req.body));
+    hmac.update(rawBody);
     const generatedSignature = hmac.digest('hex');
 
-    if (generatedSignature !== signature && process.env.NODE_ENV === 'production') {
+    try {
+      const expected = Buffer.from(generatedSignature);
+      const actual = Buffer.from(String(signature));
+      if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+        return res.status(400).send('Invalid signature');
+      }
+    } catch {
       return res.status(400).send('Invalid signature');
     }
 

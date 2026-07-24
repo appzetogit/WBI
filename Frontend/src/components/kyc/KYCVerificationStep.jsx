@@ -51,6 +51,7 @@ const KYCVerificationStep = forwardRef(({
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [verifications, setVerifications] = useState({});
+  const [editingDocs, setEditingDocs] = useState({}); // documentType -> force re-entry
   const [activeUploads, setActiveUploads] = useState({});
   const [uploadProgress, setUploadProgress] = useState({}); // { [documentType]: 0-100 }
   const [aadhaarNumber, setAadhaarNumber] = useState('');
@@ -60,6 +61,7 @@ const KYCVerificationStep = forwardRef(({
   const [videoStream, setVideoStream] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const hydratedRef = useRef(false);
 
   const stopCamera = useCallback(() => {
     if (videoStream) {
@@ -191,6 +193,52 @@ const KYCVerificationStep = forwardRef(({
     if (!initialVerifications || typeof initialVerifications !== 'object') return;
     setVerifications((prev) => ({ ...initialVerifications, ...prev }));
   }, [initialVerifications]);
+
+  // Hydrate from server KYC records — never wipe verified state on remount
+  useEffect(() => {
+    if (!entityId || !role) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await kycService.getStatus(role, entityId);
+        if (!res.success || cancelled) return;
+        const map = res.data || {};
+        setVerifications((prev) => {
+          const next = { ...prev };
+          Object.entries(map).forEach(([docType, rec]) => {
+            if (!rec) return;
+            const existing = next[docType] || {};
+            // Prefer already-verified local if newer interaction; else server
+            if (existing.status === 'verified' && !rec.expired) {
+              next[docType] = { ...rec, ...existing, status: 'verified', skipReverify: true };
+            } else {
+              next[docType] = {
+                ...existing,
+                status: rec.status,
+                fileUrl: rec.fileUrl || existing.fileUrl,
+                backFileUrl: rec.backFileUrl || existing.backFileUrl,
+                masked: rec.masked,
+                verifiedAt: rec.verifiedAt,
+                provider: rec.provider,
+                physicalUploaded:
+                  rec.physicalUploadStatus === 'uploaded' || existing.physicalUploaded,
+                skipReverify: !!rec.skipReverify && !rec.expired,
+                expired: !!rec.expired,
+                failureReason: rec.failureReason
+              };
+            }
+          });
+          return next;
+        });
+        hydratedRef.current = true;
+      } catch {
+        /* offline / no records yet */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entityId, role]);
 
   useEffect(() => {
     if (typeof onComplete === 'function') {
@@ -370,6 +418,7 @@ const KYCVerificationStep = forwardRef(({
     side === 'single' ? documentType : `${documentType}:${side}`;
 
   const isCgpeComplete = (rule, vState = {}) => {
+    if (vState.skipReverify && vState.status === 'verified' && !vState.expired) return true;
     const status = vState.status;
     if (rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') {
       return status === 'uploaded' || status === 'verified';
@@ -379,6 +428,10 @@ const KYCVerificationStep = forwardRef(({
 
   const isPhysicalComplete = (rule, vState = {}) => {
     if (!rule.requirePhysicalUpload && rule.verificationMode !== 'upload_only' && rule.verificationMode !== 'ocr' && rule.verificationMode !== 'manual') {
+      return true;
+    }
+    // Server-verified + skip: physical already accepted (file may be on record)
+    if (vState.skipReverify && vState.status === 'verified' && !vState.expired) {
       return true;
     }
     if (rule.requiresFrontAndBack) {
@@ -510,12 +563,18 @@ const KYCVerificationStep = forwardRef(({
           const physicalDone = isPhysicalComplete(rule, vState);
           const isComplete = isRuleComplete(rule, vState);
           const isFailed = vState.status === 'failed';
+          const forceEdit = !!editingDocs[rule.documentType];
+          const lockedVerified =
+            !forceEdit &&
+            (vState.status === 'verified' || vState.skipReverify) &&
+            !vState.expired;
           const needsPhysical =
             rule.requirePhysicalUpload ||
             rule.verificationMode === 'upload_only' ||
             rule.verificationMode === 'ocr' ||
             rule.verificationMode === 'manual';
           const showPhysicalUploader =
+            !lockedVerified &&
             needsPhysical &&
             (rule.verificationMode === 'upload_only' ||
               rule.verificationMode === 'ocr' ||
@@ -523,21 +582,29 @@ const KYCVerificationStep = forwardRef(({
               cgpeDone);
 
           return (
-            <div key={rule.documentType} className={`p-4 border rounded-xl transition-all ${isComplete ? 'border-green-200 bg-green-50/30' : isFailed ? 'border-red-200 bg-red-50/30' : 'border-gray-200 bg-white'}`}>
+            <div key={rule.documentType} className={`p-4 border rounded-xl transition-all ${isComplete || lockedVerified ? 'border-green-200 bg-green-50/30' : isFailed ? 'border-red-200 bg-red-50/30' : 'border-gray-200 bg-white'}`}>
               <div className="flex justify-between items-center mb-3">
                 <h4 className="font-semibold text-gray-800 text-sm">{rule.label} {rule.required && <span className="text-red-500">*</span>}</h4>
                 <div className="flex flex-wrap items-center gap-1.5 justify-end">
-                  {cgpeDone && rule.verificationMode !== 'upload_only' ? (
-                    <span className="flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> CGPE Verified</span>
+                  {lockedVerified || (cgpeDone && rule.verificationMode !== 'upload_only') ? (
+                    <span className="flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> Verified</span>
+                  ) : null}
+                  {vState.status === 'rejected' ? (
+                    <span className="flex items-center text-[10px] font-bold text-red-700 bg-red-100 px-2 py-1 rounded-md">Rejected</span>
+                  ) : null}
+                  {vState.status === 'pending' || vState.status === 'verifying' || vState.status === 'manual_review' ? (
+                    !lockedVerified ? (
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md capitalize">{vState.status || 'Pending'}</span>
+                    ) : null
                   ) : null}
                   {needsPhysical ? (
                     physicalDone ? (
                       <span className="flex items-center text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> File Uploaded</span>
-                    ) : (
+                    ) : !lockedVerified ? (
                       <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md">Upload pending</span>
-                    )
+                    ) : null
                   ) : null}
-                  {isComplete ? (
+                  {isComplete || lockedVerified ? (
                     <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> Complete</span>
                   ) : isFailed ? (
                     <span className="flex items-center text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-md"><FiAlertCircle className="mr-1" /> Failed</span>
@@ -547,7 +614,23 @@ const KYCVerificationStep = forwardRef(({
                 </div>
               </div>
 
-              {!cgpeDone && (
+              {lockedVerified && (
+                <div className="mt-1 mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs text-emerald-800">
+                    {vState.masked ? `Saved: ${vState.masked}` : 'Already verified — no need to verify again.'}
+                    {vState.fileUrl ? ' Document on file.' : ''}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setEditingDocs((p) => ({ ...p, [rule.documentType]: true }))}
+                    className="text-[11px] font-bold text-teal-700 hover:underline shrink-0"
+                  >
+                    Update document
+                  </button>
+                </div>
+              )}
+
+              {!lockedVerified && !cgpeDone && (
                 <div className="mt-2">
                   {(rule.verificationMode === 'digilocker' || rule.documentType === 'aadhaar') && (
                     <div className="space-y-3">

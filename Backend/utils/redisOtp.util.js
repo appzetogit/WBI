@@ -16,10 +16,11 @@ const RATE_LIMIT_WINDOW = parseInt(process.env.OTP_RATE_WINDOW, 10) || 3600;
  * Generate 6-digit OTP
  */
 const generateOTP = (phone) => {
-  if (phone && isOtpBypassPhone(phone)) {
-    return getBypassOtp();
+  const bypassOtp = getBypassOtp();
+  if (phone && bypassOtp && isOtpBypassPhone(phone)) {
+    return bypassOtp;
   }
-  if (process.env.USE_DEFAULT_OTP === 'true') {
+  if (process.env.USE_DEFAULT_OTP === 'true' && process.env.NODE_ENV !== 'production') {
     return '123456';
   }
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -112,10 +113,11 @@ const storeOTP = async (phone, otpHash) => {
  * Returns: { success: true/false, message: string }
  */
 const verifyOTP = async (phone, plainOtp) => {
-  console.log(`[OTP] Verifying OTP for phone: ${phone}, OTP: ${plainOtp}`);
+  console.log(`[OTP] Verifying OTP for phone: ${phone}`);
 
-  if (isOtpBypassPhone(phone) && String(plainOtp).trim() === getBypassOtp()) {
-    console.log(`[OTP] ✅ Bypass verification for ${phone}`);
+  const bypassOtp = getBypassOtp();
+  if (bypassOtp && isOtpBypassPhone(phone) && String(plainOtp).trim() === bypassOtp) {
+    console.log(`[OTP] Bypass verification for ${phone}`);
     return { success: true };
   }
 

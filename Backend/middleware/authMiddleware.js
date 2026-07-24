@@ -45,6 +45,9 @@ const authenticate = async (req, res, next) => {
     switch (userRole) {
       case USER_ROLES.USER:
         user = await User.findById(decoded.userId).select('-password').lean();
+        if (user && user.isActive === false) {
+          return res.status(403).json({ success: false, message: 'Account is deactivated. Contact support.' });
+        }
         // SINGLE DEVICE LOGOUT Logic
         if (user && user.loginSessionId && decoded.loginSessionId && user.loginSessionId !== decoded.loginSessionId) {
           return res.status(401).json({ success: false, message: 'Account logged in on another device. Please login again.' });

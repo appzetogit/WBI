@@ -9,6 +9,9 @@ import { cartService } from '../services/cartService';
 
 const CartContext = createContext(null);
 
+const cartQuantityTotal = (items) =>
+  (items || []).reduce((sum, item) => sum + (item.serviceCount || 1), 0);
+
 export const CartProvider = ({ children }) => {
   const [cartItems, setCartItems] = useState([]);
   const [cartCount, setCartCount] = useState(0);
@@ -37,7 +40,7 @@ export const CartProvider = ({ children }) => {
       if (response.success) {
         const items = response.data || [];
         setCartItems(items);
-        setCartCount(items.length);
+        setCartCount(cartQuantityTotal(items));
       }
     } catch (error) {
       // Silently handle auth errors
@@ -69,9 +72,13 @@ export const CartProvider = ({ children }) => {
       const response = await cartService.addToCart(itemData);
 
       if (response.success && response.data) {
-        // Replace temp item with real item from server, but preserve local fields (like category) just in case
+        const saved = Array.isArray(response.data)
+          ? response.data[response.data.length - 1]
+          : response.data;
         setCartItems(prev => prev.map(item =>
-          item._id === tempId ? { ...item, ...response.data } : item
+          item._id === tempId
+            ? { ...item, ...saved, _id: saved._id || saved.id || tempId, id: saved._id || saved.id || tempId }
+            : item
         ));
       } else {
         // Revert on failure (if success false but no throw)

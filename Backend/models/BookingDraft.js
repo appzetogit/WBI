@@ -57,6 +57,11 @@ const bookingDraftSchema = new mongoose.Schema({
     enum: ['draft', 'converted'],
     default: 'draft'
   },
+  convertedBookingId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Booking',
+    default: null
+  },
   bookingType: {
     type: String,
     enum: ['instant', 'scheduled'],

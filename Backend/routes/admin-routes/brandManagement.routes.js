@@ -54,7 +54,11 @@ const createBrandValidation = [
   body('status')
     .optional()
     .isIn(['active', 'inactive', 'deleted'])
-    .withMessage('Status must be active, inactive, or deleted')
+    .withMessage('Status must be active, inactive, or deleted'),
+  body('isPopular')
+    .optional()
+    .isBoolean()
+    .withMessage('isPopular must be a boolean')
 ];
 
 const updateBrandValidation = [
@@ -96,7 +100,11 @@ const updateBrandValidation = [
   body('status')
     .optional()
     .isIn(['active', 'inactive', 'deleted'])
-    .withMessage('Status must be active, inactive, or deleted')
+    .withMessage('Status must be active, inactive, or deleted'),
+  body('isPopular')
+    .optional()
+    .isBoolean()
+    .withMessage('isPopular must be a boolean')
 ];
 
 // Routes

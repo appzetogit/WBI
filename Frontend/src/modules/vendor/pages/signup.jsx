@@ -7,6 +7,7 @@ import { validators } from '../../../utils/validationUtils';
 import Logo from '../../../components/common/Logo';
 import LogoLoader from '../../../components/common/LogoLoader';
 import api from '../../../services/api';
+import useRegistrationDraft from '../../../hooks/useRegistrationDraft';
 
 // Dynamic Step Components
 import { 
@@ -53,23 +54,70 @@ const VendorSignup = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [vendorModels, setVendorModels] = useState([]); 
   const kycRef = React.useRef(null);
+
+  const {
+    entityId: draftEntityId,
+    ready: draftReady,
+    restored: draftRestored,
+    scheduleSave,
+    clearDraft
+  } = useRegistrationDraft('vendor');
   
   const [formData, setFormData] = useState({
     ownerName: '', mobile: '', email: '', password: '',
     isPhoneVerified: false,
     verificationToken: null,
     companyName: '', gstin: '', panNumber: '',
-    models: []
+    models: [],
+    tempEntityId: null
   });
 
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (!draftReady || !draftRestored) return;
+    const p = draftRestored.payload || {};
+    setFormData((prev) => ({
+      ...prev,
+      ...p,
+      tempEntityId: draftRestored.entityId || draftEntityId || prev.tempEntityId
+    }));
+    if (Array.isArray(p.models)) setVendorModels(p.models);
+    if (draftRestored.currentStep != null) {
+      const idx = Number(draftRestored.currentStep);
+      if (!Number.isNaN(idx)) setCurrentStepIndex(Math.max(0, idx));
+    }
+  }, [draftReady, draftRestored, draftEntityId]);
+
+  useEffect(() => {
+    if (!draftEntityId) return;
+    setFormData((prev) =>
+      prev.tempEntityId === draftEntityId ? prev : { ...prev, tempEntityId: draftEntityId }
+    );
+  }, [draftEntityId]);
+
+  useEffect(() => {
+    scheduleSave({
+      formData,
+      currentStep: currentStepIndex,
+      phone: formData.mobile,
+      email: formData.email
+    });
+  }, [formData, currentStepIndex, scheduleSave]);
 
   const activeSteps = [...BASE_STEPS];
   if (vendorModels.includes('ONE_TIME')) activeSteps.push(...ONE_TIME_STEPS);
   if (vendorModels.includes('PROJECT')) activeSteps.push(...PROJECT_STEPS);
   if (vendorModels.length > 0) activeSteps.push(...FINAL_STEPS);
 
-  const currentStepData = activeSteps[currentStepIndex];
+  useEffect(() => {
+    if (currentStepIndex >= activeSteps.length) {
+      setCurrentStepIndex(Math.max(0, activeSteps.length - 1));
+    }
+  }, [activeSteps.length, currentStepIndex]);
+
+  const safeStepIndex = Math.min(currentStepIndex, Math.max(0, activeSteps.length - 1));
+  const currentStepData = activeSteps[safeStepIndex];
 
   const updateData = (newData) => {
     setFormData(prev => ({ ...prev, ...newData }));
@@ -191,6 +239,7 @@ const VendorSignup = () => {
           inductionStatus: 'pending'
         }));
 
+        await clearDraft();
         toast.success('Registration submitted successfully! Pending approval.');
         navigate('/vendor/pending-approval');
       } else {
@@ -279,7 +328,7 @@ const VendorSignup = () => {
           <div className="mb-10">
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Vendor Onboarding</h2>
             <div className="flex items-center gap-4">
-              <span className="text-sm font-bold text-[#0D8A72] bg-teal-50 px-3 py-1 rounded-full">Step {currentStepIndex + 1} of {activeSteps.length}</span>
+              <span className="text-sm font-bold text-[#0D8A72] bg-teal-50 px-3 py-1 rounded-full">Step {safeStepIndex + 1} of {activeSteps.length}</span>
               <span className="text-sm text-gray-500 font-medium">{currentStepData.label}</span>
             </div>
             

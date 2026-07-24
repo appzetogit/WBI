@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const DocumentRule = require('../models/DocumentRule');
 const KYCVerification = require('../models/KYCVerification');
 const DigiLockerSession = require('../models/DigiLockerSession');
@@ -990,5 +991,51 @@ exports.verifyLicense = async (req, res) => {
       await logAudit(req.body.role, req.body.entityId, 'LICENSE_VERIFY_FAILED', 'license', 'cgpe', 'failed', error.message, req);
     }
     res.status(400).json({ success: false, message: error.message || 'License verification failed' });
+  }
+};
+
+/**
+ * GET /kyc/status?role=&entityId=
+ * Returns map of documentType → verification state for hydrate / skip re-verify UI.
+ */
+exports.getVerificationStatus = async (req, res) => {
+  try {
+    const { role, entityId } = req.query;
+    if (!role || !entityId) {
+      return res.status(400).json({ success: false, message: 'role and entityId are required' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(entityId)) {
+      return res.status(400).json({ success: false, message: 'Invalid entityId' });
+    }
+
+    const { isExpired, shouldSkipReverify, TTL_DAYS } = require('../utils/kycReverify.util');
+    const records = await KYCVerification.find({
+      role,
+      entityId: new mongoose.Types.ObjectId(entityId)
+    }).lean();
+
+    const map = {};
+    for (const r of records) {
+      const expired = isExpired(r.verifiedAt);
+      map[r.documentType] = {
+        status: r.status,
+        masked: r.documentNumberMasked || null,
+        fileUrl: r.fileUrl || null,
+        backFileUrl: r.backFileUrl || null,
+        verifiedAt: r.verifiedAt || null,
+        provider: r.provider || null,
+        verificationMode: r.verificationMode,
+        physicalUploadStatus: r.physicalUploadStatus,
+        failureReason: r.failureReason || null,
+        expired,
+        skipReverify: shouldSkipReverify(r),
+        ttlDays: TTL_DAYS
+      };
+    }
+
+    res.json({ success: true, data: map });
+  } catch (err) {
+    console.error('[kyc] getVerificationStatus:', err.message);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
