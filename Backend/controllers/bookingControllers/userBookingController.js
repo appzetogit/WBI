@@ -491,7 +491,8 @@ const createBooking = async (req, res) => {
 const getUserBookings = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { status, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const { status, startDate, endDate } = req.query;
+    const { page, limit, skip } = require('../../infrastructure/pagination').parsePaginationQuery(req.query);
 
     // Build query
     const query = { userId };
@@ -510,8 +511,8 @@ const getUserBookings = async (req, res) => {
       if (endDate) query.scheduledDate.$lte = new Date(endDate);
     }
 
-    // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    // Pagination (capped for scale)
+    const { buildOffsetMeta } = require('../../infrastructure/pagination');
 
     // Get bookings
     const bookings = await Booking.find(query)
@@ -521,7 +522,7 @@ const getUserBookings = async (req, res) => {
       .populate('workerId', 'name phone profilePhoto')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
 
     // Get total count
@@ -531,10 +532,8 @@ const getUserBookings = async (req, res) => {
       success: true,
       data: bookings,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
+        ...buildOffsetMeta({ page, limit, total }),
+        pages: Math.ceil(total / limit) || 1
       }
     });
   } catch (error) {

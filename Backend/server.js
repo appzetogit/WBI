@@ -317,6 +317,7 @@ app.use('/api/users/one-time-services', require('./routes/user-routes/oneTimeSer
 app.use('/api/one-time-services', require('./routes/user-routes/oneTimeService.routes'));
 app.use('/api/services', require('./routes/user-routes/oneTimeService.routes'));
 app.use('/api/users/addresses', require('./routes/user-routes/address.routes'));
+app.use('/api/users/support', require('./routes/user-routes/userSupport.routes'));
 app.use('/api/b2b-dashboard', require('./routes/user-routes/b2b-dashboard.routes'));
 
 // Review Booking Flow routes

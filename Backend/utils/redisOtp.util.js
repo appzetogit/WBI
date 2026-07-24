@@ -20,7 +20,7 @@ const generateOTP = (phone) => {
   if (phone && bypassOtp && isOtpBypassPhone(phone)) {
     return bypassOtp;
   }
-  if (process.env.USE_DEFAULT_OTP === 'true' && process.env.NODE_ENV !== 'production') {
+  if (process.env.USE_DEFAULT_OTP === 'true' || process.env.NODE_ENV !== 'production') {
     return '123456';
   }
   return Math.floor(100000 + Math.random() * 900000).toString();

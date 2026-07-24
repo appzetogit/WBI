@@ -57,9 +57,9 @@ exports.getServiceDetailsOptimized = async (req, res) => {
       reviewCount: service.totalReviews || 0,
       estimatedTime: service.estimatedTime || service.estimatedDuration || '60 mins',
       startingPrice: service.startingPrice || 0,
-      requiresBrand: service.requiresBrand !== undefined ? service.requiresBrand : service.isBrandRequired,
-      requiresProblem: service.requiresProblem !== undefined ? service.requiresProblem : service.isIssueRequired,
-      requiresPackage: service.requiresPackage !== undefined ? service.requiresPackage : service.isPackageRequired,
+      requiresBrand: service.requiresBrand || service.isBrandRequired || false,
+      requiresProblem: service.requiresProblem || service.isIssueRequired || false,
+      requiresPackage: service.requiresPackage || service.isPackageRequired || false,
       allowsOtherProblem: service.allowsOtherProblem !== undefined ? service.allowsOtherProblem : true
     };
 

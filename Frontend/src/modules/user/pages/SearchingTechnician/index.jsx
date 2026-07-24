@@ -55,8 +55,35 @@ const SearchingTechnician = () => {
   
   const [bottomSheetExpanded, setBottomSheetExpanded] = useState(false);
 
+  const [cancelling, setCancelling] = useState(false);
+
   // References
   const socketRef = useRef(null);
+
+  const cancelSearchAndLeave = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+      const apiBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://app.wbinfs.com/api';
+      const base = apiBase.endsWith('/api') || apiBase.endsWith('/api/')
+        ? apiBase.replace(/\/$/, '')
+        : `${apiBase.replace(/\/$/, '')}/api`;
+      await fetch(`${base}/users/bookings/${bookingId}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ cancellationReason: 'User left search screen' })
+      });
+    } catch (err) {
+      console.warn('Cancel search failed:', err);
+    } finally {
+      if (socketRef.current) socketRef.current.disconnect();
+      navigate('/user/my-bookings', { replace: true });
+    }
+  };
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -177,7 +204,18 @@ const SearchingTechnician = () => {
     <div className={styles.container}>
       {/* Header */}
       <div className={styles.header}>
-        <button className={styles.backBtn} onClick={() => navigate(-1)}>
+        <button
+          type="button"
+          className={styles.backBtn}
+          disabled={cancelling}
+          onClick={() => {
+            if (status === 'searching_worker' || status === 'searching') {
+              cancelSearchAndLeave();
+            } else {
+              navigate(-1);
+            }
+          }}
+        >
           <ArrowRight size={24} style={{ transform: 'rotate(180deg)' }} />
         </button>
       </div>

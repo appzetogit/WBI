@@ -363,28 +363,41 @@ const processWalletPayment = async (req, res) => {
       });
     }
 
-    // Check wallet balance
-    if (user.wallet.balance < booking.finalAmount) {
+    const amount = Number(booking.finalAmount) || 0;
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid booking amount'
+      });
+    }
+
+    // Atomic debit — prevents parallel overdraft
+    const updatedUser = await User.findOneAndUpdate(
+      {
+        _id: userId,
+        'wallet.balance': { $gte: amount }
+      },
+      { $inc: { 'wallet.balance': -amount } },
+      { new: true }
+    );
+
+    if (!updatedUser) {
       return res.status(400).json({
         success: false,
         message: 'Insufficient wallet balance'
       });
     }
 
-    // Deduct from user wallet
-    user.wallet.balance -= booking.finalAmount;
-    await user.save();
-
     const Transaction = require('../../models/Transaction');
     await Transaction.create({
       userId,
       bookingId: booking._id,
-      amount: booking.finalAmount,
+      amount,
       type: 'debit',
       paymentMethod: 'wallet',
       status: 'completed',
       description: `Wallet payment for booking ${booking.bookingNumber}`,
-      balanceAfter: user.wallet.balance
+      balanceAfter: updatedUser.wallet.balance
     });
 
     // Update booking payment status
@@ -401,6 +414,9 @@ const processWalletPayment = async (req, res) => {
     }
 
     await booking.save();
+
+    // Keep local user ref for response / vendor credit paths below
+    user.wallet.balance = updatedUser.wallet.balance;
 
     // ── Credit Wallet from VendorBill (single source of truth) ──
     const Vendor = require('../../models/Vendor');
