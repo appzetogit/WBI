@@ -108,17 +108,8 @@ const CustomerReviews = ({ serviceId = 'all' }) => {
 
   return (
     <section className="pt-0 pb-2 px-4 mb-6 relative">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-black">Customer Reviews</h2>
-        <button 
-          className="text-[14px] font-medium flex items-center gap-1 active:opacity-70 transition-opacity"
-          style={{ color: brandColor }}
-        >
-          See All 
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 18l6-6-6-6" />
-          </svg>
-        </button>
       </div>
 
       <div className="flex overflow-x-auto gap-4 pb-2 -mx-4 px-4 scrollbar-hide snap-x">

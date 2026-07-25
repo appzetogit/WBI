@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { FiChevronLeft, FiCheckCircle, FiCreditCard } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
+import { motion } from 'framer-motion';
 import api from '../../../../services/api';
 import DynamicForm from '../../../../components/common/DynamicForm';
 import { loadRazorpay } from '../../../../utils/loadRazorpay';
@@ -324,6 +325,16 @@ const DynamicServiceRequest = () => {
         </div>
       </header>
       <div className="px-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-br from-[#10AFA5] to-[#0A8D84] rounded-3xl p-6 text-white mb-6 shadow-lg"
+        >
+          <h2 className="text-2xl font-bold mb-2">Book Your {schema.subCategoryName} Request</h2>
+          <p className="text-sm text-teal-50 opacity-90 leading-relaxed">
+            Fill out this form to give us the details of your service request. Our expert team will review your requirements and assign the best professional for the job.
+          </p>
+        </motion.div>
         {schema.description && (
           <p className="text-sm text-gray-600 mb-4">{schema.description}</p>
         )}

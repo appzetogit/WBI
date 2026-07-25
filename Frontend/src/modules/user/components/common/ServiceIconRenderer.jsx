@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wrench, Cog } from 'lucide-react';
+import { FiTool, FiSettings, FiCode, FiSmartphone, FiPenTool, FiSpeaker, FiServer, FiShield, FiMonitor, FiLayout, FiWifi, FiCamera } from 'react-icons/fi';
 
 // Local generated vector icons (from grid)
 import homeCleaningIcon from '../../../../assets/images/icons/services/vector/home-cleaning.png';
@@ -16,9 +16,10 @@ import laundryIcon from '../../../../assets/images/icons/services/vector/laundry
 import beautyServicesIcon from '../../../../assets/images/icons/services/vector/beauty-services.png';
 import deepCleaningIcon from '../../../../assets/images/icons/services/vector/deep-cleaning.png';
 import homeMaintenanceIcon from '../../../../assets/images/icons/services/vector/home-maintenance.png';
+import cctvIcon from '../../../../assets/images/icons/services/vector/cctv.png';
 
 export const ServiceIconRenderer = ({ categoryName, className = "w-[32px] h-[32px]" }) => {
-  if (!categoryName) return <Wrench className={className} strokeWidth={1.5} />;
+  if (!categoryName) return <FiTool className={className} />;
   
   const normalized = categoryName.toLowerCase().trim();
 
@@ -38,8 +39,23 @@ export const ServiceIconRenderer = ({ categoryName, className = "w-[32px] h-[32p
   if (normalized.includes('maintenance')) return <img fetchPriority="low" loading="lazy" src={homeMaintenanceIcon} className={className} style={{ objectFit: 'contain' }} alt="Home Maintenance" />;
   if (normalized.includes('clean')) return <img fetchPriority="low" loading="lazy" src={homeCleaningIcon} className={className} style={{ objectFit: 'contain' }} alt="Home Cleaning" />;
 
+  // CCTV & Surveillance Services
+  if (normalized.includes('dvr') || normalized.includes('nvr')) return <FiServer className={className} />;
+  if (normalized.includes('cctv') || normalized.includes('camera') || normalized.includes('surveillance')) return <FiCamera className={className} />;
+
+  // Digital Solutions & IT Services (Using exact react-icons/fi to match CategoryDetails)
+  if (normalized.includes('web')) return <FiCode className={className} />;
+  if (normalized.includes('app')) return <FiSmartphone className={className} />;
+  if (normalized.includes('marketing') || normalized.includes('seo')) return <FiSpeaker className={className} />;
+  if (normalized.includes('design') || normalized.includes('ui/ux')) return <FiPenTool className={className} />;
+  if (normalized.includes('server') || normalized.includes('cloud') || normalized.includes('hosting')) return <FiServer className={className} />;
+  if (normalized.includes('security') || normalized.includes('cyber')) return <FiShield className={className} />;
+  if (normalized.includes('network') || normalized.includes('wifi')) return <FiWifi className={className} />;
+  if (normalized.includes('software') || normalized.includes('crm') || normalized.includes('erp')) return <FiLayout className={className} />;
+  if (normalized.includes('computer') || normalized.includes('laptop') || normalized.includes('desktop')) return <FiMonitor className={className} />;
+
   // Default fallback
-  return <Cog className={className} strokeWidth={1.5} />;
+  return <FiSettings className={className} />;
 };
 
 export default ServiceIconRenderer;

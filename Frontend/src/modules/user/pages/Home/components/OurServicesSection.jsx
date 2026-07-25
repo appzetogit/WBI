@@ -64,11 +64,42 @@ const OurServicesSection = () => {
       console.log('[SELECTED_SERVICE_ID]', service.serviceId);
       console.log('[SELECTED_SERVICE_SLUG]', service.slug);
       
-      if (service.type === 'one_time') {
-        navigate(`/user/service/${slug}`);
-      } else {
-        navigate(`/user/services/${slug}/details`);
+      const serviceName = (service.name || service.title || '').trim().toLowerCase();
+      const parentCategory = categories.find(c => c.id === service.categoryId);
+      const isDigital = parentCategory && parentCategory.name && parentCategory.name.toLowerCase().includes('digital');
+
+      // SMS dynamic forms (any Cxx-yy)
+      const slugMatch = slug ? slug.match(/^(c\d{2}-\d{2})/i) : null;
+      if (service.subCatCode || /^C\d{2}-\d{2}$/i.test(String(service.serviceId || service._id || '')) || slugMatch) {
+        const code = service.subCatCode || (slugMatch ? slugMatch[1].toUpperCase() : (service.serviceId || service._id));
+        navigate(`/user/service-request/${code}`);
+        return;
       }
+
+      // Legacy digital enquiry pages
+      if (isDigital && serviceName === 'web development') {
+        navigate('/user/web-development-enquiry');
+        return;
+      }
+      if (isDigital && serviceName === 'app development') {
+        navigate('/user/app-development-enquiry');
+        return;
+      }
+      if (isDigital && serviceName === 'crm') {
+        navigate('/user/crm-enquiry');
+        return;
+      }
+      if (isDigital && serviceName === 'digital marketing') {
+        navigate('/user/marketing-enquiry');
+        return;
+      }
+      if (isDigital && (serviceName.includes('design') || serviceName.includes('ui/ux'))) {
+        navigate('/user/design-enquiry');
+        return;
+      }
+      
+      // Generic catalog fallback
+      navigate(`/user/service/${slug}`);
     }
   };
 
@@ -85,7 +116,7 @@ const OurServicesSection = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex overflow-x-auto gap-2 pb-2 px-4 scrollbar-hide snap-x mb-1">
+      <div className="flex overflow-x-auto gap-2 pb-2 px-4 scroll-pl-4 scrollbar-hide snap-x mb-1">
         {displayCategories.map((category) => {
           const isActive = activeTabToUse === category.id;
           return (
@@ -122,7 +153,7 @@ const OurServicesSection = () => {
       </div>
 
       {/* Service Cards */}
-      <div className="flex overflow-x-auto gap-3 pb-4 px-4 scrollbar-hide snap-x pt-2">
+      <div className="flex overflow-x-auto gap-3 pb-4 px-4 scroll-pl-4 scrollbar-hide snap-x pt-2">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -141,13 +172,13 @@ const OurServicesSection = () => {
                     onClick={() => handleServiceClick(service)}
                     className={`bg-white rounded-[16px] p-2.5 shadow-[0_2px_12px_rgba(0,0,0,0.04)] border border-gray-100 flex flex-col items-center justify-center min-w-[100px] max-w-[100px] snap-center flex-shrink-0 cursor-pointer hover:border-[#10AFA5]/30 hover:shadow-[0_4px_16px_rgba(16,175,165,0.08)] active:scale-[0.96] transition-all duration-200 ${isOneTime ? 'bg-gradient-to-b from-white to-[#F8FCFC]' : ''}`}
                   >
-                    <div className={`w-14 h-14 mb-2 relative flex items-center justify-center shrink-0 rounded-2xl overflow-hidden shadow-sm ${isOneTime ? 'border border-[#10AFA5]/20 p-0.5 bg-white' : 'border border-gray-50'}`}>
+                    <div className={`w-14 h-14 mb-2 relative flex items-center justify-center shrink-0 rounded-2xl overflow-hidden shadow-sm ${isOneTime ? 'border border-[#10AFA5]/20 p-0.5 bg-white' : 'bg-[#F8FCFC] border border-gray-100 text-[#10AFA5]'}`}>
                       {isOneTime ? (
                         <div className="w-full h-full rounded-xl overflow-hidden">
                           <img src={getServiceImage(service.name)} className="w-full h-full object-cover transition-transform duration-300 hover:scale-110" alt={service.name} />
                         </div>
                       ) : (
-                        <ServiceIconRenderer categoryName={service.name} className="w-full h-full object-cover drop-shadow-sm" />
+                        <ServiceIconRenderer categoryName={service.name} className="w-6 h-6" />
                       )}
                     </div>
                     <h3 className="text-[10px] font-bold text-[#0F172A] text-center leading-[1.2] mb-1 line-clamp-2 min-h-[24px] flex items-center">
