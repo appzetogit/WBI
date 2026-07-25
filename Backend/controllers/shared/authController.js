@@ -387,7 +387,15 @@ exports.unifiedLogin = async (req, res) => {
 
     const { user: foundUser, role: resolvedRole, redirect: resolvedRedirect, model: matchedModel } = searchResult;
 
-    if (preferredRole && resolvedRole !== preferredRole) {
+    // Field app (Flutter) is shared by engineer + worker. Prefer the portal role,
+    // but allow the sibling field role so a registered worker can log in from the
+    // engineer login surface (and vice versa) without a false "not registered" error.
+    const FIELD_ROLES = new Set(['engineer', 'worker']);
+    if (
+      preferredRole &&
+      resolvedRole !== preferredRole &&
+      !(FIELD_ROLES.has(preferredRole) && FIELD_ROLES.has(resolvedRole))
+    ) {
       return res.status(404).json({
         success: false,
         message: `No ${preferredRole} account found with this mobile. Try the correct app or register.`

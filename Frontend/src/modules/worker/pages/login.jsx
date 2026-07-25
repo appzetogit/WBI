@@ -61,13 +61,15 @@ const WorkerLogin = () => {
       };
       const response = await sharedAuthService.unifiedLogin(loginPayload);
       if (response.success) {
-        const role = String(response.user?.role || '').toLowerCase();
-        if (role && role !== 'worker') {
+        const role = String(response.user?.role || response.role || '').toLowerCase();
+        // Shared Worker/Engineer login surface — allow either field role
+        if (role && role !== 'worker' && role !== 'engineer') {
           toast.error(`This account is registered as ${role}. Please use the ${role} login.`);
           return;
         }
         toast.success('Welcome back!');
-        navigate(response.redirectTo || '/worker/dashboard', { replace: true });
+        const fallback = role === 'engineer' ? '/engineer/dashboard' : '/worker/dashboard';
+        navigate(response.redirectTo || fallback, { replace: true });
       } else {
         toast.error(response.message || 'Login failed');
       }

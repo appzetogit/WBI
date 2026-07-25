@@ -323,10 +323,11 @@ const login = async (req, res) => {
     const { phone, password } = req.body;
 
     const searchResult = await findUserAcrossCollections(phone, 'worker');
-    if (!searchResult || searchResult.role !== 'worker') {
+    // Shared Flutter field app: accept worker OR engineer accounts
+    if (!searchResult || !['engineer', 'worker'].includes(searchResult.role)) {
       return res.status(404).json({
         success: false,
-        message: 'Worker account not found. Please register first.'
+        message: 'Account not found. Please register as Worker or Engineer first.'
       });
     }
 

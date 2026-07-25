@@ -47,11 +47,23 @@ const findUserAcrossCollections = async (identifier, preferredRole = null) => {
 
   let collectionsToSearch = [...COLLECTIONS];
   if (preferredRole) {
-    const preferred = collectionsToSearch.find((c) => c.role === preferredRole);
-    if (preferred) {
-      collectionsToSearch = collectionsToSearch.filter((c) => c.role !== preferredRole);
-      collectionsToSearch.unshift(preferred);
-    }
+    // Engineer/Worker share one Flutter field app — prefer the selected role,
+    // then immediately try the sibling field role before vendor/user/admin.
+    const fieldPair =
+      preferredRole === 'engineer'
+        ? ['engineer', 'worker']
+        : preferredRole === 'worker'
+          ? ['worker', 'engineer']
+          : [preferredRole];
+
+    const preferredItems = fieldPair
+      .map((role) => COLLECTIONS.find((c) => c.role === role))
+      .filter(Boolean);
+    const preferredRoles = new Set(preferredItems.map((c) => c.role));
+    collectionsToSearch = [
+      ...preferredItems,
+      ...COLLECTIONS.filter((c) => !preferredRoles.has(c.role))
+    ];
   }
 
   for (const item of collectionsToSearch) {
