@@ -749,20 +749,11 @@ exports.generateAadhaarOtp = async (req, res) => {
   try {
     const { role, entityId, aadhaarNumber: aadhaarRaw } = req.body;
     const aadhaarNumber = String(aadhaarRaw ?? '').replace(/\D/g, '');
-    // #region agent log
-    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',runId:'post-fix',hypothesisId:'H1,H5',location:'kycController.js:generateAadhaarOtp:entry',message:'generate-otp request',data:{role,hasEntityId:!!entityId,aadhaarType:typeof aadhaarRaw,aadhaarLen:aadhaarNumber.length,aadhaarMasked:aadhaarNumber?`****${aadhaarNumber.slice(-4)}`:null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!/^\d{12}$/.test(aadhaarNumber)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',runId:'post-fix',hypothesisId:'H1',location:'kycController.js:generateAadhaarOtp:validationFail',message:'local validation rejected',data:{aadhaarType:typeof aadhaarRaw,aadhaarLen:aadhaarNumber.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       return res.status(400).json({ success: false, message: 'Valid 12-digit Aadhaar number is required' });
     }
     
     const result = await cgpeService.generateAadhaarOtp(aadhaarNumber);
-    // #region agent log
-    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',hypothesisId:'H2,H3',location:'kycController.js:generateAadhaarOtp:cgpeOk',message:'cgpe generate returned',data:{hasClientId:!!result?.data?.clientId,flow:result?.data?.flow},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
 
     if (entityId) {
       await storeAadhaarOtpSession(entityId, aadhaarNumber, result.data.clientId, result.data.flow);
@@ -779,9 +770,6 @@ exports.generateAadhaarOtp = async (req, res) => {
     });
   } catch (error) {
     console.error('[KYC] generateAadhaarOtp Error:', error);
-    // #region agent log
-    fetch('http://127.0.0.1:7577/ingest/6011d822-6630-4485-85a2-a11dfd06147b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d825b'},body:JSON.stringify({sessionId:'7d825b',hypothesisId:'H2,H3,H4',location:'kycController.js:generateAadhaarOtp:catch',message:'generate-otp failed',data:{errMsg:String(error?.message||'').slice(0,200),hasEntityId:!!req.body?.entityId},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (req.body.entityId) {
       await logAudit(req.body.role, req.body.entityId, 'AADHAAR_OTP_FAILED', 'aadhaar', 'cgpe', 'failed', error.message, req);
     }

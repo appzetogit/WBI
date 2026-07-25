@@ -3,8 +3,14 @@ import { toast } from 'sonner';
 import { apiCache } from '../utils/apiCache';
 
 // API Base URL
-// Fallback dynamically to production URL if not explicitly provided in .env
-let rawBaseUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://app.wbinfs.com/api';
+// On local Vite, always use same-origin `/api` so the vite proxy hits the instrumented backend.
+const isLocalHost =
+  typeof window !== 'undefined' &&
+  (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
+    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(window.location.hostname));
+let rawBaseUrl = isLocalHost
+  ? '/api'
+  : (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'https://app.wbinfs.com/api');
 if (rawBaseUrl && !rawBaseUrl.endsWith('/api') && !rawBaseUrl.endsWith('/api/')) {
   rawBaseUrl = rawBaseUrl.replace(/\/$/, '') + '/api';
 }
