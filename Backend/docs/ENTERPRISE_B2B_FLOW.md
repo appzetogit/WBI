@@ -81,13 +81,30 @@ When enabled on `ServiceConfig`, milestones get `customerSignoff` / `b2bSignoff`
 | Customer (public) | POST | `/api/public/service-requests/:requestCode/milestones/:milestoneId/customer-signoff` |
 | End customer (public) | POST | `/api/public/b2b-jobs/:jobRef/customer-signoff` body `{ phone, approved }` |
 
-Engineer B2B completion payout uses `computeB2BEngineerPayout(job)` from `ServiceConfig.paymentRules` (not a hardcoded %).
+Engineer B2B completion **does not** credit the engineer wallet immediately. Escrow release after B2B Company approval pays out (see P0 below).
+
+## P0 — True B2B escrow hold + hybrid release (shipped)
+
+| Step | Behaviour |
+|------|-----------|
+| Fund (bulk create / activate) | `balance → escrowBalance` (Available → Escrow Locked). `paymentStatus = escrow_locked`. `EscrowLedger` `held`. |
+| Field complete | Sets `payoutStatus = pending_release`. Money stays locked. Flow awaits **B2B Company approval**. |
+| Company Approval (`POST /b2b/jobs/:id/approve-work`) | Calls `releaseB2BJobEscrowPayment` |
+| `engineer_direct` release | Credits **Engineer Wallet** with `engineerShare`; platform/GST retained; company `escrowBalance` ↓ + `totalSpent` ↑ |
+| `vendor_marketplace` release | Credits **VendorFinanceWallet** with **net** (vendor pays engineers via `pay-worker`) |
+| Cancel / fail / escalate / reject | `refundB2BJobEscrow` → Escrow Locked → Available |
+
+Helpers: `holdB2BJobEscrow`, `refundB2BJobEscrow`, `releaseB2BJobEscrowPayment` in `escrowReleaseEngine.service.js`.
+
+Idempotency key: `b2b_job_release:{jobId}` on `Transaction.metadata`.
+
+Verify: `node scripts/verifyB2BEscrowP0.js`
 
 ## New spine (this implementation)
 
 - **`EnterpriseProjectFlow`** — lifecycle + timeline + escrow snapshot per opportunity/project.
 - **`enterpriseB2BOrchestrator.service.js`** — bootstrap on opportunity create; vendor project + escrow lock; engineer assigned; admin escalation.
-- **`escrowReleaseEngine.service.js`** — config-driven milestone release to vendor wallet + finance ledger.
+- **`escrowReleaseEngine.service.js`** — config-driven milestone release + **B2B job hold/release/refund**.
 - **Admin APIs** — `/api/admin/enterprise-b2b/flows`, `flow`, `template-bundle/:categoryCode`, milestone `qa-approve` / `customer-signoff` / `b2b-signoff`.
 
 ## Honest completion estimate
@@ -95,13 +112,26 @@ Engineer B2B completion payout uses `computeB2BEngineerPayout(job)` from `Servic
 | Area | ~% | Notes |
 |------|-----|------|
 | Catalog / SMS dynamics | 75% | User + vendor registration mostly config-driven |
-| Assignment engine | 80% | Vendor/freelancer; certifications/inventory partial |
+| Assignment engine | 92% | Vendor cascade + freelancer pool; engineer-direct failure → vendor fallback → admin escalation; no dual-dispatch race |
 | Escrow (user SR) | 55% | Hold + full release on complete; milestone slice added for ops projects |
-| B2B bulk → field flow | 50% | B2B jobs parallel path; enterprise flow unifies opportunity-led ops |
+| **B2B escrow (P0)** | **90%** | True hold/release/refund + hybrid payout; milestone % for bulk field jobs still Phase 2 |
+| B2B bulk → field flow | 85% | Confirm → escrow hold → jobs → assignment; company approval before payout |
 | Project OS (multi-site) | 65% | Templates exist; VendorOps is lighter sibling |
 | Notifications (SMS/email/WhatsApp) | 60% | FCM + partial marketplace notify |
 | Milestone escrow (all channels) | ~85% | Sign-off gates + config payout; UI surfaces still thin |
-| B2B bulk → enterprise flow | ~90% | Flow bootstrap + approve-work + milestone B2B sign-off |
+| B2B sidebar modules | ~90% | All sidebar pages wired to live APIs (Settings/Onboarding hardened this pass) |
+
+## Phase 2 (deferred)
+
+1. Milestone % slices for bulk field jobs (reuse `releaseMilestoneEscrow`).
+2. Formal quote → pay gate before assignment.
+3. Dispute freeze (`EscrowLedger.status = disputed`) + partial release admin tools.
+4. MFA / device trust polish beyond logout-all-sessions.
+5. GST e-invoice depth + full PDF report suite.
+6. WhatsApp notification matrix.
+7. Stronger public customer OTP on B2B job sign-off.
+8. CDN / multi-region infra for millions of users.
+9. Vendor/B2B UI polish for pending milestone sign-offs.
 
 ## Next engineering passes
 
@@ -115,4 +145,7 @@ Engineer B2B completion payout uses `computeB2BEngineerPayout(job)` from `Servic
 
 - Restart API after deploy.
 - Seed milestones on `ServiceConfig` via Service Management or `seedServiceConfigs.js`.
-- Monitor assignment escalations: socket `enterprise:assignment_escalation` on admin room.
+- Sample bulk file: `Backend/uploads/b2b-bulk/samples/WBI_B2B_50_Jobs.xlsx`.
+- Monitor assignment escalations: socket `enterprise:assignment_escalation` / `admin:matchingFailed` on admin room.
+- Set `ServiceConfig.paymentRules.assignmentMode` to `vendor_marketplace` for vendor-first; default remains `engineer_direct` with vendor fallback on match failure.
+- Admin escrow-aware refund: `POST /admin/b2b-wallets/:companyId/refund` with `{ jobId }` refunds held escrow for that job.

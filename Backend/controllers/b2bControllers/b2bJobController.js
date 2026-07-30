@@ -17,20 +17,55 @@ const getStats = async (req, res) => {
     const rawId = req.companyId || req.user.companyId || req.user.id;
     const companyId = new mongoose.Types.ObjectId(rawId);
     
-    // Complex Aggregation for KPI Cards
     const statsPipeline = [
       { $match: { companyId } },
       {
         $facet: {
           totalJobs: [{ $count: 'count' }],
-          pending: [{ $match: { status: 'pending' } }, { $count: 'count' }],
+          pending: [{ $match: { status: { $in: ['pending', 'searching_engineer'] } } }, { $count: 'count' }],
+          pendingWallet: [{ $match: { status: 'pending_wallet' } }, { $count: 'count' }],
           searchingEngineer: [{ $match: { status: 'searching_engineer' } }, { $count: 'count' }],
           assigned: [{ $match: { status: 'assigned' } }, { $count: 'count' }],
-          engineerOnWay: [{ $match: { status: 'engineer_on_way' } }, { $count: 'count' }], // assuming extra states exist
+          engineerOnWay: [{ $match: { trackingStatus: 'en_route' } }, { $count: 'count' }],
           inProgress: [{ $match: { status: 'in_progress' } }, { $count: 'count' }],
-          completed: [{ $match: { status: 'completed' } }, { $count: 'count' }],
+          onHold: [{ $match: { status: 'on_hold' } }, { $count: 'count' }],
+          completed: [{ $match: { status: { $in: ['completed', 'closed'] } } }, { $count: 'count' }],
           cancelled: [{ $match: { status: 'cancelled' } }, { $count: 'count' }],
+          rejected: [{ $match: { status: 'rejected' } }, { $count: 'count' }],
+          escalated: [{ $match: { status: 'escalated' } }, { $count: 'count' }],
           failed: [{ $match: { status: 'failed' } }, { $count: 'count' }],
+          lastMonthTotal: [
+            {
+              $match: {
+                createdAt: {
+                  $gte: new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1),
+                  $lt: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+                }
+              }
+            },
+            { $count: 'count' }
+          ],
+          thisMonthCompleted: [
+            {
+              $match: {
+                status: { $in: ['completed', 'closed'] },
+                createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
+              }
+            },
+            { $count: 'count' }
+          ],
+          lastMonthCompleted: [
+            {
+              $match: {
+                status: { $in: ['completed', 'closed'] },
+                createdAt: {
+                  $gte: new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1),
+                  $lt: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+                }
+              }
+            },
+            { $count: 'count' }
+          ],
           todayJobs: [
             {
               $match: {
@@ -45,9 +80,7 @@ const getStats = async (req, res) => {
           thisMonthJobs: [
             {
               $match: {
-                createdAt: {
-                  $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
-                }
+                createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) }
               }
             },
             { $count: 'count' }
@@ -66,37 +99,143 @@ const getStats = async (req, res) => {
     const extractCount = (arr) => (arr && arr.length > 0 ? arr[0].count : 0);
     const extractTotal = (arr) => (arr && arr.length > 0 ? arr[0].total : 0);
 
+    const thisMonth = extractCount(data.thisMonthJobs);
+    const lastMonth = extractCount(data.lastMonthTotal);
+    const thisMonthDone = extractCount(data.thisMonthCompleted);
+    const lastMonthDone = extractCount(data.lastMonthCompleted);
+
+    const pctChange = (curr, prev) => {
+      if (!prev) return curr ? '+100% vs last month' : 'No prior month data';
+      const pct = Math.round(((curr - prev) / prev) * 100);
+      return `${pct >= 0 ? '↑' : '↓'} ${Math.abs(pct)}% vs last month`;
+    };
+
     const stats = {
       totalJobs: extractCount(data.totalJobs),
       pending: extractCount(data.pending),
+      pendingWallet: extractCount(data.pendingWallet),
       searchingEngineer: extractCount(data.searchingEngineer),
       assigned: extractCount(data.assigned),
       engineerOnWay: extractCount(data.engineerOnWay),
       inProgress: extractCount(data.inProgress),
+      onHold: extractCount(data.onHold),
       completed: extractCount(data.completed),
       cancelled: extractCount(data.cancelled),
+      rejected: extractCount(data.rejected),
+      escalated: extractCount(data.escalated),
       failed: extractCount(data.failed),
       todayJobs: extractCount(data.todayJobs),
-      thisMonthJobs: extractCount(data.thisMonthJobs),
+      thisMonthJobs: thisMonth,
       totalSpend: extractTotal(data.totalSpend),
-      walletDeduction: extractTotal(data.totalSpend), // Alias for spend
-      averageCompletionTime: '2.5 hrs', // Placeholder logic until exact SLA calculation is defined
-      averageSLA: '98%' // Placeholder
+      walletDeduction: extractTotal(data.totalSpend),
+      trends: {
+        totalJobs: pctChange(thisMonth, lastMonth),
+        completed: pctChange(thisMonthDone, lastMonthDone),
+        totalJobsUp: thisMonth >= lastMonth,
+        completedUp: thisMonthDone >= lastMonthDone
+      }
     };
 
-    // Calculate chart data (overview)
     const chartData = [
-      { name: 'Pending', value: stats.pending, color: '#f59e0b' },
+      { name: 'Pending', value: stats.pending + stats.pendingWallet, color: '#f59e0b' },
       { name: 'Assigned', value: stats.assigned, color: '#8b5cf6' },
       { name: 'In Progress', value: stats.inProgress, color: '#3b82f6' },
+      { name: 'On Hold', value: stats.onHold, color: '#64748b' },
       { name: 'Completed', value: stats.completed, color: '#10b981' },
-      { name: 'Failed/Cancelled', value: stats.failed + stats.cancelled, color: '#ef4444' }
+      { name: 'Escalated', value: stats.escalated, color: '#ea580c' },
+      { name: 'Failed/Cancelled', value: stats.failed + stats.cancelled + stats.rejected, color: '#ef4444' }
     ];
 
     return res.status(200).json({ success: true, stats, chartData });
   } catch (error) {
     console.error('[MyJobs getStats]', error);
     return res.status(500).json({ success: false, message: 'Server error fetching stats' });
+  }
+};
+
+/**
+ * GET filter metadata (distinct services, cities, batches from company jobs)
+ */
+const getFilterMeta = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const companyOid = new mongoose.Types.ObjectId(companyId);
+
+    const [services, cities, batches] = await Promise.all([
+      B2BJob.distinct('service', { companyId: companyOid }),
+      B2BJob.distinct('city', { companyId: companyOid }),
+      B2BBatch.find({ companyId: companyOid })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .select('batchId fileName createdAt status')
+        .lean()
+    ]);
+
+    // Prefer ServiceConfig catalog when available for services list
+    let catalogServices = [];
+    try {
+      const ServiceConfig = require('../../models/ServiceConfig');
+      const configs = await ServiceConfig.find({ isActive: { $ne: false } })
+        .select('categoryName categoryCode')
+        .lean();
+      catalogServices = configs.map((c) => c.categoryName || c.categoryCode).filter(Boolean);
+    } catch (_) { /* optional */ }
+
+    const serviceSet = new Set([...(catalogServices || []), ...(services || [])].filter(Boolean));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        services: Array.from(serviceSet).sort(),
+        cities: (cities || []).filter(Boolean).sort(),
+        batches: batches || [],
+        statuses: [
+          'pending', 'pending_wallet', 'searching_engineer', 'assigned', 'in_progress',
+          'on_hold', 'completed', 'cancelled', 'rejected', 'escalated', 'failed', 'closed'
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('[MyJobs getFilterMeta]', error);
+    return res.status(500).json({ success: false, message: 'Failed to load filter metadata' });
+  }
+};
+
+/**
+ * GET recent job activity feed for company
+ */
+const getRecentActivity = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 15, 50);
+    const JobHistory = require('../../models/JobHistory');
+
+    const companyJobs = await B2BJob.find({ companyId }).select('_id jobId').lean();
+    const jobMap = new Map(companyJobs.map((j) => [String(j._id), j.jobId]));
+    const jobIds = companyJobs.map((j) => j._id);
+
+    if (!jobIds.length) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const history = await JobHistory.find({ jobId: { $in: jobIds } })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    const data = history.map((h) => ({
+      id: h._id,
+      jobId: jobMap.get(String(h.jobId)) || h.jobId,
+      status: h.status,
+      remark: h.remark || '',
+      role: h.role,
+      createdAt: h.createdAt
+    }));
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error('[MyJobs getRecentActivity]', error);
+    return res.status(500).json({ success: false, message: 'Failed to load recent activity' });
   }
 };
 
@@ -126,13 +265,20 @@ const getJobs = async (req, res) => {
       ];
     }
 
-    // Direct filters
-    if (status && status !== 'all') filter.status = status;
+    // Direct filters — support comma-separated statuses (e.g. failed,cancelled,rejected)
+    if (status && status !== 'all') {
+      const statuses = String(status).split(',').map((s) => s.trim().toLowerCase().replace(/\s+/g, '_')).filter(Boolean);
+      if (statuses.length === 1) filter.status = statuses[0];
+      else if (statuses.length > 1) filter.status = { $in: statuses };
+    }
     if (service && service !== 'all') filter.service = service;
     if (city && city !== 'all') filter.city = city;
     if (priority && priority !== 'all') filter.priority = priority;
     if (paymentStatus && paymentStatus !== 'all') filter.paymentStatus = paymentStatus;
     if (batchId && batchId !== 'all') filter.batchId = batchId;
+    if (req.query.allocationStage && req.query.allocationStage !== 'all') {
+      filter.allocationStage = req.query.allocationStage;
+    }
 
     // Date range
     if (startDate && endDate) {
@@ -273,21 +419,102 @@ const cancelJob = async (req, res) => {
     const job = await B2BJob.findOne({ _id: req.params.id, companyId });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
+    if (['completed', 'closed', 'cancelled'].includes(job.status)) {
+      return res
+        .status(400)
+        .json({ success: false, message: `Job is already ${job.status} and cannot be cancelled` });
+    }
+    if (['in_progress'].includes(job.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Work has already started. Raise a support ticket to stop this job.'
+      });
+    }
+
     job.status = 'cancelled';
+    job.allocationStage = 'not_started';
+    job.allocationReason = 'Cancelled by company';
+    job.allocationUpdatedAt = new Date();
     await job.save();
+
+    // Stop the allocation engine and return any escrowed funds to the wallet.
+    const Opportunity = require('../../models/Opportunity');
+    const openOpportunities = await Opportunity.find({
+      'assignment.b2bJobId': job._id,
+      status: 'open'
+    }).select('_id');
+    for (const opp of openOpportunities) {
+      try {
+        const { cancelFreelancerPoolTimeout } = require('../../services/projectAssignmentEngine.service');
+        await cancelFreelancerPoolTimeout(opp._id);
+      } catch (_) {
+        /* non-blocking */
+      }
+      await Opportunity.updateOne(
+        { _id: opp._id },
+        { $set: { status: 'cancelled', 'assignment.phase': 'expired' } }
+      );
+    }
+
+    let refund = null;
+    try {
+      const { refundB2BJobEscrow } = require('../../services/escrowReleaseEngine.service');
+      refund = await refundB2BJobEscrow({ jobId: job._id, reason: 'cancelled_by_company' });
+    } catch (refundErr) {
+      console.error('[MyJobs cancelJob] escrow refund failed:', refundErr.message);
+    }
 
     await B2BJobStatusLog.create({
       jobId: job._id,
       status: 'cancelled',
       updatedBy: req.user.id
     });
-    
+
     const io = req.app.get('io');
     if (io) io.emit('job_cancelled', { jobId: job._id });
 
-    return res.status(200).json({ success: true, message: 'Job cancelled successfully' });
+    return res.status(200).json({
+      success: true,
+      message: refund?.ok
+        ? 'Job cancelled and escrow returned to your wallet'
+        : 'Job cancelled successfully'
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/**
+ * POST Retry allocation for a job that stalled or was escalated to admin.
+ */
+const rematchJob = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const job = await B2BJob.findOne({ _id: req.params.id, companyId }).select('_id');
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+
+    const { rematchB2BJob } = require('../../services/b2bJobRematch.service');
+    const result = await rematchB2BJob(job._id, {
+      actorRole: 'b2b',
+      actorId: req.user.id,
+      note: String(req.body?.note || '').slice(0, 200)
+    });
+
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ success: false, message: result.message });
+    }
+
+    const io = req.app.get('io');
+    if (io) io.emit('job_updated', { jobId: job._id, status: 'pending' });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Matching restarted — engineers and vendors are being contacted again',
+      data: { attempt: result.attempt }
+    });
+  } catch (error) {
+    console.error('[MyJobs rematchJob]', error);
+    return res.status(500).json({ success: false, message: 'Failed to restart matching' });
   }
 };
 
@@ -687,6 +914,8 @@ const getJobEnterpriseFlow = async (req, res) => {
 
 module.exports = {
   getStats,
+  getFilterMeta,
+  getRecentActivity,
   getJobs,
   exportJobs,
   getJobDetails,
@@ -695,6 +924,7 @@ module.exports = {
   getJobEnterpriseFlow,
   updateJob,
   cancelJob,
+  rematchJob,
   getJobTimeline,
   reassignEngineer,
   getLiveTracking,

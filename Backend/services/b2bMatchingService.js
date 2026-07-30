@@ -128,6 +128,9 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
   }
   b2bJob.currentWave = waveIndex + 1;
   b2bJob.waveStartedAt = new Date();
+  b2bJob.allocationStage = 'engineer_waves';
+  b2bJob.allocationReason = `Searching engineers within ${radiusKm} km (wave ${waveIndex + 1}/${radii.length})`;
+  b2bJob.allocationUpdatedAt = new Date();
   await b2bJob.save();
 
   if (waveIndex === 0) {
@@ -235,6 +238,9 @@ const assignJobToEngineer = async (b2bJob, engineer, radiusKm = null, waveNumber
   fresh.assignedAt = new Date();
   fresh.startOtp = startOtp;
   fresh.startOtpSentAt = new Date();
+  fresh.allocationStage = 'allocated';
+  fresh.allocationReason = `Assigned to ${engineer.name}`;
+  fresh.allocationUpdatedAt = new Date();
   await fresh.save();
 
   await JobHistory.create({
@@ -303,28 +309,126 @@ const assignJobToEngineer = async (b2bJob, engineer, radiusKm = null, waveNumber
 };
 
 const handleMatchingFailure = async (b2bJob, reason) => {
-  b2bJob.status = 'failed';
+  // Fallback: vendor marketplace → freelancer pool (via assignment engine) before admin escalation
+  let escalationReason = reason;
+  try {
+    const { createOpportunityFromB2BJob } = require('../utils/createOpportunityFromEnquiry');
+    const EnterpriseProjectFlow = require('../models/EnterpriseProjectFlow');
+    const result = await createOpportunityFromB2BJob(b2bJob);
+
+    // Admin must add the missing catalog category — routing it anywhere else
+    // would send the job to an unrelated vendor pool.
+    if (result?.unmatchedCategory) {
+      escalationReason = `No service category configured for "${b2bJob.service}". Add it in the service catalog, then retry matching.`;
+    }
+    if (result?.opportunity) {
+      b2bJob.status = 'pending';
+      b2bJob.allocationStage = 'vendor_marketplace';
+      b2bJob.allocationReason = `No engineer accepted (${reason}). Offered to ${result.eligibleCount || 0} vendor(s).`;
+      b2bJob.allocationUpdatedAt = new Date();
+      await b2bJob.save();
+
+      await JobHistory.create({
+        jobId: b2bJob._id,
+        status: 'pending',
+        remark: `Engineer matching failed (${reason}). Escalated to vendor marketplace (${result.eligibleCount || 0} eligible).`,
+        role: 'system'
+      });
+
+      const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: b2bJob._id });
+      if (flow) {
+        flow.opportunityId = result.opportunity._id;
+        flow.status = 'assignment_active';
+        flow.timeline = flow.timeline || [];
+        flow.timeline.push({
+          key: 'vendor_fallback',
+          label: 'Engineer waves exhausted — routed to vendor marketplace',
+          at: new Date(),
+          meta: { reason, eligibleCount: result.eligibleCount || 0 }
+        });
+        await flow.save();
+      }
+
+      emitSocket(`b2b:${b2bJob.companyId.toString()}`, 'b2b:jobVendorFallback', {
+        jobId: b2bJob.jobId,
+        reason,
+        eligibleCount: result.eligibleCount || 0
+      });
+      emitSocket('admin', 'admin:matchingVendorFallback', {
+        jobId: b2bJob.jobId,
+        companyId: b2bJob.companyId,
+        reason,
+        eligibleCount: result.eligibleCount || 0
+      });
+
+      console.warn(`[Matching] ${b2bJob.jobId} engineer fail → vendor marketplace (${result.eligibleCount || 0})`);
+      return;
+    }
+  } catch (fallbackErr) {
+    console.warn(`[Matching] Vendor fallback failed for ${b2bJob.jobId}:`, fallbackErr.message);
+  }
+
+  b2bJob.status = 'escalated';
+  b2bJob.allocationStage = 'admin_escalation';
+  b2bJob.allocationReason = String(escalationReason || 'Allocation failed').slice(0, 300);
+  b2bJob.allocationUpdatedAt = new Date();
   await b2bJob.save();
+
+  try {
+    const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
+    await refundB2BJobEscrow({
+      jobId: b2bJob._id,
+      reason: `matching_escalated:${escalationReason}`
+    });
+  } catch (refundErr) {
+    console.warn(`[Matching] Escrow refund on escalate failed for ${b2bJob.jobId}:`, refundErr.message);
+  }
 
   await JobHistory.create({
     jobId: b2bJob._id,
-    status: 'failed',
-    remark: `Engineer allocation failed: ${reason}. Admin intervention required.`,
+    status: 'escalated',
+    remark: `Allocation failed: ${escalationReason}. Admin escalation required. Escrow returned to wallet.`,
     role: 'system'
   });
+
+  try {
+    const EnterpriseProjectFlow = require('../models/EnterpriseProjectFlow');
+    await EnterpriseProjectFlow.updateOne(
+      { b2bJobId: b2bJob._id },
+      {
+        $set: { status: 'admin_escalation' },
+        $push: {
+          timeline: {
+            key: 'admin_escalation',
+            label: `Matching failed: ${escalationReason}`,
+            at: new Date(),
+            meta: { reason: escalationReason }
+          }
+        }
+      }
+    );
+  } catch (_) { /* non-blocking */ }
 
   emitSocket('admin', 'admin:matchingFailed', {
     jobId: b2bJob.jobId,
     companyId: b2bJob.companyId,
-    reason
+    reason: escalationReason
   });
-
-  emitSocket(`b2b:${b2bJob.companyId.toString()}`, 'b2b:jobFailed', {
+  emitSocket('admin-room', 'admin:b2bJobEscalated', {
     jobId: b2bJob.jobId,
-    reason
+    mongoId: String(b2bJob._id),
+    companyId: String(b2bJob.companyId),
+    service: b2bJob.service,
+    city: b2bJob.city,
+    reason: escalationReason
   });
 
-  console.warn(`[Matching] Failed ${b2bJob.jobId}: ${reason}`);
+  emitSocket(`b2b:${b2bJob.companyId.toString()}`, 'b2b:jobEscalated', {
+    jobId: b2bJob.jobId,
+    reason: escalationReason
+  });
+
+  console.warn(`[Matching] Escalated ${b2bJob.jobId}: ${escalationReason}`);
 };
 
 /**

@@ -112,7 +112,8 @@ const OpportunityList = ({
   };
 
   const handleAccept = async (id, opp) => {
-    if (opp?.type !== 'client_request') {
+    const isQueueDriven = (opp?.assignment?.vendorQueue || []).length > 0;
+    if (opp?.type !== 'client_request' && !isQueueDriven) {
       handleView(id, opp);
       return;
     }
@@ -125,11 +126,12 @@ const OpportunityList = ({
     setError('');
     try {
       const amount = opp.budget?.max || opp.budget?.min || 0;
+      const required = opp.assignment?.requiredEngineers || 1;
       const res = await acceptClientRequest(id, {
         amount,
         proposalText: `Accepted: ${opp.title}`,
         timeline: 30,
-        teamSize: 1,
+        teamSize: required,
       });
       triggerRefresh?.();
       await load(page);

@@ -483,34 +483,14 @@ exports.completeB2BJob = async (req, res) => {
       console.warn('[completeB2BJob] enterprise flow:', flowErr.message);
     }
 
+    // P0: do NOT credit engineer on complete — escrow release after B2B Company approval
+    // credits engineer (engineer_direct) or vendor (vendor_marketplace).
     if (status === 'completed' && job.charge > 0) {
       try {
-        const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: job._id }).lean();
-        const { computeB2BEngineerPayout } = require('../../services/escrowReleaseEngine.service');
-        const payout = await computeB2BEngineerPayout(job, flow?.configSnapshot);
-        const engineerShare = payout.engineerShare;
-        const platformCutPercent = payout.platformCommissionPercent ?? payout.rules?.platformCommissionPercent ?? 0;
-
-        let engineerWallet = await Wallet.findOne({ ownerId: engineerId, ownerType: 'engineer' });
-        if (!engineerWallet) {
-          engineerWallet = await Wallet.create({ ownerId: engineerId, ownerType: 'engineer' });
-        }
-
-        engineerWallet.availableBalance += engineerShare;
-        engineerWallet.totalEarned += engineerShare;
-        await engineerWallet.save();
-
-        await WalletTransaction.create({
-          walletId: engineerWallet._id,
-          ownerId: engineerId,
-          ownerType: 'engineer',
-          type: 'credit',
-          amount: engineerShare,
-          description: `B2B Job Payout — Job ${job.jobId} (${platformCutPercent}% platform fee deducted)`,
-          reference: job._id.toString(),
-          status: 'completed'
-        });
-
+        await B2BJob.updateOne(
+          { _id: job._id },
+          { $set: { payoutStatus: 'pending_release' } }
+        );
         try {
           const company = await B2BCompany.findById(job.companyId).select('email companyName');
           if (company && company.email) {
@@ -521,7 +501,7 @@ exports.completeB2BJob = async (req, res) => {
           console.error('[B2B Email] Thank-you email failed (non-blocking):', emailErr.message);
         }
       } catch (payoutErr) {
-        console.error('[B2B Payout] Auto-payout failed (non-blocking):', payoutErr.message);
+        console.error('[B2B Payout] pending_release marker failed (non-blocking):', payoutErr.message);
       }
     }
 

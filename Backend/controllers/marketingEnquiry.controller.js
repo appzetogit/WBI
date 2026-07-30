@@ -1,8 +1,21 @@
 const MarketingEnquiry = require('../models/MarketingEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 exports.submitEnquiry = async (req, res) => {
   try {
     const enquiry = await MarketingEnquiry.create(req.body);
+    queueOpportunityFromEnquiry({
+      enquiry: {
+        ...(typeof enquiry.toObject === 'function' ? enquiry.toObject() : enquiry),
+        equipmentType: ['marketing', enquiry.serviceType, enquiry.campaignType].filter(Boolean),
+        additionalNotes: enquiry.description || enquiry.goals || ''
+      },
+      enquiryType: 'marketing',
+      enquiryModel: 'MarketingEnquiry',
+      categoryCode: 'WEB',
+      titlePrefix: `Marketing — ${enquiry.city || 'Campaign'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(enquiry)
+    });
     res.status(201).json({ success: true, message: 'Enquiry submitted successfully', data: enquiry });
   } catch (error) {
     console.error('Error submitting marketing enquiry:', error);

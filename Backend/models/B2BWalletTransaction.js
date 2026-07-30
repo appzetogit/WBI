@@ -26,7 +26,16 @@ const b2bWalletTransactionSchema = new mongoose.Schema({
   },
   type: { 
     type: String, 
-    enum: ['topup', 'job_deduction', 'refund', 'adjustment', 'failed'], 
+    enum: [
+      'topup',
+      'job_deduction',
+      'refund',
+      'adjustment',
+      'failed',
+      'escrow_hold',
+      'escrow_release',
+      'escrow_refund'
+    ], 
     required: true 
   },
   amount: { 

@@ -411,6 +411,7 @@ app.use('/api/admin', require('./routes/admin-routes/b2bBulkJobAdmin.routes'));
 app.use('/api/admin/b2b-wallets', require('./routes/admin-routes/b2bWalletAdmin.routes'));
 app.use('/api/admin/b2b/invoices', require('./routes/admin-routes/b2bInvoiceAdmin.routes'));
 app.use('/api/admin/b2b/reports', require('./routes/admin-routes/b2bReportAdmin.routes'));
+app.use('/api/admin/b2b/jobs', require('./routes/admin-routes/b2bJobEscalation.routes'));
 app.use('/api/admin/b2b/support', require('./routes/admin-routes/b2bSupportAdmin.routes'));
 app.use('/api/admin/vendor-support', require('./routes/admin-routes/adminVendorSupport.routes'));
 app.use('/api/admin/vendor-settings', require('./routes/admin-routes/adminVendorSettings.routes'));

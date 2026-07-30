@@ -1,4 +1,5 @@
 const CrmEnquiry = require('../models/CrmEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // @desc    Submit a new CRM enquiry
 // @route   POST /api/public/crm-enquiries
@@ -6,6 +7,19 @@ const CrmEnquiry = require('../models/CrmEnquiry');
 exports.submitEnquiry = async (req, res) => {
   try {
     const enquiry = await CrmEnquiry.create(req.body);
+
+    queueOpportunityFromEnquiry({
+      enquiry: {
+        ...(typeof enquiry.toObject === 'function' ? enquiry.toObject() : enquiry),
+        equipmentType: ['crm', enquiry.crmType, enquiry.industry].filter(Boolean),
+        additionalNotes: enquiry.description || enquiry.requirements || ''
+      },
+      enquiryType: 'crm',
+      enquiryModel: 'CrmEnquiry',
+      categoryCode: 'C02',
+      titlePrefix: `CRM — ${enquiry.companyName || enquiry.city || 'Project'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(enquiry)
+    });
 
     res.status(201).json({
       success: true,

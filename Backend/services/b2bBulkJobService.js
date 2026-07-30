@@ -16,12 +16,13 @@ const B2BWallet = require('../models/B2BWallet');
 const B2BWalletTransaction = require('../models/B2BWalletTransaction');
 const JobHistory = require('../models/JobHistory');
 const UploadReport = require('../models/UploadReport');
-const OneTimeService = require('../models/OneTimeService');
-const ServiceCategory = require('../models/ServiceCategory');
-const SubService = require('../models/SubService');
 const B2BDeductionRule = require('../models/B2BDeductionRule');
 
 const { geocodeAddress } = require('./locationService');
+const {
+  pickCategoryFromConfigs,
+  loadActiveServiceConfigs
+} = require('../utils/createOpportunityFromEnquiry');
 
 // Socket emission helper
 const emitSocket = (app, room, event, data) => {
@@ -37,46 +38,265 @@ const emitSocket = (app, room, event, data) => {
   }
 };
 
+const SUPPORTED_UPLOAD_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
+
+/**
+ * Column header aliases. Keys are the internal field names; values are accepted
+ * spreadsheet headers after normalisation (lowercased, punctuation stripped,
+ * whitespace collapsed).
+ */
+const HEADER_ALIASES = {
+  customerName: ['customer name', 'customer', 'client name', 'client', 'name', 'contact person', 'site contact'],
+  phone: ['phone', 'phone number', 'phone no', 'mobile', 'mobile number', 'mobile no', 'contact', 'contact number', 'contact no'],
+  email: ['email', 'email address', 'email id', 'mail'],
+  address: ['address', 'street', 'location', 'address line 1', 'address line', 'site address', 'full address'],
+  city: ['city', 'town', 'city name'],
+  state: ['state', 'region'],
+  pincode: ['pincode', 'pin code', 'pin', 'zipcode', 'zip code', 'zip', 'postal code'],
+  latitude: ['latitude', 'lat'],
+  longitude: ['longitude', 'lng', 'lon', 'long'],
+  service: ['service', 'service name', 'category', 'service category', 'category name'],
+  subService: ['sub service', 'subservice', 'sub category', 'subcategory', 'service package', 'sub service name'],
+  priority: ['priority', 'urgency'],
+  preferredDate: ['preferred date', 'schedule date', 'date', 'service date', 'visit date'],
+  preferredTime: ['preferred time', 'schedule time', 'time', 'time slot', 'preferred slot', 'slot']
+};
+
+// Collapse a spreadsheet header into a comparable token: lowercase, punctuation
+// and separators to single spaces, trimmed. "Customer_Name " -> "customer name".
+const normalizeHeader = (header) =>
+  String(header)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
 /**
  * Smart column header mapping
  * Maps various Excel header titles to standardized internal fields.
  */
 const mapHeaders = (rowObject) => {
-  const mapping = {
-    customerName: ['customer name', 'customer', 'client name', 'client', 'name'],
-    phone: ['phone', 'phone number', 'mobile', 'mobile number', 'contact', 'contact number'],
-    email: ['email', 'email address', 'mail'],
-    address: ['address', 'street', 'location', 'address line 1', 'address line'],
-    city: ['city', 'town'],
-    state: ['state', 'region'],
-    pincode: ['pincode', 'pin code', 'zipcode', 'zip code', 'zip'],
-    latitude: ['latitude', 'lat'],
-    longitude: ['longitude', 'lng', 'lon'],
-    service: ['service', 'service name', 'category', 'service category'],
-    subService: ['sub service', 'subservice', 'sub-service', 'service package'],
-    priority: ['priority', 'urgency'],
-    preferredDate: ['preferred date', 'schedule date', 'date'],
-    preferredTime: ['preferred time', 'schedule time', 'time', 'time slot']
-  };
-
   const normalizedRow = {};
-  const rowKeys = Object.keys(rowObject);
+  const rowKeys = Object.keys(rowObject || {});
 
-  for (const [targetField, aliases] of Object.entries(mapping)) {
-    // Find matching key in the rowObject
-    const matchedKey = rowKeys.find(key => {
-      const cleanKey = key.toLowerCase().trim().replace(/[-_]/g, ' ');
-      return aliases.includes(cleanKey);
-    });
-
-    if (matchedKey !== undefined) {
-      normalizedRow[targetField] = rowObject[matchedKey];
-    } else {
-      normalizedRow[targetField] = null;
-    }
+  for (const [targetField, aliases] of Object.entries(HEADER_ALIASES)) {
+    const matchedKey = rowKeys.find(key => aliases.includes(normalizeHeader(key)));
+    const value = matchedKey !== undefined ? rowObject[matchedKey] : null;
+    // Treat blank/whitespace-only cells as missing so validation catches them
+    // instead of Mongoose rejecting a trimmed-empty required string later.
+    normalizedRow[targetField] =
+      typeof value === 'string' && value.trim() === '' ? null : value;
   }
 
   return normalizedRow;
+};
+
+/**
+ * Single source of truth for turning an uploaded file into raw row objects.
+ * Both the validation pass and the job-creation pass must use this so the two
+ * phases can never disagree about what is in the file.
+ */
+const parseRowsFromFile = (filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!SUPPORTED_UPLOAD_EXTENSIONS.includes(ext)) {
+    throw new Error('Unsupported file type. Please upload an .xlsx, .xls or .csv file.');
+  }
+  if (!XLSX) {
+    throw new Error('Spreadsheet engine unavailable. Please contact support.');
+  }
+
+  const workbook = XLSX.readFile(filePath);
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    throw new Error('The uploaded file has no readable sheet.');
+  }
+  const sheet = workbook.Sheets[firstSheetName];
+  return XLSX.utils.sheet_to_json(sheet, { defval: null });
+};
+
+const PRIORITY_ALIASES = {
+  low: 'Low', normal: 'Medium', medium: 'Medium', standard: 'Medium',
+  high: 'High', urgent: 'High', critical: 'High', emergency: 'High', p1: 'High', p2: 'Medium', p3: 'Low'
+};
+
+// B2BJob.priority is an enum — an unrecognised sheet value would otherwise blow
+// up the whole batch with a Mongoose ValidationError.
+const normalizePriority = (value) => {
+  if (!value) return 'Medium';
+  return PRIORITY_ALIASES[String(value).toLowerCase().trim()] || 'Medium';
+};
+
+const parsePreferredDate = (value) => {
+  const fallback = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  if (value === null || value === undefined || value === '') return fallback;
+
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? fallback : value;
+  }
+
+  if (typeof value === 'number') {
+    const serial = new Date((value - 25569) * 86400 * 1000);
+    return isNaN(serial.getTime()) ? fallback : serial;
+  }
+
+  const dateStr = String(value).trim();
+  let parsed = null;
+
+  // DD/MM/YYYY or DD-MM-YYYY (most common in Indian B2B sheets)
+  const indianFmt = dateStr.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (indianFmt) {
+    const [, dd, mm, yyyy] = indianFmt;
+    parsed = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+  }
+
+  if (!parsed || isNaN(parsed.getTime())) {
+    const isoSlash = dateStr.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+    if (isoSlash) {
+      const [, yyyy, mm, dd] = isoSlash;
+      parsed = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
+    }
+  }
+
+  if (!parsed || isNaN(parsed.getTime())) {
+    parsed = new Date(dateStr);
+  }
+
+  return !parsed || isNaN(parsed.getTime()) ? fallback : parsed;
+};
+
+/**
+ * Field-level row validation. Returns { errors: [], row } where each error is a
+ * human-readable "<Field>: <reason>" string safe to show to the client.
+ */
+const validateMappedRow = (mapped, serviceCatalog = null) => {
+  const errors = [];
+
+  if (!mapped.customerName) {
+    errors.push('Customer Name: required');
+  }
+
+  if (!mapped.phone) {
+    errors.push('Phone: required');
+  } else if (String(mapped.phone).replace(/[^0-9]/g, '').length !== 10) {
+    errors.push('Phone: must be a 10-digit mobile number');
+  }
+
+  if (mapped.email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(String(mapped.email).trim())) {
+      errors.push('Email: invalid format');
+    }
+  }
+
+  if (!mapped.address) {
+    errors.push('Address: required');
+  }
+
+  if (!mapped.city) {
+    errors.push('City: required');
+  }
+
+  if (!mapped.service) {
+    errors.push('Service: required');
+  } else if (serviceCatalog?.length) {
+    // A service with no catalog category can never be routed to a vendor, and
+    // the wallet is charged at job creation — reject it here instead.
+    const text = [mapped.service, mapped.subService].filter(Boolean).join(' ');
+    if (!pickCategoryFromConfigs(text, serviceCatalog)) {
+      errors.push(`Service: "${mapped.service}" is not an offered service category`);
+    }
+  }
+
+  return errors;
+};
+
+const CITY_STATE_MAP = {
+  'mumbai': 'Maharashtra', 'pune': 'Maharashtra', 'thane': 'Maharashtra',
+  'navi mumbai': 'Maharashtra', 'nashik': 'Maharashtra', 'nagpur': 'Maharashtra',
+  'delhi': 'Delhi', 'new delhi': 'Delhi', 'gurgaon': 'Haryana', 'noida': 'Uttar Pradesh',
+  'bangalore': 'Karnataka', 'bengaluru': 'Karnataka', 'mysore': 'Karnataka',
+  'hyderabad': 'Telangana', 'chennai': 'Tamil Nadu', 'kolkata': 'West Bengal',
+  'ahmedabad': 'Gujarat', 'surat': 'Gujarat', 'jaipur': 'Rajasthan',
+  'lucknow': 'Uttar Pradesh', 'kanpur': 'Uttar Pradesh', 'indore': 'Madhya Pradesh',
+  'bhopal': 'Madhya Pradesh', 'patna': 'Bihar', 'chandigarh': 'Chandigarh',
+  'kochi': 'Kerala', 'coimbatore': 'Tamil Nadu', 'visakhapatnam': 'Andhra Pradesh'
+};
+
+/**
+ * Build the B2BJob document for a validated row.
+ * jobId is deterministic (batch + row number) so re-running creation for the
+ * same batch upserts rather than duplicating jobs.
+ */
+const buildJobDocument = ({ mapped, batch, rowNumber, isInsufficient }) => {
+  const cleanCity = String(mapped.city || '').toLowerCase().trim();
+
+  return {
+    companyId: batch.companyId,
+    batchId: batch._id,
+    jobId: `JOB-B2B-${batch.batchId}-R${rowNumber}`,
+    customerName: String(mapped.customerName).trim(),
+    phone: String(mapped.phone).replace(/[^0-9]/g, ''),
+    email: mapped.email ? String(mapped.email).trim() : '',
+    address: String(mapped.address).trim(),
+    city: String(mapped.city).trim(),
+    state: mapped.state ? String(mapped.state).trim() : (CITY_STATE_MAP[cleanCity] || 'India'),
+    pincode: mapped.pincode ? String(mapped.pincode).replace(/[^0-9]/g, '') : '',
+    coordinates: {
+      type: 'Point',
+      coordinates: [mapped.longitude, mapped.latitude] // longitude first in GeoJSON
+    },
+    service: String(mapped.service).trim(),
+    subService: mapped.subService ? String(mapped.subService).trim() : '',
+    priority: normalizePriority(mapped.priority),
+    preferredDate: mapped.preferredDate,
+    preferredTime: mapped.preferredTime ? String(mapped.preferredTime).trim() : 'Anytime',
+    status: isInsufficient ? 'pending_wallet' : 'searching_engineer',
+    charge: batch.perJobCharge,
+    paymentStatus: isInsufficient ? 'pending_deduction' : 'escrow_locked',
+    payoutStatus: 'none',
+    date: new Date()
+  };
+};
+
+/**
+ * Final gate before writing: run the row through Mongoose validation in-memory.
+ * A failure here becomes a per-row error report entry rather than a batch crash.
+ */
+const collectSchemaErrors = (jobDoc) => {
+  const validationError = new B2BJob(jobDoc).validateSync();
+  if (!validationError) return [];
+  return Object.values(validationError.errors || {}).map((err) => {
+    const field = err.path || 'Field';
+    return `${field}: ${err.kind === 'required' ? 'required' : 'invalid value'}`;
+  });
+};
+
+/**
+ * Translate any internal exception into a message safe for the client UI.
+ * Mongoose/driver internals must never reach a toast.
+ */
+const toUserFacingFailure = (error) => {
+  const raw = error && error.message ? String(error.message) : '';
+
+  if (error && (error.name === 'ValidationError' || error.name === 'ValidatorError')) {
+    return 'Some rows had missing or invalid required fields. Download the error report for row-level details.';
+  }
+  if (error && (error.name === 'MongoBulkWriteError' || error.code === 11000)) {
+    return 'Some jobs in this batch already exist. Download the error report for details.';
+  }
+  if (/^[\w .,'()\-/&:₹]+$/.test(raw) && raw.length <= 200 && !/B2BJob|mongo|schema|ObjectId/i.test(raw)) {
+    return raw;
+  }
+  return 'We could not process this file. Please download the error report or re-upload using the sample template.';
+};
+
+/**
+ * Persist per-row failures, replacing any previous report for the batch.
+ */
+const saveBatchErrors = async (batchId, errorChunks) => {
+  await B2BBatchErrors.deleteMany({ batchId });
+  if (errorChunks.length > 0) {
+    await B2BBatchErrors.insertMany(errorChunks);
+  }
 };
 
 /**
@@ -151,47 +371,25 @@ const processValidation = async (batchId, app) => {
   emitSocket(app, `batch:${batchId}`, 'b2b:validationStarted', { batchId });
 
   try {
-    // 1. Fetch spreadsheet file paths
-    // The uploaded file is saved locally under uploads/ directory (Multer configuration)
+    // 1. Fetch file path
     const filePath = path.resolve(batch.fileUrl);
     if (!fs.existsSync(filePath)) {
-      throw new Error(`Spreadsheet file not found at path: ${filePath}`);
+      throw new Error('The uploaded file is no longer available. Please upload it again.');
     }
 
-    // 2. Parse file using XLSX
-    const workbook = XLSX.readFile(filePath);
-    const firstSheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[firstSheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    // 2. Parse the spreadsheet (same parser the creation pass uses)
+    const rawRows = parseRowsFromFile(filePath);
 
     const totalRows = rawRows.length;
     batch.totalRows = totalRows;
     await batch.save();
 
     if (totalRows === 0) {
-      throw new Error('The uploaded spreadsheet is empty');
+      throw new Error('The uploaded file is empty or contains no parseable job rows');
     }
 
-    // 3. Pre-fetch Active Services from DB to validate in-memory
-    const activeOneTimeServices = await OneTimeService.find({ isActive: true }).select('name slug');
-    const activeCategories = await ServiceCategory.find({ isActive: true }).select('name slug');
-    const activeSubServices = await SubService.find({ isActive: true }).select('name slug');
-
-    const serviceCache = new Set();
-    activeOneTimeServices.forEach(s => {
-      serviceCache.add(s.name.toLowerCase().trim());
-      serviceCache.add(s.slug.toLowerCase().trim());
-    });
-    activeCategories.forEach(c => {
-      serviceCache.add(c.name.toLowerCase().trim());
-      serviceCache.add(c.slug.toLowerCase().trim());
-    });
-    activeSubServices.forEach(sub => {
-      serviceCache.add(sub.name.toLowerCase().trim());
-      serviceCache.add(sub.slug.toLowerCase().trim());
-    });
-
-    // 4. Set up batching variables
+    // 3. Set up batching variables
+    const serviceCatalog = await loadActiveServiceConfigs();
     let validRows = 0;
     let invalidRows = 0;
     let duplicates = 0;
@@ -207,95 +405,14 @@ const processValidation = async (batchId, app) => {
       const rawRow = rawRows[index];
       const rowNum = index + 1;
 
-      // Smart Mapping
       const mapped = mapHeaders(rawRow);
-      const errors = [];
+      const errors = validateMappedRow(mapped, serviceCatalog);
 
-      // A. Validate Customer Name
-      if (!mapped.customerName) {
-        errors.push('Missing customer name');
-      }
+      // Date is optional — soft-normalize so creation never hits NaN Date
+      mapped.preferredDate = parsePreferredDate(mapped.preferredDate);
+      mapped.priority = normalizePriority(mapped.priority);
 
-      // B. Validate Phone
-      if (!mapped.phone) {
-        errors.push('Missing phone number');
-      } else {
-        const cleanPhone = String(mapped.phone).replace(/[^0-9]/g, '');
-        if (cleanPhone.length !== 10) {
-          errors.push('Wrong mobile number (must be 10 digits)');
-        }
-      }
-
-      // C. Validate Email (Optional, but checks format if present)
-      if (mapped.email) {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(String(mapped.email).trim())) {
-          errors.push('Wrong email format');
-        }
-      }
-
-      // D. Validate Address
-      if (!mapped.address) {
-        errors.push('Missing address');
-      }
-
-      // E. Validate City (required) & Pincode (optional — geocoding will handle missing)
-      if (!mapped.city) {
-        errors.push('Missing city');
-      }
-
-      // F. Service Validation — soft warning only, don't block row (B2B clients use custom service names)
-      if (!mapped.service) {
-        errors.push('Missing service type');
-      }
-      // Note: We no longer reject rows for unknown service names.
-      // B2B clients may use custom/internal service descriptions that differ from platform catalog.
-
-      // G. Date Validation — supports Excel serial, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, and ISO formats
-      if (!mapped.preferredDate) {
-        // Date is optional — default to 3 days from now if missing
-        mapped.preferredDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-      } else {
-        let parsedDate = null;
-
-        if (typeof mapped.preferredDate === 'number') {
-          // Excel serial date number
-          parsedDate = new Date((mapped.preferredDate - 25569) * 86400 * 1000);
-        } else {
-          const dateStr = String(mapped.preferredDate).trim();
-
-          // Try DD/MM/YYYY or DD-MM-YYYY (Indian format — most common in Indian B2B sheets)
-          const indianFmt = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-          if (indianFmt) {
-            const [, dd, mm, yyyy] = indianFmt;
-            parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
-          }
-
-          // Try YYYY/MM/DD
-          if (!parsedDate || isNaN(parsedDate.getTime())) {
-            const isoSlash = dateStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-            if (isoSlash) {
-              const [, yyyy, mm, dd] = isoSlash;
-              parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
-            }
-          }
-
-          // Fallback: standard Date parsing
-          if (!parsedDate || isNaN(parsedDate.getTime())) {
-            parsedDate = new Date(dateStr);
-          }
-        }
-
-        if (!parsedDate || isNaN(parsedDate.getTime())) {
-          // Don't block the row — default to 3 days from now and log warning
-          console.warn(`[Validation] Could not parse date "${mapped.preferredDate}" — defaulting to +3 days`);
-          mapped.preferredDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-        } else {
-          mapped.preferredDate = parsedDate;
-        }
-      }
-
-      // H. Duplicate Checks (Inside File)
+      // Duplicate Checks (Inside File)
       const cleanPhone = mapped.phone ? String(mapped.phone).replace(/[^0-9]/g, '') : '';
       const cleanAddr = mapped.address ? String(mapped.address).toLowerCase().trim() : '';
       const signature = `${cleanPhone}_${cleanAddr}`;
@@ -303,29 +420,28 @@ const processValidation = async (batchId, app) => {
       if (cleanPhone && cleanAddr) {
         if (rowSignatures.has(signature)) {
           duplicates++;
-          errors.push('Duplicate row found within this file');
+          errors.push('Duplicate: identical phone + address already in this file');
         } else {
           rowSignatures.add(signature);
         }
 
-        // I. Duplicate check against existing active jobs (Database)
+        // Duplicate check against existing active jobs (Database)
         const dbDuplicate = await B2BJob.findOne({
           phone: cleanPhone,
           address: { $regex: new RegExp(cleanAddr.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'i') },
           status: { $in: ['pending', 'searching_engineer', 'assigned', 'in_progress'] }
-        });
+        }).select('_id').lean();
         if (dbDuplicate) {
           duplicates++;
-          errors.push('Similar job already exists in active matching state');
+          errors.push('Duplicate: a similar active job already exists');
         }
       }
 
-      // J. Geocoding coordinates resolution (Geocode chain)
+      // Geocoding coordinates resolution (Geocode chain)
       let finalLat = parseFloat(mapped.latitude);
       let finalLng = parseFloat(mapped.longitude);
 
       if (isNaN(finalLat) || isNaN(finalLng) || finalLat === 0 || finalLng === 0) {
-        // Resolve from geocoding service
         const coords = await geocodeRow(mapped);
         finalLat = coords.lat;
         finalLng = coords.lng;
@@ -334,7 +450,21 @@ const processValidation = async (batchId, app) => {
       mapped.latitude = finalLat;
       mapped.longitude = finalLng;
 
-      // K. Collect details
+      // Final schema gate — never let a row that would fail Mongoose
+      // "validate" count as valid just because field presence checks passed.
+      if (errors.length === 0) {
+        const provisionalDoc = buildJobDocument({
+          mapped,
+          batch,
+          rowNumber: rowNum,
+          isInsufficient: false
+        });
+        const schemaErrors = collectSchemaErrors(provisionalDoc);
+        if (schemaErrors.length > 0) {
+          errors.push(...schemaErrors);
+        }
+      }
+
       if (errors.length > 0) {
         invalidRows++;
         errorChunks.push({
@@ -380,10 +510,7 @@ const processValidation = async (batchId, app) => {
     }
 
     // 7. Insert errors into DB in one bulk operation (Relational)
-    if (errorChunks.length > 0) {
-      await B2BBatchErrors.deleteMany({ batchId: batch._id }); // Clear previous
-      await B2BBatchErrors.insertMany(errorChunks);
-    }
+    await saveBatchErrors(batch._id, errorChunks);
 
     // 8. Fetch active deduction rules to calculate costs
     let rule = await B2BDeductionRule.findOne({ companyId: batch.companyId, isActive: true });
@@ -402,6 +529,7 @@ const processValidation = async (batchId, app) => {
     batch.estimatedCost = estimatedCost;
     batch.perJobCharge = ratePerJob;
     batch.status = 'validated';
+    batch.failureReason = null;
     await batch.save();
 
     // 10. Write validation reports reference (non-critical — don't fail the batch if this errors)
@@ -436,25 +564,29 @@ const processValidation = async (batchId, app) => {
 
   } catch (error) {
     console.error(`[Validation Error] Batch ${batchId} failed validation:`, error);
+    const safeMessage = toUserFacingFailure(error);
     batch.status = 'failed';
     batch.failedAt = new Date();
-    batch.failureReason = error.message;
+    batch.failureReason = safeMessage;
     await batch.save();
 
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:validationFailed', {
       batchId,
-      error: error.message
+      error: safeMessage
     });
     emitSocket(app, `batch:${batchId}`, 'b2b:validationFailed', {
       batchId,
-      error: error.message
+      error: safeMessage
     });
   }
 };
 
 /**
  * Perform Job Creation (BullMQ Task)
- * Process rows, save in Mongo using BulkWrite, deduct Wallet
+ * Process rows, save in Mongo using BulkWrite, deduct Wallet.
+ * Partial success: valid rows are created; any late-failing rows are reported
+ * via B2BBatchErrors and never crash the whole batch with a raw Mongoose error.
+ * Idempotent: jobId is deterministic per (batch, row), so retries upsert.
  */
 const processJobCreation = async (batchId, app) => {
   const batch = await B2BBatch.findById(batchId);
@@ -470,167 +602,185 @@ const processJobCreation = async (batchId, app) => {
   emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:uploadStarted', { batchId });
   emitSocket(app, `batch:${batchId}`, 'b2b:uploadStarted', { batchId });
 
+  // Tracking so the finally-block can always leave the batch in a terminal state
+  // even if an unexpected exception escapes the try body.
+  let terminatedCleanly = false;
+  let createdCount = 0;
+  let walletBalanceSnapshot = 0;
+  let companyName = '';
+
   try {
     // 1. Double check wallet balance
     const wallet = await B2BWallet.findOne({ companyId: batch.companyId });
     const isInsufficient = !wallet || wallet.balance < batch.estimatedCost;
+    walletBalanceSnapshot = wallet?.balance || 0;
 
     // Company existence check only — approval already verified at upload time
     const company = await B2BCompany.findById(batch.companyId);
     if (!company) {
       throw new Error('Company account not found. Please re-login.');
     }
+    companyName = company.companyName;
 
-    // 2. Parse file to retrieve valid rows
-    // Since we validated earlier, we know which rows are valid by checking rows that have NO errors.
+    // 2. Re-parse with the SAME parser used during validation, then skip rows
+    //    already flagged as invalid. Re-run field/schema validation so a stale
+    //    or corrupt error report can never let a bad row reach insertOne.
     const filePath = path.resolve(batch.fileUrl);
-    const workbook = XLSX.readFile(filePath);
-    const firstSheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[firstSheetName];
-    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+    if (!fs.existsSync(filePath)) {
+      throw new Error('The uploaded file is no longer available. Please upload it again.');
+    }
+    const rawRows = parseRowsFromFile(filePath);
 
-    const errorsList = await B2BBatchErrors.find({ batchId: batch._id }).select('rowNumber');
-    const invalidRowIndices = new Set(errorsList.map(err => err.rowNumber - 1)); // 0-indexed
+    const previousErrors = await B2BBatchErrors.find({ batchId: batch._id }).select('rowNumber');
+    const previouslyInvalid = new Set(previousErrors.map(err => err.rowNumber));
 
-    const validParsedRows = [];
+    const serviceCatalog = await loadActiveServiceConfigs();
+    const creationErrors = [];
+    const candidates = [];
+
     for (let index = 0; index < rawRows.length; index++) {
-      if (invalidRowIndices.has(index)) continue; // Skip invalid rows
+      const rowNum = index + 1;
+      if (previouslyInvalid.has(rowNum)) continue;
 
-      const rawRow = rawRows[index];
-      const mapped = mapHeaders(rawRow);
+      const mapped = mapHeaders(rawRows[index]);
+      const fieldErrors = validateMappedRow(mapped, serviceCatalog);
+      mapped.preferredDate = parsePreferredDate(mapped.preferredDate);
+      mapped.priority = normalizePriority(mapped.priority);
 
-      // Robust date parsing — handles Excel serial, DD/MM/YYYY, YYYY-MM-DD, ISO etc.
-      let parsedDate = null;
-      if (typeof mapped.preferredDate === 'number') {
-        parsedDate = new Date((mapped.preferredDate - 25569) * 86400 * 1000);
-      } else if (mapped.preferredDate) {
-        const dateStr = String(mapped.preferredDate).trim();
-        const indianFmt = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-        if (indianFmt) {
-          const [, dd, mm, yyyy] = indianFmt;
-          parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
-        }
-        if (!parsedDate || isNaN(parsedDate.getTime())) {
-          const isoSlash = dateStr.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-          if (isoSlash) {
-            const [, yyyy, mm, dd] = isoSlash;
-            parsedDate = new Date(`${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`);
-          }
-        }
-        if (!parsedDate || isNaN(parsedDate.getTime())) {
-          parsedDate = new Date(dateStr);
-        }
+      let finalLat = parseFloat(mapped.latitude);
+      let finalLng = parseFloat(mapped.longitude);
+      if (isNaN(finalLat) || isNaN(finalLng) || finalLat === 0 || finalLng === 0) {
+        const coords = await geocodeRow(mapped);
+        finalLat = coords.lat;
+        finalLng = coords.lng;
       }
-      if (!parsedDate || isNaN(parsedDate.getTime())) {
-        parsedDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // default +3 days
+      mapped.latitude = finalLat;
+      mapped.longitude = finalLng;
+
+      const jobDoc = buildJobDocument({
+        mapped,
+        batch,
+        rowNumber: rowNum,
+        isInsufficient
+      });
+      const schemaErrors = collectSchemaErrors(jobDoc);
+      const allErrors = [...fieldErrors, ...schemaErrors];
+
+      if (allErrors.length > 0) {
+        creationErrors.push({
+          batchId: batch._id,
+          rowNumber: rowNum,
+          rowData: mapped,
+          errorList: allErrors
+        });
+        continue;
       }
-      mapped.preferredDate = parsedDate;
 
-      // Fallback coordinate lookup
-      const coords = await geocodeRow(mapped);
-      mapped.latitude = coords.lat;
-      mapped.longitude = coords.lng;
-
-      validParsedRows.push(mapped);
+      candidates.push({ rowNum, mapped, jobDoc });
     }
 
-    if (validParsedRows.length === 0) {
-      throw new Error('No valid jobs found in this batch to create');
+    if (candidates.length === 0) {
+      // No creatable rows — surface as a failed batch with an error report,
+      // never as a raw Mongoose ValidationError toast.
+      if (creationErrors.length > 0) {
+        const existingErrorDocs = await B2BBatchErrors.find({ batchId: batch._id }).lean();
+        const byRow = new Map();
+        for (const e of existingErrorDocs) {
+          byRow.set(e.rowNumber, {
+            batchId: batch._id,
+            rowNumber: e.rowNumber,
+            rowData: e.rowData || {},
+            errorList: e.errorList || []
+          });
+        }
+        for (const e of creationErrors) byRow.set(e.rowNumber, e);
+        await saveBatchErrors(batch._id, Array.from(byRow.values()));
+        batch.invalidRows = byRow.size;
+      }
+      batch.validRows = 0;
+      batch.createdJobsCount = 0;
+      batch.status = 'failed';
+      batch.failedAt = new Date();
+      batch.failureReason = 'No valid jobs found in this batch to create. Download the error report for details.';
+      await batch.save();
+      terminatedCleanly = true;
+
+      emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:uploadFailed', {
+        batchId,
+        error: batch.failureReason
+      });
+      emitSocket(app, `batch:${batchId}`, 'b2b:uploadFailed', {
+        batchId,
+        error: batch.failureReason
+      });
+      return;
     }
 
     let newTxn = null;
-    // 3. Deduct Wallet Balance ONLY if sufficient funds (Atomic transaction updates)
-    if (!isInsufficient) {
-      wallet.balance = parseFloat((wallet.balance - batch.estimatedCost).toFixed(2));
-      wallet.totalSpent = parseFloat((wallet.totalSpent + batch.estimatedCost).toFixed(2));
-      wallet.lastUpdatedAt = new Date();
-      await wallet.save();
+    // 3. Reserve funds in escrow (Available → Escrow Locked). Do NOT mark totalSpent yet —
+    //    spend happens only on successful release after company approval.
+    //    Skip if a prior successful escrow hold already exists for this batch.
+    const existingTxn = await B2BWalletTransaction.findOne({
+      companyId: batch.companyId,
+      remark: { $regex: new RegExp(`Batch ID: ${batch.batchId}`) },
+      type: { $in: ['escrow_hold', 'job_deduction'] },
+      status: 'success'
+    });
 
-      // Sync B2B Company walletBalance
-      company.walletBalance = wallet.balance;
+    if (!isInsufficient && !existingTxn) {
+      const holdAmount = parseFloat(Number(batch.estimatedCost).toFixed(2));
+      const updatedWallet = await B2BWallet.findOneAndUpdate(
+        { companyId: batch.companyId, balance: { $gte: holdAmount } },
+        {
+          $inc: { balance: -holdAmount, escrowBalance: holdAmount },
+          $set: { lastUpdatedAt: new Date() }
+        },
+        { new: true }
+      );
+      if (!updatedWallet) {
+        throw new Error('Insufficient wallet balance to lock escrow for this batch.');
+      }
+      walletBalanceSnapshot = updatedWallet.balance;
+      company.walletBalance = updatedWallet.balance;
       await company.save();
 
-      // Log Wallet Debit transaction
-      const transactionId = `TXN-BULK-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const transactionId = `TXN-BULK-ESH-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       newTxn = await B2BWalletTransaction.create({
         companyId: batch.companyId,
-        walletId: wallet._id,
+        walletId: updatedWallet._id,
         transactionId,
-        type: 'job_deduction',
-        amount: -batch.estimatedCost,
-        totalAmount: -batch.estimatedCost,
+        type: 'escrow_hold',
+        amount: -holdAmount,
+        totalAmount: -holdAmount,
         status: 'success',
         paymentMethod: 'wallet',
-        remark: `Auto-deduction for bulk jobs creation (Batch ID: ${batch.batchId}, Rows: ${validParsedRows.length})`
+        remark: `Escrow hold for bulk jobs (Batch ID: ${batch.batchId}, Rows: ${candidates.length})`
       });
+    } else if (existingTxn) {
+      newTxn = existingTxn;
+      walletBalanceSnapshot = wallet?.balance || 0;
     }
 
-    // 4. Generate Job objects and build bulkWrite writes
+    // 4. Build idempotent upserts (deterministic jobId) + history logs
     const jobWrites = [];
     const historyLogs = [];
     const jobIdsList = [];
 
-    const datePrefix = Date.now().toString().substring(5);
-
-    for (let index = 0; index < validParsedRows.length; index++) {
-      const row = validParsedRows[index];
-      const uniqueJobId = `JOB-B2B-${datePrefix}-${Math.floor(1000 + Math.random() * 9000)}-${index}`;
-      const jobMongoId = new mongoose.Types.ObjectId();
-
+    for (const { rowNum, jobDoc } of candidates) {
+      // Prefer existing _id on retry so history / matching keep a stable reference
+      const existing = await B2BJob.findOne({ jobId: jobDoc.jobId }).select('_id').lean();
+      const jobMongoId = existing?._id || new mongoose.Types.ObjectId();
+      jobDoc._id = jobMongoId;
       jobIdsList.push(jobMongoId);
 
-      // Smart fallbacks for optional/missing fields
-      const cityStateMap = {
-        'mumbai': 'Maharashtra', 'pune': 'Maharashtra', 'thane': 'Maharashtra',
-        'navi mumbai': 'Maharashtra', 'nashik': 'Maharashtra', 'nagpur': 'Maharashtra',
-        'delhi': 'Delhi', 'new delhi': 'Delhi', 'gurgaon': 'Haryana', 'noida': 'Uttar Pradesh',
-        'bangalore': 'Karnataka', 'bengaluru': 'Karnataka', 'mysore': 'Karnataka',
-        'hyderabad': 'Telangana', 'chennai': 'Tamil Nadu', 'kolkata': 'West Bengal',
-        'ahmedabad': 'Gujarat', 'surat': 'Gujarat', 'jaipur': 'Rajasthan',
-        'lucknow': 'Uttar Pradesh', 'kanpur': 'Uttar Pradesh', 'indore': 'Madhya Pradesh',
-        'bhopal': 'Madhya Pradesh', 'patna': 'Bihar', 'chandigarh': 'Chandigarh',
-        'kochi': 'Kerala', 'coimbatore': 'Tamil Nadu', 'visakhapatnam': 'Andhra Pradesh',
-      };
-      const cleanCity = (row.city || '').toLowerCase().trim();
-      const derivedState = row.state || cityStateMap[cleanCity] || 'India';
-      const derivedPincode = row.pincode ? String(row.pincode).replace(/[^0-9]/g, '') : '';
-      const derivedService = row.service || 'General Service';
-
-      const jobDoc = {
-        _id: jobMongoId,
-        companyId: batch.companyId,
-        batchId: batch._id,
-        jobId: uniqueJobId,
-        customerName: row.customerName,
-        phone: String(row.phone).replace(/[^0-9]/g, ''),
-        email: row.email || '',
-        address: row.address,
-        city: row.city,
-        state: derivedState,
-        pincode: derivedPincode,
-        coordinates: {
-          type: 'Point',
-          coordinates: [row.longitude, row.latitude] // longitude first in GeoJSON
-        },
-        service: derivedService,
-        subService: row.subService || '',
-        priority: row.priority || 'Medium',
-        preferredDate: row.preferredDate,
-        preferredTime: row.preferredTime || 'Anytime',
-        status: isInsufficient ? 'pending_wallet' : 'searching_engineer', // Determines if queue triggers
-        charge: batch.perJobCharge,
-        paymentStatus: isInsufficient ? 'pending_deduction' : 'deducted',
-        date: new Date()
-      };
-
-      // Add to bulk writes
       jobWrites.push({
-        insertOne: {
-          document: jobDoc
+        updateOne: {
+          filter: { jobId: jobDoc.jobId },
+          update: { $setOnInsert: jobDoc },
+          upsert: true
         }
       });
 
-      // Prepare Job History
       historyLogs.push({
         jobId: jobMongoId,
         status: isInsufficient ? 'pending_wallet' : 'searching_engineer',
@@ -639,57 +789,131 @@ const processJobCreation = async (batchId, app) => {
       });
     }
 
-    // 5. Execute MongoDB bulk writes in chunks for high performance
+    // 5. Execute MongoDB bulk writes in chunks. Ordered:false so one bad doc
+    //    cannot abort the rest of the chunk (partial success).
     const chunkSize = 500;
     let written = 0;
 
     for (let i = 0; i < jobWrites.length; i += chunkSize) {
       const chunk = jobWrites.slice(i, i + chunkSize);
-      await B2BJob.bulkWrite(chunk);
-      written += chunk.length;
+      try {
+        await B2BJob.bulkWrite(chunk, { ordered: false });
+        written += chunk.length;
+      } catch (bulkErr) {
+        // Collect per-write failures as row-level errors instead of failing the batch
+        const writeErrors = bulkErr.writeErrors || bulkErr.result?.getWriteErrors?.() || [];
+        const failedIndices = new Set(writeErrors.map((we) => we.index));
+        written += chunk.length - failedIndices.size;
 
-      // Save chunk history
+        for (const we of writeErrors) {
+          const failedCandidate = candidates[i + we.index];
+          if (!failedCandidate) continue;
+          creationErrors.push({
+            batchId: batch._id,
+            rowNumber: failedCandidate.rowNum,
+            rowData: failedCandidate.mapped,
+            errorList: ['Could not create this job. Please re-check required fields and retry.']
+          });
+        }
+
+        // If the error is something other than writeErrors (e.g. connection), rethrow
+        if (writeErrors.length === 0) {
+          throw bulkErr;
+        }
+      }
+
       const historyChunk = historyLogs.slice(i, i + chunkSize);
-      await JobHistory.insertMany(historyChunk);
+      try {
+        await JobHistory.insertMany(historyChunk, { ordered: false });
+      } catch (histErr) {
+        // History is informational — duplicate keys on retry are fine
+        console.warn(`[Job Creation] History insert soft-fail for batch ${batchId}:`, histErr.message);
+      }
 
-      // Emit socket progress
-      const percent = Math.round((written / validParsedRows.length) * 100);
+      const percent = Math.round((written / candidates.length) * 100);
       emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:creationProgress', {
         batchId,
         progress: percent,
         written,
-        total: validParsedRows.length
+        total: candidates.length
       });
       emitSocket(app, `batch:${batchId}`, 'b2b:creationProgress', {
         batchId,
         progress: percent,
         written,
-        total: validParsedRows.length
+        total: candidates.length
       });
     }
 
-    // 6. Complete Batch
+    createdCount = written;
+
+    // Persist any late-failing row errors alongside the original validation ones
+    if (creationErrors.length > 0) {
+      const existingErrorDocs = await B2BBatchErrors.find({ batchId: batch._id }).lean();
+      const merged = [
+        ...existingErrorDocs.map((e) => ({
+          batchId: batch._id,
+          rowNumber: e.rowNumber,
+          rowData: e.rowData || {},
+          errorList: e.errorList || []
+        })),
+        ...creationErrors
+      ];
+      // De-dupe by rowNumber, prefer the newest error list
+      const byRow = new Map();
+      for (const e of merged) byRow.set(e.rowNumber, e);
+      await saveBatchErrors(batch._id, Array.from(byRow.values()));
+      batch.invalidRows = byRow.size;
+    }
+
+    // 6. Complete Batch — always leave a terminal status
+    batch.createdJobsCount = createdCount;
     batch.status = 'completed';
     batch.completedAt = new Date();
+    batch.failureReason = creationErrors.length > 0
+      ? `${createdCount} jobs created. ${creationErrors.length} rows could not be created — download the error report.`
+      : null;
     await batch.save();
+    terminatedCleanly = true;
 
-    // Update transactions with the real job MongoDB references
     if (newTxn) {
       newTxn.relatedJobIds = jobIdsList;
       await newTxn.save();
     }
 
-    // 7. Trigger the Engineer Allocation matching queue for each job ONLY if wallet was sufficient
-    if (!isInsufficient) {
-      const b2bMatchingService = require('./b2bMatchingService');
-      const { bootstrapFlowFromB2BJob } = require('./enterpriseB2BOrchestrator.service');
+    // 6b. Per-job EscrowLedger rows (batch already moved Available → Escrow Locked)
+    if (!isInsufficient && createdCount > 0) {
+      const EscrowLedger = require('../models/EscrowLedger');
+      const perJob = parseFloat(Number(batch.perJobCharge).toFixed(2));
       for (const jobMongoId of jobIdsList) {
-        bootstrapFlowFromB2BJob(jobMongoId).catch((err) => {
-          console.warn(`[B2B Flow] bootstrap failed for ${jobMongoId}:`, err.message);
-        });
-        // Trigger matching async in background
-        b2bMatchingService.queueJobMatching(jobMongoId, app).catch(err => {
-          console.error(`[Matching Trigger Error] Job ID ${jobMongoId} allocation failed:`, err);
+        try {
+          const exists = await EscrowLedger.findOne({
+            sourceType: 'b2b_job',
+            sourceId: jobMongoId
+          }).select('_id').lean();
+          if (exists) continue;
+          await EscrowLedger.create({
+            paymentId: jobMongoId,
+            sourceType: 'b2b_job',
+            sourceId: jobMongoId,
+            grossAmount: perJob,
+            heldAmount: perJob,
+            releasedAmount: 0,
+            status: 'held',
+            releaseReason: `b2b_bulk:${batch.batchId}`
+          });
+        } catch (ledgerErr) {
+          console.warn(`[Job Creation] EscrowLedger for ${jobMongoId}:`, ledgerErr.message);
+        }
+      }
+    }
+
+    // 7. Trigger assignment: vendor marketplace OR engineer matching (never both)
+    if (!isInsufficient) {
+      const { dispatchB2BJobAssignment } = require('./enterpriseB2BOrchestrator.service');
+      for (const jobMongoId of jobIdsList) {
+        dispatchB2BJobAssignment(jobMongoId, app).catch((err) => {
+          console.error(`[Assignment Trigger Error] Job ID ${jobMongoId}:`, err.message);
         });
       }
     }
@@ -697,62 +921,94 @@ const processJobCreation = async (batchId, app) => {
     // 8. Emit final completions
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:uploadCompleted', {
       batchId,
-      createdCount: validParsedRows.length,
-      walletBalance: wallet.balance
+      createdCount,
+      walletBalance: walletBalanceSnapshot,
+      partialFailures: creationErrors.length
     });
     emitSocket(app, `batch:${batchId}`, 'b2b:uploadCompleted', {
       batchId,
-      createdCount: validParsedRows.length,
-      walletBalance: wallet.balance
+      createdCount,
+      walletBalance: walletBalanceSnapshot,
+      partialFailures: creationErrors.length
     });
     emitSocket(app, 'admin', 'admin:batchCompleted', {
       batchId,
-      companyName: company.companyName,
-      createdCount: validParsedRows.length
+      companyName,
+      createdCount
     });
 
   } catch (error) {
     console.error(`[Job Creation Error] Batch ${batchId} failed job creation:`, error);
+    const safeMessage = toUserFacingFailure(error);
     batch.status = 'failed';
     batch.failedAt = new Date();
-    batch.failureReason = error.message;
+    batch.failureReason = safeMessage;
     await batch.save();
+    terminatedCleanly = true;
 
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:uploadFailed', {
       batchId,
-      error: error.message
+      error: safeMessage
     });
     emitSocket(app, `batch:${batchId}`, 'b2b:uploadFailed', {
       batchId,
-      error: error.message
+      error: safeMessage
     });
+  } finally {
+    // Absolute safety net: never leave a batch stuck in 'processing'
+    if (!terminatedCleanly) {
+      try {
+        const fresh = await B2BBatch.findById(batchId);
+        if (fresh && fresh.status === 'processing') {
+          fresh.status = 'failed';
+          fresh.failedAt = new Date();
+          fresh.failureReason = fresh.failureReason || 'Job creation interrupted unexpectedly. Please retry the batch.';
+          await fresh.save();
+          emitSocket(app, `b2b:${fresh.companyId.toString()}`, 'b2b:uploadFailed', {
+            batchId,
+            error: fresh.failureReason
+          });
+        }
+      } catch (finallyErr) {
+        console.error(`[Job Creation] finally-block status recovery failed for ${batchId}:`, finallyErr.message);
+      }
+    }
   }
 };
 
 module.exports = {
   processValidation,
   processJobCreation,
+  mapHeaders,
+  parseRowsFromFile,
+  validateMappedRow,
+  parsePreferredDate,
+  normalizePriority,
+  buildJobDocument,
+  collectSchemaErrors,
+  toUserFacingFailure,
   generateSampleExcelBuffer: () => {
     const headers = [
       'Customer Name', 'Phone', 'Email', 'Address', 'City', 'State', 'Pincode',
       'Latitude', 'Longitude', 'Service', 'Sub Service', 'Priority', 'Preferred Date', 'Preferred Time'
     ];
-    
+
+    // Sample rows use real catalog names so the template teaches the right shape.
     const sampleData = [
       {
         'Customer Name': 'Ramesh Mehta',
         'Phone': '9876543210',
         'Email': 'ramesh@example.com',
-        'Address': '2, MG Road',
+        'Address': '2, MG Road, Fort',
         'City': 'Mumbai',
         'State': 'Maharashtra',
         'Pincode': '400001',
         'Latitude': 18.9268,
         'Longitude': 72.8273,
-        'Service': 'AC Repair',
-        'Sub Service': 'AC Cleaning',
+        'Service': 'CCTV & Surveillance',
+        'Sub Service': 'CCTV Camera Installation',
         'Priority': 'High',
-        'Preferred Date': '2026-07-01',
+        'Preferred Date': '2026-08-15',
         'Preferred Time': '10:00 AM - 01:00 PM'
       },
       {
@@ -765,23 +1021,21 @@ module.exports = {
         'Pincode': '411006',
         'Latitude': 18.5463,
         'Longitude': 73.9033,
-        'Service': 'Plumbing',
-        'Sub Service': 'Leakage Repair',
+        'Service': 'Plumbing & Water Systems',
+        'Sub Service': 'Pipe Leak Repair',
         'Priority': 'Medium',
-        'Preferred Date': '2026-07-02',
+        'Preferred Date': '2026-08-16',
         'Preferred Time': '02:00 PM - 05:00 PM'
       }
     ];
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(sampleData, { header: headers });
-    
-    // Auto-fit columns
+
     const wscols = headers.map(h => ({ wch: Math.max(h.length + 3, 15) }));
     ws['!cols'] = wscols;
 
     XLSX.utils.book_append_sheet(wb, ws, 'Bulk Jobs Template');
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    return buffer;
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   }
 };

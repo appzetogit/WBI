@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const fs = require('fs');
+const path = require('path');
 
 let XLSX;
 try {
@@ -97,7 +98,14 @@ const downloadSample = (req, res) => {
 const uploadFile = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Please provide a valid Excel or CSV file' });
+      return res.status(400).json({ success: false, message: 'Only .xlsx, .xls, .csv allowed' });
+    }
+
+    const ext = path.extname(req.file.originalname || '').toLowerCase();
+    const allowed = ['.xlsx', '.xls', '.csv'];
+    if (!allowed.includes(ext)) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'Only .xlsx, .xls, .csv allowed' });
     }
 
     // isApprovedB2B middleware already verified company status — use authoritative companyId from auth
@@ -106,6 +114,7 @@ const uploadFile = async (req, res) => {
     // Fetch company for batch metadata (no redundant auth check needed)
     const company = await B2BCompany.findById(companyId);
     if (!company) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(404).json({ success: false, message: 'Company not found. Please re-login.' });
     }
 
@@ -121,6 +130,26 @@ const uploadFile = async (req, res) => {
       wallet = await B2BWallet.create({ companyId, balance: 0 });
     }
 
+    // Quick validation to ensure the spreadsheet is readable BEFORE creating a batch
+    try {
+      if (!XLSX) throw new Error('Missing xlsx module');
+      const workbook = XLSX.readFile(req.file.path);
+      if (!workbook || workbook.SheetNames.length === 0) {
+        throw new Error('Empty or invalid workbook');
+      }
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const previewRows = XLSX.utils.sheet_to_json(firstSheet, { defval: null });
+      if (!previewRows || previewRows.length === 0) {
+        throw new Error('The uploaded file is empty');
+      }
+    } catch (err) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: 'Unable to read the spreadsheet. Please upload a valid .xlsx, .xls, or .csv file using the sample template.'
+      });
+    }
+
     const batchId = `BATCH-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     // Create Batch Metadata in DB
@@ -128,7 +157,7 @@ const uploadFile = async (req, res) => {
       companyId,
       batchId,
       fileName: req.file.originalname,
-      fileUrl: req.file.path, // Store local path of uploaded file
+      fileUrl: req.file.path,
       status: 'draft',
       totalRows: 0,
       walletBalanceAtUpload: wallet.balance,
@@ -146,21 +175,6 @@ const uploadFile = async (req, res) => {
       changes: { fileName: req.file.originalname, status: 'uploaded' }
     });
 
-    // Quick validation to ensure file is a readable Excel/CSV before accepting
-    try {
-      if (!XLSX) throw new Error('Missing xlsx module');
-      const workbook = XLSX.readFile(req.file.path);
-      if (!workbook || workbook.SheetNames.length === 0) {
-        throw new Error('Empty or invalid workbook');
-      }
-    } catch(err) {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ 
-        success: false, 
-        message: "Unable to process Excel file. Please upload a valid .xlsx/.xls/.csv file." 
-      });
-    }
-
     // Enqueue Validation Job in BullMQ
     await bulkJobQueue.add('validateBatch', { batchId: batch._id.toString() });
 
@@ -176,6 +190,9 @@ const uploadFile = async (req, res) => {
     });
   } catch (error) {
     console.error('[B2B Bulk Upload Error]:', error);
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) { /* ignore */ }
+    }
     res.status(500).json({ success: false, message: 'Failed to process spreadsheet upload' });
   }
 };

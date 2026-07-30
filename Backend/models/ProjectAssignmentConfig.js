@@ -17,6 +17,12 @@ const projectAssignmentConfigSchema = new mongoose.Schema(
       default: 'vendor_then_freelancer'
     },
     releaseToFreelancerOnVendorExhausted: { type: Boolean, default: true },
+    /**
+     * How long an unclaimed project may sit in the freelancer pool before it is
+     * escalated to admin. Without this the pool is a dead end and the job stays
+     * "pending" forever.
+     */
+    freelancerPoolTimeoutMinutes: { type: Number, default: 120, min: 5 },
     /** Platform vendor used when a freelancer (no vendorId) wins the project */
     freelancerPoolVendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', default: null },
     scoringWeights: {

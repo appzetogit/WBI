@@ -1,4 +1,5 @@
 const DesignEnquiry = require('../models/DesignEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // Submit new enquiry (Public)
 exports.submitEnquiry = async (req, res) => {
@@ -32,6 +33,19 @@ exports.submitEnquiry = async (req, res) => {
         data: newEnquiry
       });
     }
+
+    queueOpportunityFromEnquiry({
+      enquiry: {
+        ...(typeof newEnquiry.toObject === 'function' ? newEnquiry.toObject() : newEnquiry),
+        equipmentType: ['design', category].filter(Boolean),
+        additionalNotes: comments || ''
+      },
+      enquiryType: 'design',
+      enquiryModel: 'DesignEnquiry',
+      categoryCode: 'WEB',
+      titlePrefix: `Design — ${category} (${newEnquiry.city || 'Site'})`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(newEnquiry)
+    });
 
     res.status(201).json({
       success: true,

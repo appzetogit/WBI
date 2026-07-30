@@ -11,10 +11,19 @@ const fetchPool = async () => {
   return res.data?.data?.jobs || [];
 };
 
+const emptyConfirm = (required = 1) => ({
+  availableTeamSize: String(required),
+  canComplete: false,
+  canMeetTimeline: false,
+  hasResources: false,
+  estimatedDays: '',
+  notes: ''
+});
+
 const FreelancerPool = () => {
   const queryClient = useQueryClient();
   const [modal, setModal] = useState(null);
-  const [teamSize, setTeamSize] = useState('');
+  const [confirm, setConfirm] = useState(emptyConfirm());
 
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ['freelancerPool'],
@@ -24,8 +33,8 @@ const FreelancerPool = () => {
   });
 
   const acceptMutation = useMutation({
-    mutationFn: ({ id, availableTeamSize }) =>
-      api.post(`/engineers/freelancer-pool/pool/${id}/accept`, { availableTeamSize }),
+    mutationFn: ({ id, payload }) =>
+      api.post(`/engineers/freelancer-pool/pool/${id}/accept`, payload),
     onSuccess: (res) => {
       const data = res.data?.data;
       if (data?.opsWarning) {
@@ -36,7 +45,7 @@ const FreelancerPool = () => {
         toast.success('Project accepted');
       }
       setModal(null);
-      setTeamSize('');
+      setConfirm(emptyConfirm());
       queryClient.invalidateQueries(['freelancerPool']);
     },
     onError: (err) => toast.error(getUserFacingError(err, 'Could not accept project'))
@@ -44,25 +53,52 @@ const FreelancerPool = () => {
 
   const openAccept = (job) => {
     setModal(job);
-    setTeamSize(String(job.requiredEngineers || 1));
+    setConfirm(emptyConfirm(job.requiredEngineers || 1));
   };
 
   const confirmAccept = () => {
     const required = modal?.requiredEngineers || 1;
-    const available = parseInt(teamSize, 10);
+    const available = parseInt(confirm.availableTeamSize, 10);
     if (!available || available < required) {
       toast.error(`Enter at least ${required} engineers in your available team`);
       return;
     }
-    acceptMutation.mutate({ id: modal._id, availableTeamSize: available });
+    if (!confirm.canComplete || !confirm.canMeetTimeline || !confirm.hasResources) {
+      toast.error('Confirm team size, completion ability, timeline, and resources');
+      return;
+    }
+    acceptMutation.mutate({
+      id: modal._id,
+      payload: {
+        availableTeamSize: available,
+        canComplete: true,
+        canMeetTimeline: true,
+        hasResources: true,
+        estimatedDays: confirm.estimatedDays || undefined,
+        notes: confirm.notes || undefined
+      }
+    });
   };
+
+  const Check = ({ id, label, checked, onChange }) => (
+    <label htmlFor={id} className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-1 rounded border-gray-300 text-[#10AFA5] focus:ring-[#10AFA5]"
+      />
+      <span>{label}</span>
+    </label>
+  );
 
   return (
     <div className="p-4 max-w-lg mx-auto space-y-4 pb-24">
       <div>
         <h1 className="text-xl font-black text-gray-900">Freelancer Projects</h1>
         <p className="text-xs text-gray-500">
-          Available when vendors decline or time out. Confirm your team size before accepting.
+          Available when vendors decline or time out. Confirm team, timeline, and resources before accepting.
         </p>
       </div>
 
@@ -98,25 +134,59 @@ const FreelancerPool = () => {
 
       {modal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="font-bold text-gray-900">Can you complete this project?</h3>
             <p className="text-sm text-gray-600">{modal.title}</p>
             <p className="text-sm">
               Required engineers: <strong>{modal.requiredEngineers || 1}</strong>
             </p>
             <label className="block text-xs font-semibold text-gray-600">
-              Your available team
+              Your available team size
               <input
                 type="number"
                 min={1}
-                value={teamSize}
-                onChange={(e) => setTeamSize(e.target.value.replace(/\D/g, ''))}
+                value={confirm.availableTeamSize}
+                onChange={(e) =>
+                  setConfirm((c) => ({ ...c, availableTeamSize: e.target.value.replace(/\D/g, '') }))
+                }
+                className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
+              />
+            </label>
+            <div className="space-y-2 border rounded-xl p-3 bg-gray-50">
+              <Check
+                id="fp-complete"
+                label="I can complete this project with my team"
+                checked={confirm.canComplete}
+                onChange={(v) => setConfirm((c) => ({ ...c, canComplete: v }))}
+              />
+              <Check
+                id="fp-timeline"
+                label="I can meet the required timeline"
+                checked={confirm.canMeetTimeline}
+                onChange={(v) => setConfirm((c) => ({ ...c, canMeetTimeline: v }))}
+              />
+              <Check
+                id="fp-resources"
+                label="I have the tools / resources needed"
+                checked={confirm.hasResources}
+                onChange={(v) => setConfirm((c) => ({ ...c, hasResources: v }))}
+              />
+            </div>
+            <label className="block text-xs font-semibold text-gray-600">
+              Estimated days (optional)
+              <input
+                type="number"
+                min={1}
+                value={confirm.estimatedDays}
+                onChange={(e) =>
+                  setConfirm((c) => ({ ...c, estimatedDays: e.target.value.replace(/\D/g, '') }))
+                }
                 className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
               />
             </label>
             <div className="flex gap-2">
               <button type="button" onClick={() => setModal(null)} className="flex-1 py-2 border rounded-xl text-sm font-bold">
-                No
+                Reject
               </button>
               <button
                 type="button"
@@ -124,7 +194,7 @@ const FreelancerPool = () => {
                 onClick={confirmAccept}
                 className="flex-1 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold disabled:opacity-60"
               >
-                {acceptMutation.isPending ? '…' : 'Yes, Accept'}
+                {acceptMutation.isPending ? '…' : 'Accept & Assign'}
               </button>
             </div>
           </div>

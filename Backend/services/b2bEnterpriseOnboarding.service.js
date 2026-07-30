@@ -182,14 +182,77 @@ function computeScores(onboarding) {
 
 async function getOrCreateOnboardingForCompany(companyId) {
   let onboarding = await B2BEnterpriseOnboarding.findOne({ companyId, deletedAt: null });
-  if (onboarding) return onboarding;
+  const company = await B2BCompany.findById(companyId).lean();
 
-  onboarding = await B2BEnterpriseOnboarding.create({
-    companyId,
-    currentStep: 1,
-    lifecycleStatus: 'draft',
-    timeline: [{ event: 'onboarding_created', actorType: 'system' }]
-  });
+  if (!onboarding) {
+    onboarding = await B2BEnterpriseOnboarding.create({
+      companyId,
+      currentStep: 1,
+      lifecycleStatus: 'draft',
+      companyInfo: {
+        legalName: company?.companyName || '',
+        brandName: company?.companyName || '',
+        gstNumber: company?.gstNumber || '',
+        panNumber: company?.panNumber || '',
+        tanNumber: company?.tanNumber || '',
+        cinNumber: company?.cinNumber || ''
+      },
+      addresses: {
+        registeredAddress: company?.companyAddress || '',
+        billingAddress: company?.billingAddress || company?.companyAddress || ''
+      },
+      primaryContact: {
+        name: company?.authorizedPerson?.name || company?.authorizedPerson?.fullName || '',
+        designation: company?.authorizedPerson?.designation || '',
+        email: company?.email || '',
+        phone: company?.phone || '',
+        altPhone: company?.authorizedPerson?.altPhone || ''
+      },
+      financeContact: {
+        name: company?.authorizedPerson?.name || '',
+        email: company?.email || '',
+        phone: company?.phone || ''
+      },
+      timeline: [{ event: 'onboarding_created', actorType: 'system' }]
+    });
+  } else if (company) {
+    let modified = false;
+    if (!onboarding.companyInfo?.legalName && company.companyName) {
+      onboarding.companyInfo = {
+        legalName: company.companyName,
+        brandName: company.companyName,
+        gstNumber: company.gstNumber || '',
+        panNumber: company.panNumber || '',
+        tanNumber: company.tanNumber || '',
+        cinNumber: company.cinNumber || '',
+        ...(onboarding.companyInfo || {})
+      };
+      modified = true;
+    }
+    if (!onboarding.addresses?.registeredAddress && company.companyAddress) {
+      onboarding.addresses = {
+        registeredAddress: company.companyAddress,
+        billingAddress: company.billingAddress || company.companyAddress,
+        ...(onboarding.addresses || {})
+      };
+      modified = true;
+    }
+    if (!onboarding.primaryContact?.name && (company.authorizedPerson?.name || company.email)) {
+      onboarding.primaryContact = {
+        name: company.authorizedPerson?.name || '',
+        designation: company.authorizedPerson?.designation || '',
+        email: company.email || '',
+        phone: company.phone || '',
+        altPhone: company.authorizedPerson?.altPhone || '',
+        ...(onboarding.primaryContact || {})
+      };
+      modified = true;
+    }
+    if (modified) {
+      await onboarding.save();
+    }
+  }
+
   return onboarding;
 }
 

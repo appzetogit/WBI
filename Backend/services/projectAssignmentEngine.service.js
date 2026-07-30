@@ -11,7 +11,10 @@ const ProjectAssignmentConfig = require('../models/ProjectAssignmentConfig');
 const VendorOpsJob = require('../models/VendorOpsJob');
 const VendorOpsProject = require('../models/VendorOpsProject');
 const { createOpsProjectFromOpportunity } = require('../utils/createOpsProjectFromOpportunity');
-const { expandCategoryMatchCodes } = require('../utils/serviceCategoryAliases');
+const {
+  expandCategoryMatchCodes,
+  buildLegacyCategoryMatchers
+} = require('../utils/serviceCategoryAliases');
 const { calculateDistance } = require('./locationService');
 const { projectAssignmentQueue } = require('../jobs/queueSetup');
 const { sendNotificationToEngineer, sendNotificationToUser } = require('./firebaseAdmin');
@@ -33,6 +36,54 @@ const pushTimeline = (opportunity, key, label, meta = {}) => {
   opportunity.assignment.timeline.push({ key, label, at: new Date(), meta });
 };
 
+/**
+ * Flowchart gate: Team Size / Can Complete / Timeline / Resources before award.
+ * Accepts body from freelancer-pool or ops-job accept.
+ */
+const parseEngineerConfirmation = (body = {}, requiredEngineers = 1) => {
+  const availableTeamSize = parseInt(
+    body.availableTeamSize ?? body.teamSize ?? body.availableTeam,
+    10
+  );
+  const truthy = (v) => v === true || v === 'true' || v === 1 || v === '1' || v === 'yes';
+  const canComplete = truthy(body.canComplete);
+  const canMeetTimeline = truthy(body.canMeetTimeline);
+  const hasResources = truthy(body.hasResources);
+  const estimatedRaw = body.estimatedDays ?? body.timelineDays;
+  const estimatedDays =
+    estimatedRaw != null && estimatedRaw !== '' ? Number(estimatedRaw) : null;
+  const notes = String(body.confirmationNotes || body.notes || '').slice(0, 500);
+
+  if (!canComplete || !canMeetTimeline || !hasResources) {
+    return {
+      ok: false,
+      status: 400,
+      message:
+        'Confirm you can complete the work, meet the timeline, and have the required resources/team'
+    };
+  }
+  if (!availableTeamSize || availableTeamSize < requiredEngineers) {
+    return {
+      ok: false,
+      status: 400,
+      message: `You need at least ${requiredEngineers} engineer(s) available to accept this project`
+    };
+  }
+
+  return {
+    ok: true,
+    confirmation: {
+      availableTeamSize,
+      canComplete: true,
+      canMeetTimeline: true,
+      hasResources: true,
+      estimatedDays: Number.isFinite(estimatedDays) && estimatedDays > 0 ? estimatedDays : null,
+      notes,
+      confirmedAt: new Date()
+    }
+  };
+};
+
 const getAssignmentConfig = async (categoryCode) => {
   const code = String(categoryCode || 'DEFAULT').toUpperCase();
   let cfg = await ProjectAssignmentConfig.findOne({ categoryCode: code, isActive: true }).lean();
@@ -47,6 +98,7 @@ const getAssignmentConfig = async (categoryCode) => {
       vendorRetryCount: 3,
       priorityMode: 'vendor_then_freelancer',
       releaseToFreelancerOnVendorExhausted: true,
+      freelancerPoolTimeoutMinutes: 120,
       scoringWeights: { location: 30, service: 25, capacity: 20, rating: 15, responseScore: 10 }
     };
   }
@@ -58,16 +110,82 @@ const getAssignmentConfig = async (categoryCode) => {
 
 const normalizeCity = (c) => String(c || '').trim().toLowerCase();
 
-const vendorCoversCity = (vendor, city) => {
-  const target = normalizeCity(city);
-  if (!target) return true;
-  const lists = [
+/** Small Levenshtein for city typos (e.g. Inodre ↔ Indore). */
+const editDistance = (a, b) => {
+  const s = String(a || '');
+  const t = String(b || '');
+  if (s === t) return 0;
+  if (!s.length) return t.length;
+  if (!t.length) return s.length;
+  const rows = Array.from({ length: s.length + 1 }, (_, i) => i);
+  for (let j = 1; j <= t.length; j += 1) {
+    let prev = rows[0];
+    rows[0] = j;
+    for (let i = 1; i <= s.length; i += 1) {
+      const cur = rows[i];
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      rows[i] = Math.min(rows[i] + 1, rows[i - 1] + 1, prev + cost);
+      prev = cur;
+    }
+  }
+  return rows[s.length];
+};
+
+const citiesFuzzyMatch = (a, b) => {
+  const left = normalizeCity(a);
+  const right = normalizeCity(b);
+  if (!left || !right) return false;
+  if (left === right || left.includes(right) || right.includes(left)) return true;
+  const maxLen = Math.max(left.length, right.length);
+  if (maxLen < 4) return false;
+  const allowed = maxLen >= 6 ? 2 : 1;
+  return editDistance(left, right) <= allowed;
+};
+
+const vendorCoverageCities = (vendor) =>
+  [
     ...(vendor.operatingCities || []),
     ...(vendor.operationalCities || []),
     vendor.address?.city,
     vendor.location?.city
   ].filter(Boolean);
-  return lists.some((c) => normalizeCity(c) === target || normalizeCity(c).includes(target) || target.includes(normalizeCity(c)));
+
+const hasValidGeo = (vendor) => {
+  const coords = vendor?.geoLocation?.coordinates;
+  if (!Array.isArray(coords) || coords.length !== 2) return false;
+  const [lng, lat] = coords.map(Number);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
+  // Reject null-island / unset placeholders
+  if (lng === 0 && lat === 0) return false;
+  return true;
+};
+
+const vendorCoversCity = (vendor, city) => {
+  const target = normalizeCity(city);
+  if (!target) return true;
+  const lists = vendorCoverageCities(vendor);
+  // Coverage not configured → do not hard-exclude (match by service; rank by other scores)
+  if (!lists.length) return true;
+  return lists.some((c) => citiesFuzzyMatch(c, target));
+};
+
+/** True only when vendor has an explicit city list that fuzzy-matches the site. */
+const vendorExplicitlyCoversCity = (vendor, city) => {
+  const target = normalizeCity(city);
+  if (!target) return false;
+  const lists = vendorCoverageCities(vendor);
+  if (!lists.length) return false;
+  return lists.some((c) => citiesFuzzyMatch(c, target));
+};
+
+const vendorInGeoRange = (vendor, coords) => {
+  if (!coords || !hasValidGeo(vendor)) return false;
+  const dist = calculateDistance(coords, {
+    lat: vendor.geoLocation.coordinates[1],
+    lng: vendor.geoLocation.coordinates[0]
+  });
+  const range = vendor.settings?.serviceRange || 250;
+  return dist <= range;
 };
 
 const normSubToken = (s) => String(s || '').trim().toUpperCase();
@@ -79,14 +197,20 @@ const vendorSubMatches = (token, subCatCode) => {
   return got === want || got.includes(want) || want.includes(got);
 };
 
-const vendorHasService = (vendor, matchCodes, subCatCode) => {
+/**
+ * Category match required. Sub-service match accepts code OR display name
+ * (vendors often store names like "Wheelchair & Mobility Aid Repair", not C10-02).
+ */
+const vendorHasService = (vendor, matchCodes, subCatCode, subNames = []) => {
   const codes = (matchCodes || []).map((c) => String(c).toUpperCase());
   const approvedRows = (vendor.approvedServices || []).filter(
     (s) => codes.includes(String(s.categoryCode || '').toUpperCase()) && ['active', 'pending'].includes(s.status)
   );
   const legacy = (vendor.categories || []).some((c) => codes.includes(String(c).toUpperCase()));
   if (!approvedRows.length && !legacy) return false;
-  if (!subCatCode) return true;
+
+  const names = (Array.isArray(subNames) ? subNames : [subNames]).map(normSubToken).filter(Boolean);
+  if (!subCatCode && !names.length) return true;
 
   const fromApproved = approvedRows.flatMap((s) => s.subServices || []);
   const flatSubs = [
@@ -97,10 +221,12 @@ const vendorHasService = (vendor, matchCodes, subCatCode) => {
   if (!flatSubs.length) return legacy || approvedRows.length > 0;
 
   return flatSubs.some((s) => {
-    if (s && typeof s === 'object') {
-      return vendorSubMatches(s.subCatCode || s.code || s.name, subCatCode);
-    }
-    return vendorSubMatches(s, subCatCode);
+    const token =
+      s && typeof s === 'object' ? s.subCatCode || s.code || s.name || s.subCatName : s;
+    if (subCatCode && vendorSubMatches(token, subCatCode)) return true;
+    const got = normSubToken(token);
+    if (!got) return false;
+    return names.some((n) => got === n || got.includes(n) || n.includes(got));
   });
 };
 
@@ -108,17 +234,19 @@ const scoreVendor = (vendor, ctx, weights) => {
   let score = 0;
   const w = weights || {};
 
-  if (ctx.city && vendorCoversCity(vendor, ctx.city)) score += w.location || 30;
-  else if (ctx.coords && vendor.geoLocation?.coordinates?.length === 2) {
+  if (ctx.city && vendorExplicitlyCoversCity(vendor, ctx.city)) score += w.location || 30;
+  else if (ctx.coords && vendorInGeoRange(vendor, ctx.coords)) {
     const dist = calculateDistance(ctx.coords, {
       lat: vendor.geoLocation.coordinates[1],
       lng: vendor.geoLocation.coordinates[0]
     });
     const range = vendor.settings?.serviceRange || 250;
-    if (dist <= range) score += Math.max(0, (w.location || 30) * (1 - dist / (range * 2)));
+    score += Math.max(0, (w.location || 30) * (1 - dist / (range * 2)));
   }
 
-  if (vendorHasService(vendor, ctx.matchCodes, ctx.subCatCode)) score += w.service || 25;
+  if (vendorHasService(vendor, ctx.matchCodes, ctx.subCatCode, ctx.subNames)) {
+    score += w.service || 25;
+  }
 
   const team = Number(vendor.teamSize) || (vendor.teamEngineers?.length || 0) || 1;
   const cap = Number(vendor.maxCapacity) || 99;
@@ -136,25 +264,38 @@ const scoreVendor = (vendor, ctx, weights) => {
 
 /**
  * Rank eligible vendors for an opportunity.
+ * Prefer coverage match; if coverage would empty the queue, fall back to category/sub-service vendors.
  */
 const buildVendorQueue = async (opportunity, config) => {
   const categoryCode = opportunity.categoryCode;
-  const city = opportunity.requirements?.cities?.[0] || opportunity.clientInfo?.city || '';
+  const city =
+    opportunity.assignment?.siteLocation?.city ||
+    opportunity.requirements?.cities?.[0] ||
+    opportunity.clientInfo?.city ||
+    '';
+  const rawCoords = opportunity.assignment?.siteLocation?.coordinates?.coordinates;
   const coords =
-    opportunity.assignment?.siteLocation?.coordinates?.coordinates?.length === 2
-      ? {
-          lat: opportunity.assignment.siteLocation.coordinates.coordinates[1],
-          lng: opportunity.assignment.siteLocation.coordinates.coordinates[0]
-        }
+    Array.isArray(rawCoords) &&
+    rawCoords.length === 2 &&
+    !(Number(rawCoords[0]) === 0 && Number(rawCoords[1]) === 0)
+      ? { lat: Number(rawCoords[1]), lng: Number(rawCoords[0]) }
       : null;
 
   const codes = await expandCategoryMatchCodes([categoryCode]);
   const vendors = await Vendor.find({
     approvalStatus: 'approved',
-    isActive: { $ne: false },
-    $or: [
-      { approvedServices: { $elemMatch: { categoryCode: { $in: codes }, status: { $in: ['active', 'pending'] } } } },
-      { categories: { $in: codes } }
+    $and: [
+      { $or: [{ isActive: true }, { isActive: { $exists: false } }, { isActive: null }] },
+      {
+        $or: [
+          {
+            approvedServices: {
+              $elemMatch: { categoryCode: { $in: codes }, status: { $in: ['active', 'pending'] } }
+            }
+          },
+          { categories: { $in: buildLegacyCategoryMatchers(codes) } }
+        ]
+      }
     ]
   })
     .select(
@@ -162,10 +303,12 @@ const buildVendorQueue = async (opportunity, config) => {
     )
     .lean();
 
+  const subNames = Array.isArray(opportunity.subServices) ? opportunity.subServices : [];
   const ctx = {
     categoryCode,
     matchCodes: codes,
     subCatCode: opportunity.assignment?.subCatCode || '',
+    subNames,
     city,
     coords,
     requiredEngineers: opportunity.assignment?.requiredEngineers || 1
@@ -175,7 +318,9 @@ const buildVendorQueue = async (opportunity, config) => {
     vendorId: v._id,
     score: scoreVendor(v, ctx, config.scoringWeights),
     coversCity: vendorCoversCity(v, city),
-    hasService: vendorHasService(v, codes, ctx.subCatCode),
+    inGeoRange: vendorInGeoRange(v, coords),
+    hasService: vendorHasService(v, codes, ctx.subCatCode, subNames),
+    hasCategory: vendorHasService(v, codes, '', []),
     businessName: v.businessName || v.name || '',
     vendor: v
   }));
@@ -184,18 +329,74 @@ const buildVendorQueue = async (opportunity, config) => {
     config.maxVendorsToNotify || 10,
     config.vendorRetryCount != null ? Math.max(1, config.vendorRetryCount) : config.maxVendorsToNotify || 10
   );
-  const scored = scoredAll
-    .filter((row) => row.score > 0)
-    .filter((row) => !city || vendorCoversCity(row.vendor, city) || (coords && row.vendor.geoLocation))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, notifyCap);
 
-  return scored.map((row, idx) => ({
-    vendorId: row.vendorId,
-    rank: idx + 1,
-    score: row.score,
-    status: 'pending'
-  }));
+  const byScore = (a, b) => b.score - a.score;
+  const toQueue = (rows) =>
+    rows.slice(0, notifyCap).map((row, idx) => ({
+      vendorId: row.vendorId,
+      rank: idx + 1,
+      score: row.score,
+      status: 'pending'
+    }));
+
+  const coverageMatched = scoredAll
+    .filter((row) => row.score > 0)
+    .filter((row) => !city || row.coversCity || row.inGeoRange)
+    .sort(byScore);
+
+  if (coverageMatched.length) {
+    console.info('[buildVendorQueue]', {
+      opportunityId: String(opportunity._id),
+      categoryCode,
+      subCatCode: ctx.subCatCode,
+      city: city || null,
+      candidates: vendors.length,
+      coverageMatched: coverageMatched.length,
+      mode: 'coverage'
+    });
+    return toQueue(coverageMatched);
+  }
+
+  // Coverage empty but category vendors exist → still notify (coverage soft when data incomplete/typo)
+  const categoryFallback = scoredAll
+    .filter((row) => row.hasCategory && row.score > 0)
+    .sort((a, b) => {
+      if (a.hasService !== b.hasService) return a.hasService ? -1 : 1;
+      return b.score - a.score;
+    });
+
+  if (categoryFallback.length) {
+    console.warn('[buildVendorQueue] coverage empty — falling back to category/sub-service vendors', {
+      opportunityId: String(opportunity._id),
+      categoryCode,
+      subCatCode: ctx.subCatCode,
+      city: city || null,
+      candidates: vendors.length,
+      fallbackCount: categoryFallback.length,
+      sample: categoryFallback.slice(0, 5).map((r) => ({
+        name: r.businessName,
+        coversCity: r.coversCity,
+        hasService: r.hasService,
+        score: r.score
+      }))
+    });
+    return toQueue(categoryFallback);
+  }
+
+  console.warn('[buildVendorQueue] no vendors matched', {
+    opportunityId: String(opportunity._id),
+    categoryCode,
+    matchCodes: codes,
+    subCatCode: ctx.subCatCode,
+    city: city || null,
+    candidates: vendors.length,
+    hint:
+      vendors.length === 0
+        ? 'No approved vendors with this categoryCode/aliases in approvedServices or categories'
+        : 'Vendors found but score was 0 (check capacity/status)'
+  });
+
+  return [];
 };
 
 const emitVendorOpportunity = async (vendorId, payload) => {
@@ -215,6 +416,135 @@ const emitVendorOpportunity = async (vendorId, payload) => {
   } catch (e) {
     console.warn('[assignmentEngine] vendor notify failed', e.message);
   }
+};
+
+/**
+ * Mirror the opportunity's allocation phase onto the source B2B job so the
+ * company panel can distinguish "waiting on vendors" from "nothing happening".
+ */
+const markB2BAllocationStage = async (opportunity, stage, reason = null, meta = {}) => {
+  const b2bJobId = opportunity?.assignment?.b2bJobId;
+  if (!b2bJobId) return;
+  try {
+    const B2BJob = require('../models/B2BJob');
+    await B2BJob.updateOne(
+      { _id: b2bJobId },
+      {
+        $set: {
+          allocationStage: stage,
+          allocationReason: reason ? String(reason).slice(0, 300) : null,
+          allocationUpdatedAt: new Date()
+        }
+      }
+    );
+
+    if (global.io) {
+      global.io.to(`b2b:${String(opportunity.assignment.b2bCompanyId || '')}`).emit('b2b:jobAllocationStage', {
+        jobId: String(b2bJobId),
+        stage,
+        reason,
+        ...meta
+      });
+    }
+  } catch (err) {
+    console.warn('[assignment] B2B allocation stage update failed:', err.message);
+  }
+};
+
+/** Internal failure keys are useless to a company reading its job list. */
+const ESCALATION_MESSAGES = {
+  no_vendors_matched: 'No approved vendor covers this service in this city yet',
+  vendor_queue_exhausted: 'Every matched vendor declined or did not respond in time',
+  freelancer_pool_timeout: 'No vendor or freelance engineer accepted the job within the SLA',
+  freelancer_only_mode: 'No freelance engineer accepted the job within the SLA',
+  stalled_allocation_repair: 'Allocation stalled and was closed out — retry matching or contact support',
+  assignment_failed: 'Allocation could not be completed'
+};
+
+const describeEscalation = (reason) =>
+  ESCALATION_MESSAGES[reason] || String(reason || 'Allocation could not be completed');
+
+/**
+ * Terminal escalation for a B2B-sourced opportunity: park the job for admin,
+ * return the held escrow and leave an auditable trail on both sides.
+ */
+const escalateB2BJobForOpportunity = async (opportunity, reason) => {
+  const b2bJobId = opportunity?.assignment?.b2bJobId;
+  if (!b2bJobId) return;
+
+  const B2BJob = require('../models/B2BJob');
+  const job = await B2BJob.findById(b2bJobId);
+  if (!job) return;
+  if (['completed', 'closed', 'cancelled', 'escalated'].includes(job.status)) return;
+
+  const message = describeEscalation(reason);
+  job.status = 'escalated';
+  job.allocationStage = 'admin_escalation';
+  job.allocationReason = message.slice(0, 300);
+  job.allocationUpdatedAt = new Date();
+  await job.save();
+
+  try {
+    const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
+    await refundB2BJobEscrow({ jobId: job._id, reason: `assignment_escalated:${reason}` });
+  } catch (err) {
+    console.warn('[assignment] B2B escrow refund on escalation failed:', err.message);
+  }
+
+  try {
+    const JobHistory = require('../models/JobHistory');
+    await JobHistory.create({
+      jobId: job._id,
+      status: 'escalated',
+      remark: `${message} (${reason}). Escalated to admin; escrow returned to wallet.`,
+      role: 'system'
+    });
+  } catch (_) {
+    /* non-blocking */
+  }
+
+  try {
+    const EnterpriseProjectFlow = require('../models/EnterpriseProjectFlow');
+    await EnterpriseProjectFlow.updateOne(
+      { b2bJobId: job._id },
+      {
+        $set: { status: 'admin_escalation' },
+        $push: {
+          timeline: {
+            key: 'admin_escalation',
+            label: `Assignment failed: ${reason}`,
+            at: new Date(),
+            meta: { reason, opportunityId: opportunity._id }
+          }
+        }
+      }
+    );
+  } catch (_) {
+    /* non-blocking */
+  }
+
+  try {
+    if (global.io) {
+      global.io.to(`b2b:${String(job.companyId)}`).emit('b2b:jobEscalated', {
+        jobId: job.jobId,
+        mongoId: String(job._id),
+        reason: message
+      });
+      global.io.to('admin-room').emit('admin:b2bJobEscalated', {
+        jobId: job.jobId,
+        mongoId: String(job._id),
+        companyId: String(job.companyId),
+        service: job.service,
+        city: job.city,
+        reason,
+        message
+      });
+    }
+  } catch (_) {
+    /* non-blocking */
+  }
+
+  console.warn('[assignment] B2B job escalated to admin', { jobId: job.jobId, reason });
 };
 
 const handleAssignmentFailure = async (opportunity, reason = 'assignment_failed') => {
@@ -243,6 +573,12 @@ const handleAssignmentFailure = async (opportunity, reason = 'assignment_failed'
     } catch (err) {
       console.error('[assignment] escrow refund failed:', err.message);
     }
+  }
+
+  try {
+    await escalateB2BJobForOpportunity(opportunity, reason);
+  } catch (err) {
+    console.error('[assignment] B2B escalation failed:', err.message);
   }
 };
 
@@ -354,17 +690,19 @@ const findMatchingFreelancers = async (opportunity) => {
     approvalStatus: 'approved',
     status: { $in: ['active', 'available', 'online'] }
   };
+  // `skills` holds Skill ObjectIds — matching category codes against it throws
+  // a CastError and used to abort the whole freelancer fallback.
   const categoryQuery = {
     ...baseQuery,
     $or: [
       { serviceCategories: { $in: codes } },
       { categories: { $in: codes } },
-      { skills: { $in: codes } }
+      { secondarySkills: { $in: codes } }
     ]
   };
 
   let list = await Engineer.find(categoryQuery)
-    .select('_id fullName phone engineerType subServices serviceCategories skills')
+    .select('_id fullName phone engineerType subServices serviceCategories secondarySkills')
     .limit(80)
     .lean();
 
@@ -416,6 +754,48 @@ const cancelVendorTimeout = async (opportunityId, vendorId) => {
   }
 };
 
+const scheduleFreelancerPoolTimeout = async (opportunityId, timeoutMinutes, { immediate = false } = {}) => {
+  const delayMs = immediate ? 0 : Math.max(60000, (timeoutMinutes || 120) * 60 * 1000);
+  const jobId = `freelancer-pool-timeout-${opportunityId}`;
+  try {
+    const existing = await projectAssignmentQueue.getJob(jobId);
+    if (existing) await existing.remove();
+  } catch {
+    /* ignore */
+  }
+  await projectAssignmentQueue.add(
+    'freelancer-pool-timeout',
+    { opportunityId: String(opportunityId) },
+    { delay: delayMs, jobId, removeOnComplete: true, removeOnFail: 50 }
+  );
+};
+
+const cancelFreelancerPoolTimeout = async (opportunityId) => {
+  const jobId = `freelancer-pool-timeout-${opportunityId}`;
+  try {
+    const job = await projectAssignmentQueue.getJob(jobId);
+    if (job) await job.remove();
+  } catch {
+    /* ignore */
+  }
+};
+
+/**
+ * The freelancer pool is the last automatic hop. If nobody claims the project
+ * within the SLA it must become an admin escalation, otherwise the opportunity
+ * stays `open` forever and the source job never leaves "pending".
+ */
+const handleFreelancerPoolTimeout = async (opportunityId) => {
+  const opportunity = await Opportunity.findById(opportunityId);
+  if (!opportunity) return null;
+  if (opportunity.status !== 'open') return opportunity;
+  if (opportunity.assignment?.phase !== 'freelancer_pool') return opportunity;
+  if (opportunity.assignment?.freelancerLeadEngineerId) return opportunity;
+
+  await handleAssignmentFailure(opportunity, 'freelancer_pool_timeout');
+  return opportunity;
+};
+
 /**
  * Start assignment after opportunity is created.
  */
@@ -454,6 +834,21 @@ const startAssignmentForOpportunity = async (opportunityId, opts = {}) => {
   opportunity.assignment.vendorQueue = await buildVendorQueue(opportunity, config);
   opportunity.eligibleVendors = opportunity.assignment.vendorQueue.map((q) => q.vendorId);
   opportunity.assignment.currentVendorIndex = -1;
+  // Re-match can recover from an earlier empty-queue → freelancer_pool jump
+  if (opportunity.assignment.vendorQueue.length) {
+    opportunity.assignment.freelancerPoolReleasedAt = null;
+    opportunity.assignment.freelancerLeadEngineerId = null;
+    await cancelFreelancerPoolTimeout(opportunity._id);
+  }
+
+  console.info('[startAssignmentForOpportunity]', {
+    opportunityId: String(opportunity._id),
+    categoryCode: opportunity.categoryCode,
+    subCatCode: opportunity.assignment.subCatCode || null,
+    city: opportunity.assignment?.siteLocation?.city || opportunity.clientInfo?.city || null,
+    queueSize: opportunity.assignment.vendorQueue.length,
+    eligibleCount: opportunity.eligibleVendors.length
+  });
 
   if (config.priorityMode === 'freelancer_only') {
     await opportunity.save();
@@ -535,6 +930,12 @@ const notifyNextVendor = async (opportunityId) => {
     config.vendorResponseTimeoutMinutes
   );
   emitUserTimeline(opportunity, 'Vendors have been notified about your project');
+  await markB2BAllocationStage(
+    opportunity,
+    'vendor_marketplace',
+    `Vendor ${nextIndex + 1} of ${queue.length} reviewing`,
+    { vendorIndex: nextIndex, queueSize: queue.length }
+  );
   return opportunity;
 };
 
@@ -611,6 +1012,8 @@ const onVendorAccepted = async (opportunityId, vendorId) => {
   pushTimeline(opportunity, 'vendor_accepted', 'Vendor Accepted', { vendorId });
   await opportunity.save();
   emitUserTimeline(opportunity, 'A vendor accepted your project');
+  await cancelFreelancerPoolTimeout(opportunityId);
+  await markB2BAllocationStage(opportunity, 'allocated', 'Vendor accepted the job', { vendorId: String(vendorId) });
 
   if (opportunity.assignment.serviceRequestId) {
     await ServiceRequest.updateOne(
@@ -678,13 +1081,25 @@ const releaseToFreelancerPool = async (opportunityId, reason = 'vendor_exhausted
   }
 
   emitUserTimeline(opportunity, 'Finding freelancer engineers for your project');
+
+  await markB2BAllocationStage(opportunity, 'freelancer_pool', reason, {
+    freelancerCount: freelancers.length
+  });
+
+  // Nobody to notify → there is nothing to wait for; escalate on the next tick.
+  const config = opportunity.assignment?.configSnapshot || (await getAssignmentConfig(opportunity.categoryCode));
+  await scheduleFreelancerPoolTimeout(opportunity._id, config.freelancerPoolTimeoutMinutes, {
+    immediate: freelancers.length === 0
+  });
+
   return freelancers;
 };
 
 /**
- * Freelancer accepts with team size gate (per product flow).
+ * Freelancer accepts with confirmation checklist (team / complete / timeline / resources).
+ * @param {object|number} confirmationOrTeamSize — full checklist body, or legacy team size number
  */
-const freelancerAcceptProject = async (opportunityId, engineerId, availableTeamSize) => {
+const freelancerAcceptProject = async (opportunityId, engineerId, confirmationOrTeamSize) => {
   const opportunity = await Opportunity.findOne({
     _id: opportunityId,
     status: 'open',
@@ -695,19 +1110,20 @@ const freelancerAcceptProject = async (opportunityId, engineerId, availableTeamS
   }
 
   const required = opportunity.assignment?.requiredEngineers || 1;
-  const team = parseInt(availableTeamSize, 10);
-  if (!team || team < required) {
-    return {
-      ok: false,
-      status: 400,
-      message: `You need at least ${required} engineers available to accept this project`
-    };
-  }
+  const body =
+    confirmationOrTeamSize != null && typeof confirmationOrTeamSize === 'object'
+      ? confirmationOrTeamSize
+      : { availableTeamSize: confirmationOrTeamSize, canComplete: true, canMeetTimeline: true, hasResources: true };
+
+  const parsed = parseEngineerConfirmation(body, required);
+  if (!parsed.ok) return parsed;
 
   const engineer = await Engineer.findById(engineerId).lean();
   if (!engineer || engineer.engineerType !== 'freelancer') {
     return { ok: false, status: 403, message: 'Only freelancer engineers can accept from the pool' };
   }
+
+  const team = parsed.confirmation.availableTeamSize;
 
   // First accept wins
   const updated = await Opportunity.findOneAndUpdate(
@@ -722,6 +1138,10 @@ const freelancerAcceptProject = async (opportunityId, engineerId, availableTeamS
         status: 'awarded',
         'assignment.phase': 'awarded',
         'assignment.freelancerLeadEngineerId': engineerId,
+        'assignment.engineerConfirmation': {
+          ...parsed.confirmation,
+          engineerId
+        },
         awardedTo: {
           vendorId: engineer.vendorId || null,
           awardedAt: new Date()
@@ -738,7 +1158,10 @@ const freelancerAcceptProject = async (opportunityId, engineerId, availableTeamS
   const opp = await Opportunity.findById(updated._id);
   pushTimeline(opp, 'freelancer_accepted', 'Freelancer Accepted Project', {
     engineerId,
-    availableTeamSize: team
+    availableTeamSize: team,
+    canComplete: true,
+    canMeetTimeline: true,
+    hasResources: true
   });
   pushTimeline(opp, 'engineer_assigned', 'Engineer Assigned', { engineerId });
 
@@ -756,6 +1179,12 @@ const freelancerAcceptProject = async (opportunityId, engineerId, availableTeamS
         awardedAt: new Date()
       };
     }
+    if (job) {
+      await VendorOpsJob.updateOne(
+        { _id: job._id },
+        { $set: { acceptConfirmation: parsed.confirmation } }
+      ).catch(() => {});
+    }
     opsWarning = warning;
   } catch (err) {
     console.error('[freelancerAcceptProject] ops create failed:', err.message);
@@ -769,7 +1198,11 @@ const freelancerAcceptProject = async (opportunityId, engineerId, availableTeamS
   }
 
   emitUserTimeline(opp, 'An engineer has been assigned to your project');
-  return { ok: true, opportunity: opp, projectId, opsWarning };
+  await cancelFreelancerPoolTimeout(opp._id);
+  await markB2BAllocationStage(opp, 'allocated', 'Freelancer engineer accepted the job', {
+    engineerId: String(engineerId)
+  });
+  return { ok: true, opportunity: opp, projectId, opsWarning, confirmation: parsed.confirmation };
 };
 
 const getPublicTimeline = (opportunity) => {
@@ -792,8 +1225,13 @@ module.exports = {
   recordVendorReject,
   onVendorAccepted,
   releaseToFreelancerPool,
+  handleFreelancerPoolTimeout,
+  cancelFreelancerPoolTimeout,
+  handleAssignmentFailure,
+  markB2BAllocationStage,
   findMatchingFreelancers,
   freelancerAcceptProject,
+  parseEngineerConfirmation,
   getPublicTimeline,
   pushTimeline
 };

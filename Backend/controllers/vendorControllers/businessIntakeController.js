@@ -93,18 +93,22 @@ const ensureLinkedProposal = async ({
   return proposal;
 };
 
-// HELPER: Get vendor category codes (pending + active; exclude suspended)
+// HELPER: Get vendor category codes (approvedServices + legacy categories; exclude suspended)
 const getVendorCategoryCodes = (vendor) => {
-  if (!vendor?.approvedServices?.length) return [];
-  return vendor.approvedServices
+  const fromApproved = (vendor?.approvedServices || [])
     .filter((s) => s.status !== 'suspended')
     .map((s) => s.categoryCode)
     .filter(Boolean);
+  const fromLegacy = (vendor?.categories || []).filter((c) => {
+    const code = String(c || '').trim();
+    return /^C\d{2}$/i.test(code) || /^(WEB|APP|CCTV|SOLAR|ATM|NET|IT)$/i.test(code);
+  });
+  return [...new Set([...fromApproved, ...fromLegacy].map((c) => String(c).toUpperCase()))];
 };
 
 // HELPER: opportunity match scoped to vendor services (+ legacy aliases e.g. C01↔CCTV)
 const buildOpportunityBaseFilter = async (vendorId, extra = {}) => {
-  const vendor = await Vendor.findById(vendorId).select('approvedServices').lean();
+  const vendor = await Vendor.findById(vendorId).select('approvedServices categories').lean();
   const codes = getVendorCategoryCodes(vendor);
   const matchCodes = await expandCategoryMatchCodes(codes);
   const filter = {
@@ -114,7 +118,8 @@ const buildOpportunityBaseFilter = async (vendorId, extra = {}) => {
   if (matchCodes.length) {
     filter.categoryCode = { $in: matchCodes };
   } else {
-    filter.categoryCode = { $in: [] };
+    // No configured services — still allow rows where vendor is explicitly eligible
+    // (assignment engine already decided). Do not force categoryCode: [].
   }
   return { filter, codes, matchCodes, vendor };
 };
@@ -496,7 +501,12 @@ const acceptClientRequest = async (req, res) => {
       });
     }
 
-    if (opportunity.type !== 'client_request' && opportunity.type !== 'direct_invitation') {
+    // Queue-driven work (B2B jobs, service requests) is accept/reject, not bidding —
+    // the assignment engine is already waiting on this vendor's response.
+    const queue = opportunity.assignment?.vendorQueue || [];
+    const isQueuedForMe = queue.some((q) => vidStr(q.vendorId) === vidStr(vendorId));
+    const directAcceptTypes = ['client_request', 'direct_invitation'];
+    if (!directAcceptTypes.includes(opportunity.type) && !isQueuedForMe) {
       return res.status(400).json({
         success: false,
         message: 'Use Submit Bid for this opportunity type, then wait for client award.'
@@ -504,7 +514,6 @@ const acceptClientRequest = async (req, res) => {
     }
 
     // Assignment engine: only the active vendor in queue may accept (when queue exists)
-    const queue = opportunity.assignment?.vendorQueue || [];
     if (queue.length) {
       const active = queue.find((q) => q.status === 'active');
       if (active && vidStr(active.vendorId) !== vidStr(vendorId)) {
@@ -513,6 +522,15 @@ const acceptClientRequest = async (req, res) => {
           message: 'Another vendor is currently reviewing this project. Please wait for your turn.'
         });
       }
+    }
+
+    const requiredEngineers = opportunity.assignment?.requiredEngineers || 1;
+    const committedTeam = parseInt(teamSize, 10) || 0;
+    if (committedTeam < requiredEngineers) {
+      return res.status(400).json({
+        success: false,
+        message: `Confirm team size of at least ${requiredEngineers} engineer(s) before accepting`
+      });
     }
 
     if (opportunity.deadline && new Date() > new Date(opportunity.deadline)) {
@@ -553,7 +571,14 @@ const acceptClientRequest = async (req, res) => {
       myBid.status = 'accepted';
       myBid.updatedAt = new Date();
       if (bidAmount > 0) myBid.amount = bidAmount;
+      if (committedTeam > 0) myBid.teamSize = committedTeam;
     }
+
+    if (!opportunity.assignment) opportunity.assignment = {};
+    opportunity.assignment.vendorTeamConfirmation = {
+      teamSize: committedTeam,
+      confirmedAt: new Date()
+    };
 
     // Close others
     opportunity.bids.forEach((b) => {

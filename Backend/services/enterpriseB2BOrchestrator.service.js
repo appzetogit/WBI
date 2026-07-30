@@ -361,16 +361,25 @@ async function bootstrapFlowFromB2BJob(jobId) {
   const af = parseApprovalFlow(flow.configSnapshot);
   if (!flow.jobSignoffs) flow.jobSignoffs = {};
   flow.jobSignoffs.customer = af.customerSignoffRequired ? 'pending' : 'not_required';
-  flow.jobSignoffs.b2b = af.b2bSignoffRequired ? 'pending' : 'not_required';
+  // P0: funded enterprise jobs always require B2B Company approval before escrow release
+  flow.jobSignoffs.b2b = 'pending';
 
   pushTimeline(flow, 'submitted', 'B2B job submitted', { jobId: job.jobId });
-  pushTimeline(flow, 'escrow_locked', 'B2B wallet funds reserved', {
-    amount: job.charge,
-    paymentStatus: job.paymentStatus
-  });
+  const funded = ['escrow_locked', 'deducted'].includes(job.paymentStatus);
+  if (funded) {
+    pushTimeline(flow, 'escrow_locked', 'B2B wallet funds locked in escrow', {
+      amount: job.charge,
+      paymentStatus: job.paymentStatus
+    });
+    if (!flow.escrow) flow.escrow = {};
+    flow.escrow.grossAmount = Number(job.charge) || 0;
+    flow.escrow.heldAmount = Number(job.charge) || 0;
+    flow.escrow.releasedAmount = 0;
+    flow.escrow.status = 'held';
+  }
   await flow.save();
 
-  if (job.paymentStatus === 'deducted' && Number(job.charge) > 0) {
+  if (funded && Number(job.charge) > 0) {
     const EscrowLedger = require('../models/EscrowLedger');
     const existing = await EscrowLedger.findOne({ sourceType: 'b2b_job', sourceId: job._id }).lean();
     if (!existing) {
@@ -390,7 +399,7 @@ async function bootstrapFlowFromB2BJob(jobId) {
   if (mode === 'vendor_marketplace' && job.status === 'searching_engineer') {
     const { createOpportunityFromB2BJob } = require('../utils/createOpportunityFromEnquiry');
     const fresh = await B2BJob.findById(jobId);
-    const { opportunity, eligibleCount } = await createOpportunityFromB2BJob(fresh);
+    const { opportunity, eligibleCount, unmatchedCategory } = await createOpportunityFromB2BJob(fresh);
     if (opportunity) {
       flow.opportunityId = opportunity._id;
       flow.status = 'assignment_active';
@@ -400,18 +409,58 @@ async function bootstrapFlowFromB2BJob(jobId) {
       });
       await flow.save();
       await B2BJob.updateOne({ _id: job._id }, { $set: { status: 'pending' } });
+    } else if (unmatchedCategory) {
+      pushTimeline(flow, 'assignment_blocked', 'No service category matches this job', {
+        service: job.service,
+        subService: job.subService
+      });
+      await flow.save();
+      await B2BJob.updateOne(
+        { _id: job._id },
+        {
+          $set: {
+            status: 'escalated',
+            incompleteReason: `No service category configured for "${job.service}"`
+          }
+        }
+      );
+      try {
+        const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
+        await refundB2BJobEscrow({
+          jobId: job._id,
+          reason: 'unmatched_category_escalated'
+        });
+        if (flow.escrow) flow.escrow.status = 'refunded';
+        await flow.save();
+      } catch (e) {
+        console.warn('[bootstrapFlowFromB2BJob] escrow refund:', e.message);
+      }
     }
   }
 
   return flow;
 }
 
+/**
+ * Bootstrap enterprise flow, then dispatch either vendor marketplace OR engineer matching — never both.
+ */
+async function dispatchB2BJobAssignment(jobId, app = null) {
+  const flow = await bootstrapFlowFromB2BJob(jobId);
+  if (!flow) return { skipped: true, matchingQueued: false };
+
+  const mode = await getAssignmentMode(flow.categoryCode, flow.configSnapshot);
+  if (mode === 'vendor_marketplace') {
+    return { mode, flow, matchingQueued: false };
+  }
+
+  const { queueJobMatching } = require('./b2bMatchingService');
+  await queueJobMatching(jobId, app);
+  return { mode: 'engineer_direct', flow, matchingQueued: true };
+}
+
 async function releaseB2BJobEscrow(jobId) {
-  const EscrowLedger = require('../models/EscrowLedger');
-  await EscrowLedger.updateOne(
-    { sourceType: 'b2b_job', sourceId: jobId },
-    { $set: { status: 'released', releaseReason: 'job_completed_approved' } }
-  );
+  const { releaseB2BJobEscrowPayment } = require('./escrowReleaseEngine.service');
+  return releaseB2BJobEscrowPayment({ jobId, actor: { role: 'system' } });
 }
 
 async function onB2BJobCompleted(jobId, { status = 'completed' } = {}) {
@@ -424,9 +473,15 @@ async function onB2BJobCompleted(jobId, { status = 'completed' } = {}) {
   if (status === 'completed') {
     pushTimeline(flow, 'work_completed', 'Field work marked complete', {});
 
+    if (!flow.jobSignoffs) flow.jobSignoffs = {};
+    // P0: never auto-release — company must approve unless already approved
+    if (flow.jobSignoffs.b2b === 'not_required' || !flow.jobSignoffs.b2b) {
+      flow.jobSignoffs.b2b = 'pending';
+    }
+
     const needsCustomer =
-      af.customerSignoffRequired && flow.jobSignoffs?.customer === 'pending';
-    const needsB2b = af.b2bSignoffRequired && flow.jobSignoffs?.b2b === 'pending';
+      af.customerSignoffRequired && flow.jobSignoffs.customer === 'pending';
+    const needsB2b = flow.jobSignoffs.b2b === 'pending';
 
     if (needsCustomer || needsB2b) {
       if (needsCustomer) {
@@ -434,7 +489,7 @@ async function onB2BJobCompleted(jobId, { status = 'completed' } = {}) {
         pushTimeline(flow, 'awaiting_customer', 'Awaiting customer sign-off', {});
       } else {
         flow.status = 'awaiting_b2b_approval';
-        pushTimeline(flow, 'awaiting_b2b', 'Awaiting B2B client sign-off', {});
+        pushTimeline(flow, 'awaiting_b2b', 'Awaiting B2B company approval before escrow release', {});
       }
       await flow.save();
       return { ok: true, pendingSignoff: true, flow };
@@ -442,14 +497,21 @@ async function onB2BJobCompleted(jobId, { status = 'completed' } = {}) {
 
     flow.status = 'closed';
     pushTimeline(flow, 'closed', 'B2B field job completed', {});
-    await releaseB2BJobEscrow(jobId);
+    const release = await releaseB2BJobEscrow(jobId);
     if (flow.escrow) {
       flow.escrow.releasedAmount = flow.escrow.heldAmount;
-      flow.escrow.status = 'released';
+      flow.escrow.status = release?.ok ? 'released' : flow.escrow.status;
     }
   } else {
     flow.status = 'cancelled';
     pushTimeline(flow, 'cancelled', 'B2B job closed incomplete', { status });
+    try {
+      const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
+      await refundB2BJobEscrow({ jobId, reason: `job_${status || 'cancelled'}` });
+      if (flow.escrow) flow.escrow.status = 'refunded';
+    } catch (refundErr) {
+      console.warn('[onB2BJobCompleted] escrow refund:', refundErr.message);
+    }
   }
   await flow.save();
   return flow;
@@ -532,7 +594,13 @@ async function approveB2BJobWork(jobId, companyId, { party = 'b2b', approved = t
   if (!approved) {
     flow.status = 'cancelled';
     await flow.save();
-    return { ok: false, status: 400, message: 'Work rejected' };
+    try {
+      const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
+      await refundB2BJobEscrow({ jobId: job._id, reason: `${party}_rejected_work` });
+    } catch (e) {
+      console.warn('[approveB2BJobWork] escrow refund:', e.message);
+    }
+    return { ok: false, status: 400, message: 'Work rejected — escrow refunded to company wallet' };
   }
 
   return finalizeB2BJobAfterSignoffs(flow, job._id);
@@ -623,6 +691,7 @@ module.exports = {
   resolveTemplateBundle,
   bootstrapFlowFromOpportunity,
   bootstrapFlowFromB2BJob,
+  dispatchB2BJobAssignment,
   onVendorOpsProjectCreated,
   onEngineerAssigned,
   onAssignmentEscalation,

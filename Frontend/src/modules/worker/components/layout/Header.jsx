@@ -147,10 +147,10 @@ const Header = ({
                 </button>
               ) : (
                 <div
-                  className="cursor-pointer"
+                  className="cursor-pointer w-10 h-10 rounded-full overflow-hidden border border-gray-200/80 shadow-sm flex items-center justify-center bg-white shrink-0"
                   onClick={handleLogoClick}
                   onMouseEnter={() => {
-                    if (logoRef.current) gsap.to(logoRef.current, { scale: 1.05, duration: 0.3, ease: 'power2.out' });
+                    if (logoRef.current) gsap.to(logoRef.current, { scale: 1.08, duration: 0.3, ease: 'power2.out' });
                   }}
                   onMouseLeave={() => {
                     if (logoRef.current) gsap.to(logoRef.current, { scale: 1.0, duration: 0.3, ease: 'power2.out' });
@@ -158,9 +158,9 @@ const Header = ({
                 >
                   <img fetchPriority="low" loading="lazy" 
                     ref={logoRef}
-                    src="/logo/WBILogo.jpg" 
-                    alt="WBI Logo" 
-                    className="h-9 object-contain mix-blend-multiply" 
+                    src="/logo/TazkYLogo_circle.png" 
+                    alt="TazkY Logo" 
+                    className="w-full h-full object-cover rounded-full" 
                   />
                 </div>
               )}

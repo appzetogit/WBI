@@ -37,7 +37,7 @@ const MapController = ({ center, bounds }) => {
 const B2BLiveTracking = () => {
   // Authentication & Socket base URL
   const token = localStorage.getItem('b2bAccessToken') || localStorage.getItem('accessToken');
-  const socketBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://api.wbinfs.com';
+  const socketBaseUrl = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com';
 
   // Live Tracking state
   const [engineers, setEngineers] = useState([]);

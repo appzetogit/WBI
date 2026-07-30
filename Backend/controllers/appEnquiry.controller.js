@@ -1,4 +1,5 @@
 const AppEnquiry = require('../models/AppEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 // --- Public Endpoints ---
 
@@ -8,6 +9,19 @@ const AppEnquiry = require('../models/AppEnquiry');
 exports.submitEnquiry = async (req, res) => {
   try {
     const enquiry = await AppEnquiry.create(req.body);
+
+    queueOpportunityFromEnquiry({
+      enquiry: {
+        ...(typeof enquiry.toObject === 'function' ? enquiry.toObject() : enquiry),
+        equipmentType: ['app', enquiry.appType, enquiry.platform].filter(Boolean),
+        additionalNotes: enquiry.description || enquiry.projectDescription || ''
+      },
+      enquiryType: 'app',
+      enquiryModel: 'AppEnquiry',
+      categoryCode: 'APP',
+      titlePrefix: `App — ${enquiry.projectTitle || enquiry.city || 'Project'}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(enquiry)
+    });
 
     res.status(201).json({
       success: true,

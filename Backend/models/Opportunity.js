@@ -178,6 +178,21 @@ const opportunitySchema = new mongoose.Schema({
       ref: 'Engineer',
       default: null
     },
+    /** Engineer / freelancer checklist before award (flowchart gate) */
+    engineerConfirmation: {
+      availableTeamSize: { type: Number, default: null },
+      canComplete: { type: Boolean, default: false },
+      canMeetTimeline: { type: Boolean, default: false },
+      hasResources: { type: Boolean, default: false },
+      estimatedDays: { type: Number, default: null },
+      notes: { type: String, default: '' },
+      confirmedAt: { type: Date, default: null },
+      engineerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Engineer', default: null }
+    },
+    vendorTeamConfirmation: {
+      teamSize: { type: Number, default: null },
+      confirmedAt: { type: Date, default: null }
+    },
     timeline: [
       {
         key: String,

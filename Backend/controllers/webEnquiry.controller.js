@@ -1,4 +1,5 @@
 const WebEnquiry = require('../models/WebEnquiry');
+const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
 /**
  * @desc    Submit a new web development enquiry
@@ -62,6 +63,20 @@ exports.createEnquiry = async (req, res) => {
       budgetRange,
       source,
       attachments: attachments || []
+    });
+
+    queueOpportunityFromEnquiry({
+      enquiry: {
+        ...(typeof enquiry.toObject === 'function' ? enquiry.toObject() : enquiry),
+        equipmentType: ['web', websiteType, projectTitle].filter(Boolean),
+        additionalNotes: description,
+        siteAddress: city
+      },
+      enquiryType: 'web',
+      enquiryModel: 'WebEnquiry',
+      categoryCode: 'WEB',
+      titlePrefix: `Web — ${projectTitle || websiteType || city}`,
+      assignmentMeta: buildAssignmentMetaFromEnquiry(enquiry)
     });
 
     res.status(201).json({

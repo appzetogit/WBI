@@ -72,10 +72,23 @@ const BulkJobs = () => {
     queryKey: ['b2bActiveBatch', activeBatchId],
     queryFn: async () => {
       if (!activeBatchId) return null;
-      const res = await api.get(`/b2b/bulk-jobs/${activeBatchId}`);
-      return res.data.batch;
+      try {
+        const res = await api.get(`/b2b/bulk-jobs/${activeBatchId}`);
+        return res.data.batch;
+      } catch (err) {
+        if (err.response?.status === 404) {
+          localStorage.removeItem('activeB2BBatchId');
+          setActiveBatchId(null);
+          return null;
+        }
+        throw err;
+      }
     },
     enabled: !!activeBatchId,
+    retry: (failureCount, error) => {
+      if (error?.response?.status === 404) return false;
+      return failureCount < 2;
+    },
     // Auto-poll every 3s when batch is in an active state; stop when done/failed
     refetchInterval: (query) => {
       const status = query.state?.data?.status;
@@ -112,7 +125,13 @@ const BulkJobs = () => {
         setCreationProgress(100);
       }
       if (newStatus === 'failed') {
-        toast.error(`Batch failed: ${activeBatch.failureReason || 'Unknown error'}`);
+        // Never dump raw Mongoose / driver strings into the toast.
+        const reason = activeBatch.failureReason || 'Please download the error report or re-upload using the sample template.';
+        const cleaned = /validation failed|Path `|B2BJob|mongoose/i.test(reason)
+          ? 'Some rows had missing or invalid required fields. Download the error report for details.'
+          : reason;
+        toast.error(cleaned);
+        queryClient.invalidateQueries(['b2bBulkJobStats']);
       }
       prevBatchStatus.current = newStatus;
     }
@@ -150,7 +169,8 @@ const BulkJobs = () => {
     };
 
     const onValidationFailed = (data) => {
-      toast.error(`Validation failed: ${data.error || 'Syntax errors detected'}`);
+      const msg = data.error || 'Validation failed. Please check your file and try again.';
+      toast.error(msg);
       refetchActiveBatch();
     };
 
@@ -172,7 +192,8 @@ const BulkJobs = () => {
     };
 
     const onUploadFailed = (data) => {
-      toast.error(`Job dispatch aborted: ${data.error}`);
+      const msg = data.error || 'Job creation failed. Download the error report or retry.';
+      toast.error(msg);
       refetchActiveBatch();
     };
 
@@ -277,9 +298,19 @@ const BulkJobs = () => {
       'text/csv': ['.csv']
     },
     multiple: false,
-    onDrop: (acceptedFiles) => {
+    onDrop: (acceptedFiles, fileRejections) => {
+      if (fileRejections && fileRejections.length > 0) {
+        toast.error('Only .xlsx, .xls, .csv allowed');
+        return;
+      }
       if (acceptedFiles.length > 0) {
-        fileUploadMutation.mutate(acceptedFiles[0]);
+        const file = acceptedFiles[0];
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+          toast.error('Only .xlsx, .xls, .csv allowed');
+          return;
+        }
+        fileUploadMutation.mutate(file);
       }
     }
   });
@@ -307,6 +338,7 @@ const BulkJobs = () => {
     setUploadProgress(0);
     setCreationProgress(0);
     setLiveStats(null);
+    queryClient.removeQueries(['b2bActiveBatch']);
     queryClient.invalidateQueries(['b2bHistoryRecent']);
   };
 
@@ -346,7 +378,7 @@ const BulkJobs = () => {
         <div>
           <h1 className="text-2xl font-bold text-gray-800 tracking-tight">Bulk Job Upload</h1>
           <p className="text-sm text-gray-500 font-semibold mt-1">
-            Upload your jobs in bulk using Excel. Our system will validate and process them.
+            Upload your jobs in bulk using Excel or CSV. Our system will validate and process them.
           </p>
         </div>
         <a 
@@ -540,8 +572,8 @@ const BulkJobs = () => {
                 className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-6"
               >
                 <div className="pb-4 border-b border-gray-50 flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-gray-800">Upload Spreadsheet File</h3>
-                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Drag & drop excel or CSV</span>
+                  <h3 className="text-sm font-bold text-gray-800">Upload Bulk Job File (Excel or CSV)</h3>
+                  <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Drag & drop .xlsx, .xls or .csv</span>
                 </div>
 
                 <div 
@@ -559,10 +591,10 @@ const BulkJobs = () => {
                     )}
                   </div>
                   <div>
-                    <h4 className="text-sm font-bold text-gray-800">Drag & drop your Excel file here</h4>
+                    <h4 className="text-sm font-bold text-gray-800">Drag & drop your Excel or CSV file here</h4>
                     <p className="text-xs text-gray-400 font-semibold mt-1">or click to browse from files</p>
                     <p className="text-[10px] font-bold text-[#10AFA5] mt-4 uppercase tracking-wider bg-[#F0FDFA] px-3 py-1 rounded-full inline-block">
-                      SUPPORTS .XLSX, .XLS, .CSV FILES
+                      ONLY .XLSX, .XLS, .CSV ALLOWED
                     </p>
                   </div>
                 </div>
@@ -704,7 +736,26 @@ const BulkJobs = () => {
                   </div>
 
                   {/* Alerts banner */}
-                  {activeBatch.invalidRows > 0 ? (
+                  {activeBatch.status === 'failed' ? (
+                    <div className="bg-red-50/50 border border-red-100 rounded-2xl p-4 flex gap-3 text-red-500 items-start text-xs font-semibold leading-relaxed">
+                      <FiAlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <span className="block font-bold">Batch could not be completed</span>
+                        <p className="mt-0.5 font-medium text-red-500/80">
+                          {activeBatch.failureReason || 'Please download the error report, fix the rows, and re-upload using the sample Excel template.'}
+                        </p>
+                        {activeBatch.invalidRows > 0 && (
+                          <a
+                            href={`${import.meta.env.VITE_API_BASE_URL || 'https://app.wbinfs.com'}/api/b2b/bulk-jobs/errors/${activeBatch._id}/download`}
+                            download
+                            className="inline-flex items-center gap-1.5 mt-2 text-red-600 font-bold hover:underline"
+                          >
+                            <FiDownload className="w-3.5 h-3.5" /> Download Error Report
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ) : activeBatch.invalidRows > 0 ? (
                     <div className="bg-red-50/50 border border-red-100 rounded-2xl p-4 flex gap-3 text-red-500 items-start text-xs font-semibold leading-relaxed">
                       <FiAlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                       <div>
@@ -745,7 +796,12 @@ const BulkJobs = () => {
                     </button>
                     <button 
                       onClick={() => confirmMutation.mutate()}
-                      disabled={confirmMutation.isPending || (walletData?.balance || 0) < activeBatch.estimatedCost || activeBatch.validRows === 0}
+                      disabled={
+                        confirmMutation.isPending ||
+                        activeBatch.status === 'failed' ||
+                        (walletData?.balance || 0) < activeBatch.estimatedCost ||
+                        activeBatch.validRows === 0
+                      }
                       className="bg-[#10AFA5] hover:bg-[#0D9488] disabled:bg-gray-200 text-white text-xs font-bold py-2.5 px-5 rounded-xl shadow-md shadow-teal-500/10 flex items-center gap-2 transition-colors cursor-pointer ml-auto"
                     >
                       {confirmMutation.isPending ? 'Confirming Dispatch...' : 'Review & Confirm Upload →'}

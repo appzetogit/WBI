@@ -16,7 +16,8 @@ import {
   signSla,
   createOnboardingBranch,
   fetchOnboardingBranches,
-  deleteOnboardingBranch
+  deleteOnboardingBranch,
+  uploadB2BFile
 } from '../../services/b2bOnboardingApi';
 
 const STEP_LABELS = [
@@ -49,6 +50,7 @@ export default function EnterpriseOnboarding() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [step, setStep] = useState(1);
   const [config, setConfig] = useState(null);
   const [onboarding, setOnboarding] = useState(null);

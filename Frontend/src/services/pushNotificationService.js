@@ -142,12 +142,15 @@ async function registerFCMToken(userType = 'user', forceUpdate = false) {
         endpoint = '/engineers/fcm-tokens/save';
         authTokenKey = 'engineerAccessToken';
         break;
+      case 'b2b':
+        endpoint = '/b2b/fcm-tokens/save';
+        authTokenKey = 'b2bAccessToken';
+        break;
       case 'user':
         endpoint = '/users/fcm-tokens/save';
         authTokenKey = 'accessToken';
         break;
       default:
-        // console.warn(`[FCM] Unknown userType: ${userType}, defaulting to user`);
         endpoint = '/users/fcm-tokens/save';
         authTokenKey = 'accessToken';
     }
@@ -156,7 +159,6 @@ async function registerFCMToken(userType = 'user', forceUpdate = false) {
     const authToken =
       sessionStorage.getItem(authTokenKey) || localStorage.getItem(authTokenKey);
     if (!authToken) {
-      // console.log(`[FCM] ❌ No auth token found for ${userType} (${authTokenKey}), skipping registration`);
       return null;
     }
 

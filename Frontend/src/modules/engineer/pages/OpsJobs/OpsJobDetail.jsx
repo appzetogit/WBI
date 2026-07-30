@@ -11,6 +11,14 @@ const OpsJobDetail = () => {
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirm, setConfirm] = useState({
+    availableTeamSize: '1',
+    canComplete: false,
+    canMeetTimeline: false,
+    hasResources: false,
+    estimatedDays: ''
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,14 +37,15 @@ const OpsJobDetail = () => {
     load();
   }, [load]);
 
-  const act = async (action) => {
+  const act = async (action, body = {}) => {
     setActing(true);
     try {
       const res = await api.post(
         `/engineers/ops-jobs/${id}/${action}`,
-        action === 'reject' ? { reason: 'Unavailable' } : {}
+        action === 'reject' ? { reason: 'Unavailable' } : body
       );
       if (res.data?.message) toast.success(res.data.message);
+      setShowConfirm(false);
       await load();
       if (action === 'complete') {
         window.dispatchEvent(new Event('workerJobsUpdated'));
@@ -46,6 +55,25 @@ const OpsJobDetail = () => {
     } finally {
       setActing(false);
     }
+  };
+
+  const submitAccept = () => {
+    const team = parseInt(confirm.availableTeamSize, 10);
+    if (!team || team < 1) {
+      toast.error('Enter your available team size');
+      return;
+    }
+    if (!confirm.canComplete || !confirm.canMeetTimeline || !confirm.hasResources) {
+      toast.error('Confirm completion, timeline, and resources');
+      return;
+    }
+    act('accept', {
+      availableTeamSize: team,
+      canComplete: true,
+      canMeetTimeline: true,
+      hasResources: true,
+      estimatedDays: confirm.estimatedDays || undefined
+    });
   };
 
   if (loading) {
@@ -135,10 +163,10 @@ const OpsJobDetail = () => {
             <button
               type="button"
               disabled={acting}
-              onClick={() => act('accept')}
+              onClick={() => setShowConfirm(true)}
               className="flex-1 py-3 bg-emerald-600 text-white font-semibold rounded-xl"
             >
-              Accept
+              Review & Accept
             </button>
             <button
               type="button"
@@ -180,6 +208,55 @@ const OpsJobDetail = () => {
           </button>
         )}
       </div>
+
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3">
+            <h3 className="font-bold text-gray-900">Confirm before accepting</h3>
+            <p className="text-sm text-gray-600">Project is awarded only after this checklist.</p>
+            <label className="block text-xs font-semibold text-gray-600">
+              Available team size
+              <input
+                type="number"
+                min={1}
+                value={confirm.availableTeamSize}
+                onChange={(e) =>
+                  setConfirm((c) => ({ ...c, availableTeamSize: e.target.value.replace(/\D/g, '') }))
+                }
+                className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
+              />
+            </label>
+            {[
+              ['canComplete', 'I can complete this job'],
+              ['canMeetTimeline', 'I can meet the timeline'],
+              ['hasResources', 'I have required tools / resources']
+            ].map(([key, label]) => (
+              <label key={key} className="flex items-start gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={confirm[key]}
+                  onChange={(e) => setConfirm((c) => ({ ...c, [key]: e.target.checked }))}
+                  className="mt-1"
+                />
+                {label}
+              </label>
+            ))}
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setShowConfirm(false)} className="flex-1 py-2 border rounded-xl text-sm font-bold">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={acting}
+                onClick={submitAccept}
+                className="flex-1 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold disabled:opacity-60"
+              >
+                {acting ? '…' : 'Accept — Award Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

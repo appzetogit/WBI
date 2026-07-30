@@ -10,6 +10,8 @@ router.use(isApprovedB2B);
 
 // Job Stats & Export (Must be placed before /:id routes)
 router.get('/stats', b2bJobController.getStats);
+router.get('/filter-meta', b2bJobController.getFilterMeta);
+router.get('/recent-activity', b2bJobController.getRecentActivity);
 router.get('/export', b2bJobController.exportJobs);
 
 // Job Actions
@@ -27,6 +29,7 @@ router.post(
 // Core CRUD and Job specific getters
 router.get('/', b2bJobController.getJobs);
 router.get('/:id/enterprise-flow', b2bJobController.getJobEnterpriseFlow);
+router.post('/:id/rematch', b2bJobController.rematchJob);
 router.post('/:id/approve-work', b2bJobController.approveJobWork);
 router.get('/:id', b2bJobController.getJobDetails);
 router.patch('/:id', b2bJobController.updateJob);

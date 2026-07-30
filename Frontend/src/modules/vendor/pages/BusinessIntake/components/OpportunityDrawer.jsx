@@ -20,6 +20,7 @@ const OpportunityDrawer = ({ opportunity, onClose, onBidSubmitted, onAccepted })
   const [declining, setDeclining] = useState(false);
   const [awarding, setAwarding] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [acceptTeamSize, setAcceptTeamSize] = useState('');
   const { openProposalBuilder, triggerRefresh } = useBusinessIntake();
   const { vendorProfile } = useVendorConfig() || {};
 
@@ -46,8 +47,11 @@ const OpportunityDrawer = ({ opportunity, onClose, onBidSubmitted, onAccepted })
   // Soft gate: show warning but allow approved vendors (matches backend)
   const kycPending = kycStatus && kycStatus !== 'verified';
 
-  const isClientRequest = type === 'client_request';
-  const isCompetitive = ['b2b_opportunity', 'bulk_requirement', 'bid_quote_request'].includes(type);
+  // Queue-driven work is accept/reject; only open opportunities go to bidding.
+  const isQueueDriven = (assignment?.vendorQueue || []).length > 0;
+  const isClientRequest = type === 'client_request' || isQueueDriven;
+  const isCompetitive =
+    !isQueueDriven && ['b2b_opportunity', 'bulk_requirement', 'bid_quote_request'].includes(type);
 
   const handleCreateProposal = () => {
     openProposalBuilder({
@@ -63,6 +67,12 @@ const OpportunityDrawer = ({ opportunity, onClose, onBidSubmitted, onAccepted })
 
   const handleAcceptRequest = async () => {
     setActionError('');
+    const required = opportunity.assignment?.requiredEngineers || opportunity.requiredEngineers || 1;
+    const team = parseInt(acceptTeamSize || String(required), 10);
+    if (!team || team < required) {
+      setActionError(`Confirm team size of at least ${required} engineer(s)`);
+      return;
+    }
     setAccepting(true);
     try {
       const amount = budget?.max || budget?.min || 0;
@@ -70,7 +80,7 @@ const OpportunityDrawer = ({ opportunity, onClose, onBidSubmitted, onAccepted })
         amount,
         proposalText: `Accepted: ${title}`,
         timeline: 30,
-        teamSize: 1,
+        teamSize: team,
       });
       triggerRefresh?.();
       onAccepted?.(res.data);
@@ -292,6 +302,16 @@ const OpportunityDrawer = ({ opportunity, onClose, onBidSubmitted, onAccepted })
                   Response SLA window ended — you can still accept this open client request.
                 </p>
               )}
+              <label className="block text-xs font-semibold text-gray-600">
+                Confirm team size (required: {opportunity.assignment?.requiredEngineers || 1})
+                <input
+                  type="number"
+                  min={1}
+                  value={acceptTeamSize || String(opportunity.assignment?.requiredEngineers || 1)}
+                  onChange={(e) => setAcceptTeamSize(e.target.value.replace(/\D/g, ''))}
+                  className="mt-1 w-full border rounded-xl px-3 py-2 text-sm"
+                />
+              </label>
               <button
                 onClick={handleAcceptRequest}
                 disabled={accepting}

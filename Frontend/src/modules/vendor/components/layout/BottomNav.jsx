@@ -73,27 +73,12 @@ const BottomNav = memo(() => {
 
   return (
     <motion.nav
-      className="fixed bottom-0 left-0 right-0 bg-white"
-
+      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/95 backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] z-50"
       style={{
-        position: 'fixed',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        width: '100%',
-        zIndex: 40,
-        willChange: 'transform',
-        transform: 'translateZ(0)',
-        backfaceVisibility: 'hidden',
-        WebkitBackfaceVisibility: 'hidden',
-        borderTop: '2px solid rgba(0, 0, 0, 0.35)',
-        borderTopLeftRadius: '20px',
-        borderTopRightRadius: '20px',
-        boxShadow: '0 -8px 24px rgba(0, 0, 0, 0.15), 0 -4px 12px rgba(0, 0, 0, 0.1), 0 -2px 6px rgba(0, 0, 0, 0.08)',
-        background: 'linear-gradient(to top, #FFFFFF 0%, #FAFAFA 100%)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
-      <div className="flex items-center justify-around px-2 py-2">
+      <div className="flex items-center justify-around px-2 py-1">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path ||
             (item.path === '/vendor/dashboard' && location.pathname === '/vendor');
@@ -103,12 +88,12 @@ const BottomNav = memo(() => {
             <button
               key={item.path}
               onClick={() => handleNavClick(item.path)}
-              className="flex flex-col items-center justify-center relative w-16 h-14 rounded-xl transition-all duration-200 group hover:scale-105"
+              className="flex flex-col items-center justify-center relative w-16 h-12 rounded-xl transition-all duration-200 group active:scale-95"
             >
               {/* Active Indicator Bar - Gradient Accent */}
               {isActive && (
                 <div
-                  className="absolute -top-2 w-10 h-1 rounded-b-full"
+                  className="absolute top-0 w-8 h-1 rounded-b-full"
                   style={{
                     background: themeColors.gradient,
                     boxShadow: `0 2px 8px ${themeColors.brand.teal}4D`,
@@ -124,10 +109,10 @@ const BottomNav = memo(() => {
                 />
               )}
 
-              <div className="relative z-10 flex flex-col items-center justify-center">
+              <div className="relative z-10 flex flex-col items-center justify-center pt-0.5">
                 <div className="relative mb-0.5">
                   <IconComponent
-                    className={`w-6 h-6 transition-all duration-300 ${isActive ? 'scale-110' : 'text-gray-400 group-hover:text-gray-600'}`}
+                    className={`w-5 h-5 transition-all duration-200 ${isActive ? 'scale-110' : 'text-gray-400 group-hover:text-gray-600'}`}
                     style={{
                       color: isActive ? themeColors.button : '#9CA3AF',
                       filter: isActive ? `drop-shadow(0 2px 4px ${themeColors.brand.teal}1A)` : 'none'
@@ -137,13 +122,13 @@ const BottomNav = memo(() => {
                     <span
                       className="absolute bg-gradient-to-br from-red-500 to-red-600 text-white text-xs font-bold rounded-full flex items-center justify-center"
                       style={{
-                        top: '-6px',
+                        top: '-5px',
                         right: '-8px',
-                        minWidth: '18px',
-                        height: '18px',
-                        padding: '0 4px',
-                        fontSize: '10px',
-                        lineHeight: '18px',
+                        minWidth: '16px',
+                        height: '16px',
+                        padding: '0 3px',
+                        fontSize: '9px',
+                        lineHeight: '16px',
                         border: '2px solid white',
                         boxShadow: '0 2px 5px rgba(239, 68, 68, 0.4)',
                         zIndex: 50,
@@ -154,7 +139,7 @@ const BottomNav = memo(() => {
                   )}
                 </div>
                 <span
-                  className={`text-[10px] transition-colors duration-300 ${isActive ? 'font-bold' : 'font-medium text-gray-500'}`}
+                  className={`text-[10px] leading-tight transition-colors duration-200 ${isActive ? 'font-bold' : 'font-medium text-gray-500'}`}
                   style={{
                     color: isActive ? themeColors.button : '#6B7280',
                   }}

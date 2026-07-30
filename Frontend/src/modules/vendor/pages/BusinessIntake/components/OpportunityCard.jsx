@@ -71,19 +71,14 @@ const OpportunityCard = ({
       ? 'Team required'
       : null;
 
+  // Queue-driven work (client requests, B2B jobs) is accept/reject on a timer,
+  // regardless of opportunity type.
   const queueActive = (assignment?.vendorQueue || []).some((q) => q.status === 'active');
+  const isQueueDriven = (assignment?.vendorQueue || []).length > 0;
   const showYourTurn =
-    type === 'client_request' &&
-    status === 'open' &&
-    !hasMyBid &&
-    queueActive &&
-    isMyTurnToRespond === true;
+    status === 'open' && !hasMyBid && queueActive && isMyTurnToRespond === true;
   const showWaitingTurn =
-    type === 'client_request' &&
-    status === 'open' &&
-    !hasMyBid &&
-    queueActive &&
-    isMyTurnToRespond === false;
+    status === 'open' && !hasMyBid && queueActive && isMyTurnToRespond === false;
 
   const skillTags =
     subServices?.length > 0
@@ -92,7 +87,7 @@ const OpportunityCard = ({
           (s) => (s.categoryCode || s.code) === categoryCode
         )?.subServices || [];
 
-  const primaryHandler = type === 'client_request' ? onAccept : onBid;
+  const primaryHandler = type === 'client_request' || isQueueDriven ? onAccept : onBid;
 
   if (compact) {
     return (
@@ -260,7 +255,7 @@ const OpportunityCard = ({
             disabled={showWaitingTurn}
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {showWaitingTurn ? 'Waiting turn' : actionLabel}
+            {showWaitingTurn ? 'Waiting turn' : isQueueDriven ? 'Accept Job' : actionLabel}
           </button>
         )}
         {type === 'direct_invitation' && status === 'open' && !hasMyBid && (

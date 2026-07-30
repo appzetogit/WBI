@@ -38,24 +38,28 @@ const initBulkJobWorker = (app) => {
         }
       } catch (error) {
         console.error(`[BullMQ Worker] Critical failure in job '${job.name}' for batch ${batchId}:`, error);
-        
-        // Update batch status to failed in case of unhandled worker crash
+
+        // Absolute safety net — never leave a batch stuck in validating/processing
         const B2BBatch = mongoose.model('B2BBatch');
+        const safeMessage = b2bBulkJobService.toUserFacingFailure
+          ? b2bBulkJobService.toUserFacingFailure(error)
+          : 'Batch processing failed. Please retry or contact support.';
+
         await B2BBatch.findByIdAndUpdate(batchId, {
           status: 'failed',
           failedAt: new Date(),
-          failureReason: error.message || 'Unhandled worker error'
+          failureReason: safeMessage
         });
 
-        // Notify client and admin
         try {
           const { getIO } = require('../sockets');
           const io = getIO();
           const batch = await B2BBatch.findById(batchId);
           if (batch && io) {
-            io.to(`b2b:${batch.companyId.toString()}`).emit('b2b:uploadFailed', {
+            const event = job.name === 'validateBatch' ? 'b2b:validationFailed' : 'b2b:uploadFailed';
+            io.to(`b2b:${batch.companyId.toString()}`).emit(event, {
               batchId,
-              message: error.message || 'Worker processing failed'
+              error: safeMessage
             });
             io.to('admin').emit('admin:batchFailed', { batchId });
           }

@@ -180,14 +180,16 @@ export default function GlobalWorkerJobAlert() {
     const alert = activeAlerts.find((b) => String(b.id || b._id) === String(id));
     try {
       if (alert?.isOpsJob) {
-        await api.post(`/engineers/ops-jobs/${id}/accept`);
-        toast.success('Vendor job accepted!');
-        navigate('/engineer/ops-jobs');
-      } else {
-        await engineerService.respondToJob(id, 'ACCEPTED');
-        toast.success('Job Accepted Successfully!');
-        navigate(`/engineer/job/${id}`);
+        // Checklist required before award — open job detail
+        stopAlertRing();
+        setActiveAlerts((prev) => prev.filter((b) => String(b.id || b._id) !== String(id)));
+        navigate(`/engineer/ops-jobs/${id}`);
+        toast('Confirm team, timeline, and resources to accept', { icon: '📋' });
+        return;
       }
+      await engineerService.respondToJob(id, 'ACCEPTED');
+      toast.success('Job Accepted Successfully!');
+      navigate(`/engineer/job/${id}`);
 
       const pendingJobs = JSON.parse(localStorage.getItem('workerPendingJobs') || '[]');
       const updated = pendingJobs.filter(b => String(b.id || b._id) !== String(id));

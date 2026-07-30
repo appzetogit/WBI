@@ -120,7 +120,7 @@ const WorkerLogin = () => {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#D68F35] opacity-[0.03] rounded-full blur-3xl animate-floating" style={{ animationDelay: '2s' }} />
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-8 relative z-10 animate-fade-in">
-        <Logo className="h-16 w-auto mx-auto transform hover:scale-110 transition-transform duration-500" />
+        <Logo src="/logo/TazkYLogo_circle.png" circle={true} className="w-16 h-16 mx-auto transform hover:scale-110 transition-transform duration-500" />
         
         {/* Removed duplicate logo circle */}
 

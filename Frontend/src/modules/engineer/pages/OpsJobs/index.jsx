@@ -120,10 +120,13 @@ const OpsJobs = () => {
                 <div className="flex gap-2">
                   <button
                     disabled={acting === job._id}
-                    onClick={(e) => { e.stopPropagation(); act(job._id, 'accept'); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/engineer/ops-jobs/${job._id}`);
+                    }}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl"
                   >
-                    <CheckCircle2 className="h-4 w-4" /> Accept
+                    <CheckCircle2 className="h-4 w-4" /> Review & Accept
                   </button>
                   <button
                     disabled={acting === job._id}

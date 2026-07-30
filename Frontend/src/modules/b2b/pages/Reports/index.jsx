@@ -47,13 +47,30 @@ const Reports = () => {
   const { data: companyProfile } = useQuery({
     queryKey: ['b2bFilterCompanyProfile'],
     queryFn: async () => {
-      const res = await api.get('/b2b/profile');
-      return res.data.data || res.data;
+      const res = await api.get('/b2b/company-profile');
+      return res.data.company || res.data.data || res.data;
     }
   });
 
-  // Extract branches cities safely
-  const cities = companyProfile?.branches?.map(b => b.city) || ['Mumbai', 'Pune', 'Navi Mumbai', 'Thane'];
+  // 3. Live services / cities from jobs + ServiceConfig catalog
+  const { data: filterMeta } = useQuery({
+    queryKey: ['b2bJobsFilterMeta'],
+    queryFn: async () => {
+      const res = await api.get('/b2b/jobs/filter-meta');
+      return res.data?.data || {};
+    },
+    staleTime: 60_000
+  });
+
+  const branchCities = companyProfile?.branches?.map((b) => b.city).filter(Boolean) || [];
+  const cities = (filterMeta?.cities?.length ? filterMeta.cities : branchCities).length
+    ? (filterMeta?.cities?.length ? filterMeta.cities : branchCities)
+    : [];
+  const serviceOptions = filterMeta?.services || [];
+  const statusOptions = filterMeta?.statuses || [
+    'completed', 'in_progress', 'assigned', 'searching_engineer', 'pending',
+    'pending_wallet', 'on_hold', 'cancelled', 'rejected', 'escalated', 'failed', 'closed'
+  ];
 
   // Handle Preset Date changes
   useEffect(() => {
@@ -314,12 +331,9 @@ const Reports = () => {
               className="w-full h-10 px-3 bg-white border border-gray-200 hover:border-[#10AFA5]/40 text-xs font-bold text-gray-600 rounded-xl outline-none focus:ring-1 focus:ring-[#10AFA5] transition-all"
             >
               <option value="">All Services</option>
-              <option value="AC Repair">AC Repair</option>
-              <option value="Washing Machine">Washing Machine</option>
-              <option value="RO / Filter">RO / Filter</option>
-              <option value="Electrician">Electrician</option>
-              <option value="Plumbing">Plumbing</option>
-              <option value="Pest Control">Pest Control</option>
+              {serviceOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
           </div>
 
@@ -362,12 +376,9 @@ const Reports = () => {
               className="w-full h-10 px-3 bg-white border border-gray-200 hover:border-[#10AFA5]/40 text-xs font-bold text-gray-600 rounded-xl outline-none focus:ring-1 focus:ring-[#10AFA5] transition-all"
             >
               <option value="">All Status</option>
-              <option value="completed">Completed</option>
-              <option value="in_progress">In Progress</option>
-              <option value="assigned">Assigned</option>
-              <option value="searching_engineer">Searching</option>
-              <option value="pending">Pending</option>
-              <option value="cancelled">Cancelled</option>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>{String(s).replace(/_/g, ' ')}</option>
+              ))}
             </select>
           </div>
 
@@ -472,7 +483,7 @@ const Reports = () => {
           </div>
           <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-3">Avg. Rating</p>
           <h3 className="text-xl font-black text-gray-800 mt-1">
-            {loadingSummary ? <FiLoader className="w-4 h-4 animate-spin text-[#10AFA5]" /> : `${summary?.averageRating?.value || 4.5} / 5`}
+            {loadingSummary ? <FiLoader className="w-4 h-4 animate-spin text-[#10AFA5]" /> : `${summary?.averageRating?.value != null ? summary.averageRating.value : '—'} / 5`}
           </h3>
           <p className={`text-[10px] font-bold mt-1.5 ${summary?.averageRating?.changeText?.includes('↑') ? 'text-green-600' : 'text-red-500'}`}>
             {summary?.averageRating?.changeText || 'No change vs Last Month'}

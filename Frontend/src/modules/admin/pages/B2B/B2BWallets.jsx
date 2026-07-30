@@ -36,7 +36,8 @@ const B2BWallets = () => {
             <thead>
               <tr className="text-left text-gray-500 border-b">
                 <th className="py-3 pr-4">Company</th>
-                <th className="py-3 pr-4">Balance</th>
+                <th className="py-3 pr-4">Available</th>
+                <th className="py-3 pr-4">Escrow Locked</th>
                 <th className="py-3 pr-4">Status</th>
               </tr>
             </thead>
@@ -47,6 +48,7 @@ const B2BWallets = () => {
                     {w.companyId?.companyName || w.companyId?.email || '—'}
                   </td>
                   <td className="py-3 pr-4">₹{Number(w.balance || 0).toLocaleString('en-IN')}</td>
+                  <td className="py-3 pr-4 text-amber-700">₹{Number(w.escrowBalance || 0).toLocaleString('en-IN')}</td>
                   <td className="py-3 pr-4 capitalize">{w.companyId?.verificationStatus || '—'}</td>
                 </tr>
               ))}

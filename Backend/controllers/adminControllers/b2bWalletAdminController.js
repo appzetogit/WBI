@@ -125,11 +125,37 @@ const createAdjustment = async (req, res) => {
 
 /**
  * POST Process Refund (Admin)
+ * If jobId is provided and escrow is held, refund from escrowBalance (not invented money).
  */
 const processRefund = async (req, res) => {
   try {
     const { companyId } = req.params;
-    const { amount, remark } = req.body;
+    const { amount, remark, jobId } = req.body;
+
+    if (jobId) {
+      const { refundB2BJobEscrow } = require('../../services/escrowReleaseEngine.service');
+      const result = await refundB2BJobEscrow({
+        jobId,
+        reason: remark || 'admin_escrow_refund'
+      });
+      if (!result.ok && !result.alreadyRefunded) {
+        return res.status(400).json({
+          success: false,
+          message: result.reason === 'no_held_ledger'
+            ? 'No held escrow found for this job'
+            : `Escrow refund failed: ${result.reason}`
+        });
+      }
+      const wallet = await B2BWallet.findOne({ companyId });
+      return res.status(200).json({
+        success: true,
+        message: result.alreadyRefunded
+          ? 'Escrow already refunded for this job'
+          : `Escrow of ₹${result.amount} refunded to company wallet`,
+        wallet,
+        escrowRefund: result
+      });
+    }
 
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
@@ -145,10 +171,8 @@ const processRefund = async (req, res) => {
     wallet.lastUpdatedAt = new Date();
     await wallet.save();
 
-    // Sync company profile
     await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
 
-    // Create transaction log
     const transactionId = `TXN-RFD-${Date.now()}`;
     const txn = await B2BWalletTransaction.create({
       companyId,

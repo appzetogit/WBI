@@ -1,24 +1,32 @@
-import React, { forwardRef, useState } from 'react';
+import React, { forwardRef, useState, useEffect } from 'react';
 import brandConfig from '../../config/brandConfig';
 
 /**
  * Centralized Logo Component
- * Usage: <Logo className="h-8 w-auto" />
+ * Usage: <Logo className="h-8 w-auto" src="/logo/TazkYLogo.jpeg" />
  * onDark — white badge behind full-color logo (use on teal/dark headers, not CSS invert)
  */
-const Logo = forwardRef(({ className = 'h-8 w-auto', onDark = false, ...props }, ref) => {
-  const [src, setSrc] = useState(brandConfig.logoPath);
+const Logo = forwardRef(({ className = 'h-8 w-auto', onDark = false, circle = false, src: propSrc, ...props }, ref) => {
+  const [src, setSrc] = useState(propSrc || brandConfig.logoPath);
+
+  useEffect(() => {
+    if (propSrc) {
+      setSrc(propSrc);
+    }
+  }, [propSrc]);
 
   const img = (
     <img
       fetchPriority="low"
       loading="lazy"
-      ref={onDark ? undefined : ref}
+      ref={onDark || circle ? undefined : ref}
       src={src}
       alt={brandConfig.brandName}
-      className={`${className} object-contain`}
+      className={circle ? 'w-full h-full object-cover rounded-full' : `${className} object-contain`}
       onError={() => {
-        if (src !== brandConfig.logoAltPath) {
+        if (src !== propSrc && propSrc) {
+          setSrc(propSrc);
+        } else if (src !== brandConfig.logoAltPath) {
           setSrc(brandConfig.logoAltPath);
         } else if (src !== '/logo/WBILogo.jpg') {
           setSrc('/logo/WBILogo.jpg');
@@ -27,6 +35,17 @@ const Logo = forwardRef(({ className = 'h-8 w-auto', onDark = false, ...props },
       {...props}
     />
   );
+
+  if (circle) {
+    return (
+      <span
+        ref={ref}
+        className={`${className} inline-flex items-center justify-center rounded-full overflow-hidden border border-gray-200/80 shadow-sm bg-white shrink-0 aspect-square p-0.5`}
+      >
+        {img}
+      </span>
+    );
+  }
 
   if (onDark) {
     return (

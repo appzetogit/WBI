@@ -44,6 +44,16 @@ const vendorOpsJobSchema = new mongoose.Schema({
   },
   assignedAt: { type: Date, default: Date.now },
   respondedAt: { type: Date, default: null },
+  /** Checklist before accept → project awarded */
+  acceptConfirmation: {
+    availableTeamSize: { type: Number, default: null },
+    canComplete: { type: Boolean, default: false },
+    canMeetTimeline: { type: Boolean, default: false },
+    hasResources: { type: Boolean, default: false },
+    estimatedDays: { type: Number, default: null },
+    notes: { type: String, default: '' },
+    confirmedAt: { type: Date, default: null }
+  },
   rejectionReason: { type: String, default: '' },
   startedAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },

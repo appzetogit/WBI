@@ -44,6 +44,8 @@ const getWalletSummary = async (req, res) => {
       data: {
         walletId: wallet._id,
         balance: wallet.balance,
+        escrowBalance: wallet.escrowBalance || 0,
+        availableBalance: wallet.balance,
         totalTopup: wallet.totalTopup,
         totalSpent: wallet.totalSpent,
         pendingDeductions: wallet.pendingDeductions,

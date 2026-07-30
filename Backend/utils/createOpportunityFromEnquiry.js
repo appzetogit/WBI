@@ -6,7 +6,11 @@ const Opportunity = require('../models/Opportunity');
 const Vendor = require('../models/Vendor');
 const ServiceConfig = require('../models/ServiceConfig');
 const ServiceRequest = require('../models/ServiceRequest');
-const { expandCategoryMatchCodes, LEGACY_ALIAS_MAP } = require('./serviceCategoryAliases');
+const {
+  expandCategoryMatchCodes,
+  buildLegacyCategoryMatchers,
+  LEGACY_ALIAS_MAP
+} = require('./serviceCategoryAliases');
 const { startAssignmentForOpportunity } = require('../services/projectAssignmentEngine.service');
 
 /**
@@ -49,7 +53,7 @@ const buildAssignmentMetaFromEnquiry = (enquiry = {}, extra = {}) => {
   };
 };
 
-/** Map equipment / enquiry keywords → ServiceConfig categoryCode */
+/** Map equipment / enquiry keywords → ServiceConfig categoryCode (legacy regex fallback) */
 const EQUIPMENT_TO_CATEGORY = [
   { test: /cctv|camera|surveillance|nvr|dvr/i, code: 'C01' },
   { test: /\bit\b|computer|laptop|desktop|pc\b/i, code: 'C02' },
@@ -62,7 +66,9 @@ const EQUIPMENT_TO_CATEGORY = [
   { test: /fire|safety|fas/i, code: 'C19' },
   { test: /elevator|lift/i, code: 'C18' },
   { test: /smart\s*home|home\s*auto/i, code: 'C23' },
-  { test: /ev\b|vehicle|auto/i, code: 'C22' }
+  { test: /ev\b|vehicle|auto/i, code: 'C22' },
+  { test: /water|purifier|ro\b/i, code: 'C24' },
+  { test: /web|website|digital|app\b|crm|marketing|design/i, code: 'WEB' }
 ];
 
 const ENQUIRY_TYPE_DEFAULTS = {
@@ -79,7 +85,115 @@ const ENQUIRY_TYPE_DEFAULTS = {
   app: 'APP',
   design: 'WEB',
   marketing: 'WEB',
-  crm: 'C02'
+  crm: 'C02',
+  service_request: null,
+  b2b: null
+};
+
+/**
+ * Generic words that must never drive a category decision on their own —
+ * almost every catalog entry and every free-text service string contains them.
+ */
+const MATCH_STOPWORDS = new Set([
+  'SERVICE', 'SERVICES', 'SERVICING', 'REPAIR', 'REPAIRS', 'REPAIRING',
+  'INSTALL', 'INSTALLATION', 'MAINTENANCE', 'SETUP', 'SYSTEM', 'SYSTEMS',
+  'AMC', 'AND', 'THE', 'FOR', 'WITH', 'NEW', 'OLD', 'GENERAL', 'OTHER',
+  'OTHERS', 'MISC', 'WORK', 'JOB', 'REQUEST', 'CUSTOM'
+]);
+
+const tokenizeForMatch = (text) =>
+  String(text || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .split(' ')
+    .filter((t) => t && !MATCH_STOPWORDS.has(t));
+
+/** ELECTRICIAN ~ ELECTRICAL, PLUMBER ~ PLUMBING: same 6+ char stem. */
+const tokensMatch = (a, b) => {
+  if (a === b) return true;
+  const limit = Math.min(a.length, b.length);
+  if (limit < 6) return false;
+  let common = 0;
+  while (common < limit && a[common] === b[common]) common += 1;
+  return common >= 6;
+};
+
+/**
+ * Similarity between the input text and one catalog label.
+ * Rewards both how much of the label is covered and how much of the input is
+ * explained, so a single incidental word ("Pest Control" vs "Access Control")
+ * cannot win.
+ */
+const scoreCatalogLabel = (textTokens, label) => {
+  const labelTokens = tokenizeForMatch(label);
+  if (!labelTokens.length || !textTokens.length) return 0;
+  let matched = 0;
+  for (const lt of labelTokens) {
+    if (textTokens.some((tt) => tokensMatch(tt, lt))) matched += 1;
+  }
+  if (!matched) return 0;
+  return (matched / labelTokens.length) * 40 + (matched / textTokens.length) * 40 + matched * 5;
+};
+
+/** Below this the match is treated as "no category in the catalog fits". */
+const MIN_CATALOG_MATCH_SCORE = 50;
+
+/**
+ * Pure scorer over an already-loaded catalog. Callers that classify many rows
+ * (bulk upload) load the configs once and reuse this.
+ * Scores every active category and returns the best one, rather than the first
+ * whose name happens to be a substring of the input.
+ */
+const pickCategoryFromConfigs = (haystack, configs = []) => {
+  const textTokens = tokenizeForMatch(haystack);
+  if (!textTokens.length) return null;
+
+  let best = { code: null, score: 0 };
+  for (const cfg of configs) {
+    const code = String(cfg.categoryCode || '').toUpperCase();
+    if (!code) continue;
+
+    // An explicit code in the text is authoritative.
+    if (textTokens.includes(code)) return code;
+
+    let score = scoreCatalogLabel(textTokens, cfg.categoryName);
+    for (const alias of cfg.matchAliases || []) {
+      if (!alias) continue;
+      if (textTokens.includes(String(alias).toUpperCase())) {
+        score = Math.max(score, 85);
+        continue;
+      }
+      score = Math.max(score, scoreCatalogLabel(textTokens, alias));
+    }
+    for (const sub of cfg.subCategories || []) {
+      const subCode = String(sub.subCatCode || sub.code || '').toUpperCase();
+      if (subCode && textTokens.includes(subCode)) return code;
+      const subName = sub.subCatName || sub.name || sub.subCategoryName;
+      score = Math.max(score, scoreCatalogLabel(textTokens, subName));
+    }
+
+    if (score > best.score) best = { code, score };
+  }
+
+  return best.code && best.score >= MIN_CATALOG_MATCH_SCORE ? best.code : null;
+};
+
+const loadActiveServiceConfigs = () =>
+  ServiceConfig.find({ isActive: true, status: { $ne: 'archived' } })
+    .select('categoryCode categoryName matchAliases subCategories')
+    .lean();
+
+/**
+ * Prefer admin ServiceConfig (name / aliases / subCategories) over hardcoded regex.
+ */
+const resolveCategoryCodeFromCatalog = async (haystack = '') => {
+  if (!tokenizeForMatch(haystack).length) return null;
+  try {
+    return pickCategoryFromConfigs(haystack, await loadActiveServiceConfigs());
+  } catch {
+    /* fall through to regex */
+    return null;
+  }
 };
 
 const parseBudgetRange = (budgetRange = '') => {
@@ -91,7 +205,13 @@ const parseBudgetRange = (budgetRange = '') => {
   return { min: Math.min(...values), max: Math.max(...values) };
 };
 
-const resolveCategoryCode = async ({ enquiryType, equipmentType = [], hints = [] }) => {
+/**
+ * Resolve a category and report whether it was actually matched.
+ * `matched: false` means nothing in the catalog fits and the returned code is
+ * only a placeholder — callers that can escalate should do so instead of
+ * routing the work to an unrelated vendor pool.
+ */
+const resolveCategoryMatch = async ({ enquiryType, equipmentType = [], hints = [] }) => {
   const haystack = [
     ...(Array.isArray(equipmentType) ? equipmentType : [equipmentType]),
     ...hints
@@ -99,13 +219,33 @@ const resolveCategoryCode = async ({ enquiryType, equipmentType = [], hints = []
     .filter(Boolean)
     .join(' ');
 
+  const fromCatalog = await resolveCategoryCodeFromCatalog(haystack);
+  if (fromCatalog) return { code: fromCatalog, matched: true, source: 'catalog', haystack };
+
   for (const rule of EQUIPMENT_TO_CATEGORY) {
-    if (rule.test.test(haystack)) return rule.code;
+    if (rule.test.test(haystack)) return { code: rule.code, matched: true, source: 'keyword', haystack };
   }
 
-  const fallback = ENQUIRY_TYPE_DEFAULTS[String(enquiryType || '').toLowerCase()] || 'C01';
-  return fallback;
+  const typeKey = String(enquiryType || '').toLowerCase();
+  const typeDefault = ENQUIRY_TYPE_DEFAULTS[typeKey];
+  if (typeDefault) return { code: typeDefault, matched: true, source: 'enquiryType', haystack };
+
+  // Last resort: first active ServiceConfig (never invent a fake category)
+  try {
+    const any = await ServiceConfig.findOne({ isActive: true, status: { $ne: 'archived' } })
+      .select('categoryCode')
+      .sort({ categoryCode: 1 })
+      .lean();
+    if (any?.categoryCode) {
+      return { code: String(any.categoryCode).toUpperCase(), matched: false, source: 'fallback', haystack };
+    }
+  } catch {
+    /* ignore */
+  }
+  return { code: 'C01', matched: false, source: 'fallback', haystack };
 };
+
+const resolveCategoryCode = async (opts) => (await resolveCategoryMatch(opts)).code;
 
 const resolveCategoryName = async (categoryCode) => {
   const code = String(categoryCode || '').toUpperCase();
@@ -131,17 +271,21 @@ const findEligibleVendorIds = async (categoryCode) => {
 
   const vendors = await Vendor.find({
     approvalStatus: 'approved',
-    isActive: { $ne: false },
-    $or: [
+    $and: [
+      { $or: [{ isActive: true }, { isActive: { $exists: false } }, { isActive: null }] },
       {
-        approvedServices: {
-          $elemMatch: {
-            categoryCode: { $in: codes },
-            status: { $in: ['active', 'pending'] }
-          }
-        }
-      },
-      { categories: { $in: codes } }
+        $or: [
+          {
+            approvedServices: {
+              $elemMatch: {
+                categoryCode: { $in: codes },
+                status: { $in: ['active', 'pending'] }
+              }
+            }
+          },
+          { categories: { $in: buildLegacyCategoryMatchers(codes) } }
+        ]
+      }
     ]
   })
     .select('_id')
@@ -222,7 +366,7 @@ const createOpportunityFromEnquiry = async ({
     categoryName,
     subServices: Array.isArray(enquiry.equipmentType) ? enquiry.equipmentType.slice(0, 12) : [],
     clientInfo: {
-      clientType: enquiry.companyName ? 'company' : 'individual',
+      clientType: enquiry.clientType || (enquiry.companyName ? 'company' : 'individual'),
       name: enquiry.fullName || enquiry.name || enquiry.contactName || 'Client',
       company: enquiry.companyName || '',
       city: enquiry.city || '',
@@ -387,13 +531,35 @@ const createOpportunityFromB2BJob = async (job) => {
   const lng = coords[0];
   const lat = coords[1];
 
-  const categoryCode = await resolveCategoryCode({
+  const match = await resolveCategoryMatch({
     enquiryType: 'b2b',
     equipmentType: [job.service, job.subService].filter(Boolean),
     hints: [job.deviceId, job.siteId]
   });
 
+  // Routing a job to an unrelated vendor pool is worse than not routing it:
+  // surface it so admin can add the missing category instead.
+  if (!match.matched) {
+    console.warn('[createOpportunityFromB2BJob] no catalog category matches service', {
+      jobId: job.jobId,
+      service: job.service,
+      subService: job.subService
+    });
+    return { opportunity: null, eligibleCount: 0, categoryCode: null, unmatchedCategory: true };
+  }
+
+  const categoryCode = match.code;
   const budget = Number(job.charge) || 0;
+
+  // Vendors need to see which corporate client the job belongs to.
+  let companyName = '';
+  try {
+    const B2BCompany = require('../models/B2BCompany');
+    const company = await B2BCompany.findById(job.companyId).select('companyName').lean();
+    companyName = company?.companyName || '';
+  } catch {
+    /* name is informational only */
+  }
 
   return createOpportunityFromEnquiry({
     enquiry: {
@@ -403,7 +569,8 @@ const createOpportunityFromB2BJob = async (job) => {
       email: job.email || '',
       city: job.city,
       siteAddress: job.address,
-      companyName: '',
+      companyName,
+      clientType: 'b2b',
       equipmentType: [job.service, job.subService].filter(Boolean),
       urgency: job.priority === 'High' ? 'Urgent' : 'Normal',
       preferredVisitDate: job.preferredDate,
@@ -427,7 +594,7 @@ const createOpportunityFromB2BJob = async (job) => {
       },
       { b2bJobId: job._id, b2bCompanyId: job.companyId }
     ),
-    opportunityType: 'bulk_requirement'
+    opportunityType: 'b2b_opportunity'
   });
 };
 
@@ -438,6 +605,9 @@ module.exports = {
   createOpportunityFromB2BJob,
   buildAssignmentMetaFromEnquiry,
   resolveCategoryCode,
+  resolveCategoryMatch,
+  pickCategoryFromConfigs,
+  loadActiveServiceConfigs,
   findEligibleVendorIds,
   parseBudgetRange
 };

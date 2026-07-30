@@ -193,10 +193,10 @@ const Wallet = () => {
       {/* KPI Cards section */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         
-        {/* Wallet Balance */}
+        {/* Available Balance */}
         <div className="bg-white rounded-3xl border border-[#E6F4F2] p-5 shadow-sm space-y-4 hover:border-[#10AFA5]/20 transition-colors">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Wallet Balance</span>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Available Balance</span>
             <div className="h-8 w-8 rounded-xl bg-teal-50 text-[#10AFA5] flex items-center justify-center border border-teal-100 shrink-0">
               <FiCreditCard className="w-4 h-4" />
             </div>
@@ -206,7 +206,25 @@ const Wallet = () => {
               ₹{loadSummary ? '---' : summary?.balance?.toLocaleString('en-IN') || '0.00'}
             </p>
             <span className="text-[9px] text-gray-400 font-semibold block mt-3 flex items-center gap-1">
-              <FiClock /> Last updated: 2 min ago
+              <FiShield /> Ready to fund new jobs
+            </span>
+          </div>
+        </div>
+
+        {/* Escrow Locked */}
+        <div className="bg-white rounded-3xl border border-[#E6F4F2] p-5 shadow-sm space-y-4 hover:border-amber-200 transition-colors">
+          <div className="flex justify-between items-start">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Escrow Locked</span>
+            <div className="h-8 w-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100 shrink-0">
+              <FiShield className="w-4 h-4" />
+            </div>
+          </div>
+          <div>
+            <p className="text-2xl font-black text-amber-600 leading-none">
+              ₹{loadSummary ? '---' : (summary?.escrowBalance || 0).toLocaleString('en-IN')}
+            </p>
+            <span className="text-[9px] text-gray-400 font-semibold block mt-3">
+              Held until company approval
             </span>
           </div>
         </div>

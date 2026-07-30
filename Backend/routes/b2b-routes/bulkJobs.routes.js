@@ -25,15 +25,28 @@ const diskStorage = multer.diskStorage({
   }
 });
 
-// File extensions filter
+// File extensions filter — spreadsheets only. Documents (PDF/DOCX/images) cannot be
+// parsed into structured job rows and previously reached the parser as garbage data.
+const ALLOWED_UPLOAD_EXTENSIONS = ['.xlsx', '.xls', '.csv'];
+const ALLOWED_UPLOAD_MIMETYPES = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/octet-stream', // some browsers send this for .xlsx
+  'text/csv',
+  'text/plain',
+  'application/csv',
+  'application/x-csv'
+];
+
 const excelFilter = (req, file, cb) => {
-  const allowedExtensions = ['.xlsx', '.xls', '.csv'];
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowedExtensions.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file format. Only .xlsx, .xls, and .csv are supported.'), false);
+  if (!ALLOWED_UPLOAD_EXTENSIONS.includes(ext)) {
+    return cb(new Error('Only .xlsx, .xls, .csv allowed'), false);
   }
+  if (file.mimetype && !ALLOWED_UPLOAD_MIMETYPES.includes(file.mimetype.toLowerCase())) {
+    return cb(new Error('Only .xlsx, .xls, .csv allowed'), false);
+  }
+  cb(null, true);
 };
 
 // Spreadsheet upload handler (No file size limit — supports large enterprise batches)

@@ -258,11 +258,27 @@ exports.acceptOpsJob = async (req, res) => {
 
     }
 
+    const { parseEngineerConfirmation } = require('../../services/projectAssignmentEngine.service');
 
+    let requiredEngineers = 1;
+    let opportunity = null;
+    const projectPreview = await VendorOpsProject.findById(job.projectId).select('opportunityId').lean();
+    if (projectPreview?.opportunityId) {
+      opportunity = await Opportunity.findById(projectPreview.opportunityId)
+        .select('assignment.requiredEngineers assignment.phase status')
+        .lean();
+      requiredEngineers = opportunity?.assignment?.requiredEngineers || 1;
+    }
+
+    const parsed = parseEngineerConfirmation(req.body || {}, requiredEngineers);
+    if (!parsed.ok) {
+      return res.status(parsed.status || 400).json({ success: false, message: parsed.message });
+    }
 
     job.status = 'accepted';
 
     job.respondedAt = new Date();
+    job.acceptConfirmation = parsed.confirmation;
 
     await job.save();
 
@@ -300,7 +316,11 @@ exports.acceptOpsJob = async (req, res) => {
           $set: {
             status: 'awarded',
             'assignment.phase': 'awarded',
-            'awardedTo.awardedAt': new Date()
+            'awardedTo.awardedAt': new Date(),
+            'assignment.engineerConfirmation': {
+              ...parsed.confirmation,
+              engineerId: job.engineerId
+            }
           }
         }
       );
@@ -338,7 +358,11 @@ exports.acceptOpsJob = async (req, res) => {
 
     await notifyVendorOpsJobStatus(job, engineerId, 'accepted');
 
-    res.status(200).json({ success: true, message: 'Job accepted', data: job });
+    res.status(200).json({
+      success: true,
+      message: 'Job accepted — project awarded',
+      data: job
+    });
 
   } catch (error) {
 

@@ -5,6 +5,7 @@ const B2BInvoice = require('../models/B2BInvoice');
 const B2BJob = require('../models/B2BJob');
 const B2BCompany = require('../models/B2BCompany');
 const JobHistory = require('../models/JobHistory');
+const { holdB2BJobEscrow } = require('./escrowReleaseEngine.service');
 
 /**
  * Compute pending_wallet activation gate for a company.
@@ -27,6 +28,7 @@ const getPendingWalletGate = async (companyId) => {
 
   return {
     walletBalance: balance,
+    escrowBalance: wallet?.escrowBalance || 0,
     pendingJobCount,
     pendingBatchCost,
     shortfall,
@@ -41,7 +43,7 @@ const getPendingWalletGate = async (companyId) => {
 };
 
 /**
- * Activate pending_wallet jobs when balance covers their charges.
+ * Activate pending_wallet jobs by locking each job's charge into escrow.
  */
 const activatePendingWalletJobs = async (companyId, app = null) => {
   const gate = await getPendingWalletGate(companyId);
@@ -52,81 +54,67 @@ const activatePendingWalletJobs = async (companyId, app = null) => {
     return { activated: 0, remaining: gate.pendingJobCount, deducted: 0, gate, blocked: true };
   }
 
-  const wallet = await B2BWallet.findOne({ companyId });
-  if (!wallet) {
-    return { activated: 0, remaining: gate.pendingJobCount, deducted: 0, gate, blocked: true };
-  }
-
   const pendingJobs = await B2BJob.find({ companyId, status: 'pending_wallet' }).sort({ createdAt: 1 });
-  const totalCost = parseFloat(pendingJobs.reduce((s, j) => s + (j.charge || 0), 0).toFixed(2));
-
-  if (wallet.balance < totalCost) {
-    const refreshed = await getPendingWalletGate(companyId);
-    return { activated: 0, remaining: refreshed.pendingJobCount, deducted: 0, gate: refreshed, blocked: true };
-  }
-
-  wallet.balance = parseFloat((wallet.balance - totalCost).toFixed(2));
-  wallet.totalSpent = parseFloat((wallet.totalSpent + totalCost).toFixed(2));
-  wallet.lastUpdatedAt = new Date();
-  await wallet.save();
-  await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
-
-  const jobIds = pendingJobs.map((j) => j._id);
-  await B2BWalletTransaction.create({
-    companyId,
-    walletId: wallet._id,
-    transactionId: `TXN-ACT-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-    type: 'job_deduction',
-    amount: -totalCost,
-    totalAmount: -totalCost,
-    status: 'success',
-    paymentMethod: 'wallet',
-    remark: `Activation of ${pendingJobs.length} pending_wallet job(s)`,
-    relatedJobIds: jobIds
-  });
-
   const historyLogs = [];
+  let heldTotal = 0;
+  const activatedIds = [];
+
   for (const job of pendingJobs) {
+    const hold = await holdB2BJobEscrow({
+      companyId,
+      jobId: job._id,
+      amount: job.charge,
+      remark: `Escrow hold on activation — ${job.jobId}`
+    });
+    if (!hold.ok && !hold.alreadyHeld) {
+      console.warn(`[Activate] Escrow hold failed for ${job.jobId}:`, hold.reason);
+      break;
+    }
+
     job.status = 'searching_engineer';
-    job.paymentStatus = 'deducted';
+    job.paymentStatus = 'escrow_locked';
+    job.payoutStatus = 'none';
     job.currentWave = 0;
     await job.save();
+    heldTotal += Number(job.charge) || 0;
+    activatedIds.push(job._id);
     historyLogs.push({
       jobId: job._id,
       status: 'searching_engineer',
-      remark: 'Activated from pending_wallet after sufficient top-up / balance.',
+      remark: 'Activated from pending_wallet — funds locked in escrow.',
       role: 'system'
     });
   }
+
   if (historyLogs.length) await JobHistory.insertMany(historyLogs);
 
   try {
-    const { queueJobMatching } = require('./b2bMatchingService');
-    const { bootstrapFlowFromB2BJob } = require('./enterpriseB2BOrchestrator.service');
-    for (const job of pendingJobs) {
-      bootstrapFlowFromB2BJob(job._id).catch((e) => {
-        console.warn(`[Activate] flow bootstrap ${job._id}:`, e.message);
-      });
-      queueJobMatching(job._id, app).catch((err) => {
-        console.error(`[Activate] Matching queue failed for ${job._id}:`, err.message);
+    const { dispatchB2BJobAssignment } = require('./enterpriseB2BOrchestrator.service');
+    for (const id of activatedIds) {
+      dispatchB2BJobAssignment(id, app).catch((err) => {
+        console.error(`[Activate] Assignment dispatch failed for ${id}:`, err.message);
       });
     }
   } catch (err) {
-    console.error('[Activate] Matching service load failed:', err.message);
+    console.error('[Activate] Assignment service load failed:', err.message);
   }
 
+  const wallet = await B2BWallet.findOne({ companyId });
   if (app) {
     try {
       const io = app.get('socketio');
       if (io) {
         io.to(`b2b:${companyId}`).emit('b2b:walletUpdated', {
-          balance: wallet.balance,
-          totalSpent: wallet.totalSpent
+          balance: wallet?.balance || 0,
+          escrowBalance: wallet?.escrowBalance || 0,
+          totalSpent: wallet?.totalSpent || 0
         });
         io.to(`b2b:${companyId}`).emit('b2b:pendingJobsActivated', {
-          activated: pendingJobs.length,
-          deducted: totalCost,
-          balance: wallet.balance
+          activated: activatedIds.length,
+          deducted: heldTotal,
+          escrowHeld: heldTotal,
+          balance: wallet?.balance || 0,
+          escrowBalance: wallet?.escrowBalance || 0
         });
       }
     } catch (e) {
@@ -135,19 +123,21 @@ const activatePendingWalletJobs = async (companyId, app = null) => {
   }
 
   const refreshedGate = await getPendingWalletGate(companyId);
-  console.log(`[Activate] Activated ${pendingJobs.length} jobs for company ${companyId}, deducted ₹${totalCost}`);
+  console.log(
+    `[Activate] Activated ${activatedIds.length} jobs for company ${companyId}, escrow held ₹${heldTotal}`
+  );
 
   return {
-    activated: pendingJobs.length,
+    activated: activatedIds.length,
     remaining: refreshedGate.pendingJobCount,
-    deducted: totalCost,
+    deducted: heldTotal,
     gate: refreshedGate,
     blocked: false
   };
 };
 
 /**
- * Triggered when a B2B job is marked completed.
+ * Legacy completion-time deduct. Skips jobs already in escrow / released.
  */
 const deductWalletForCompletedJob = async (companyId, jobId, app = null) => {
   console.log(`[B2B Wallet Service] Triggering auto-deduction for company: ${companyId}, job: ${jobId}`);
@@ -158,9 +148,9 @@ const deductWalletForCompletedJob = async (companyId, jobId, app = null) => {
       return { success: false, error: 'Job not found' };
     }
 
-    if (job.paymentStatus === 'deducted') {
-      console.log(`[B2B Wallet Service] Job ${job.jobId} already deducted`);
-      return { success: true, message: 'Already deducted' };
+    if (['deducted', 'escrow_locked', 'released', 'refunded'].includes(job.paymentStatus)) {
+      console.log(`[B2B Wallet Service] Job ${job.jobId} already funded (${job.paymentStatus})`);
+      return { success: true, message: 'Already funded / escrowed' };
     }
 
     let wallet = await B2BWallet.findOne({ companyId });
@@ -191,61 +181,43 @@ const deductWalletForCompletedJob = async (companyId, jobId, app = null) => {
       }
     };
 
-    if (wallet.balance >= totalDeduction) {
-      wallet.balance = parseFloat((wallet.balance - totalDeduction).toFixed(2));
-      wallet.totalSpent = parseFloat((wallet.totalSpent + totalDeduction).toFixed(2));
-      wallet.lastUpdatedAt = new Date();
-      await wallet.save();
-
-      await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
-
-      const transactionId = `TXN-DED-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      const txn = await B2BWalletTransaction.create({
-        companyId,
-        walletId: wallet._id,
-        transactionId,
-        type: 'job_deduction',
-        amount: -perJobCharge,
-        gstAmount: -gstAmount,
-        totalAmount: -totalDeduction,
-        status: 'success',
-        paymentMethod: 'wallet',
-        remark: `Auto-deduction for completed job ID: ${job.jobId}`,
-        relatedJobIds: [jobId]
-      });
-
+    // Prefer true escrow hold over immediate spend
+    const hold = await holdB2BJobEscrow({
+      companyId,
+      jobId,
+      amount: totalDeduction,
+      remark: `Escrow hold on completion path — ${job.jobId}`
+    });
+    if (hold.ok) {
       job.charge = totalDeduction;
-      job.paymentStatus = 'deducted';
-      job.status = 'completed';
+      job.paymentStatus = 'escrow_locked';
       await job.save();
 
-      const invoiceNumber = `WBI-DED-${Date.now().toString().substring(5)}`;
-      await B2BInvoice.create({
-        companyId,
-        invoiceId: `INV-DED-${Date.now()}`,
-        invoiceNumber,
-        invoiceType: 'deduction',
-        amount: perJobCharge,
-        gstAmount,
-        totalAmount: totalDeduction,
-        status: 'Settled',
-        fileUrl: `https://wbi-invoices.s3.amazonaws.com/${invoiceNumber}.pdf`
+      emitEvent('b2b:walletUpdated', `b2b:${companyId}`, {
+        balance: hold.balance,
+        escrowBalance: hold.escrowBalance,
+        totalSpent: wallet.totalSpent
       });
+      return { success: true, hold, escrow: true };
+    }
+
+    if (wallet.balance >= totalDeduction) {
+      // Fallback should not happen if hold works; keep for safety
+      wallet.balance = parseFloat((wallet.balance - totalDeduction).toFixed(2));
+      wallet.escrowBalance = parseFloat(((wallet.escrowBalance || 0) + totalDeduction).toFixed(2));
+      wallet.lastUpdatedAt = new Date();
+      await wallet.save();
+      await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
+
+      job.charge = totalDeduction;
+      job.paymentStatus = 'escrow_locked';
+      await job.save();
 
       emitEvent('b2b:walletUpdated', `b2b:${companyId}`, {
         balance: wallet.balance,
-        totalSpent: wallet.totalSpent
+        escrowBalance: wallet.escrowBalance
       });
-      emitEvent('b2b:deductionSuccess', `b2b:${companyId}`, {
-        jobId: job.jobId,
-        amount: totalDeduction
-      });
-      emitEvent('admin:b2bWalletUpdated', 'admin', {
-        companyId,
-        balance: wallet.balance
-      });
-
-      return { success: true, txn, wallet };
+      return { success: true, wallet, escrow: true };
     }
 
     wallet.pendingDeductions = parseFloat((wallet.pendingDeductions + totalDeduction).toFixed(2));
@@ -257,14 +229,10 @@ const deductWalletForCompletedJob = async (companyId, jobId, app = null) => {
     job.status = 'completed';
     await job.save();
 
-    emitEvent('b2b:walletUpdated', `b2b:${companyId}`, {
-      balance: wallet.balance,
-      pendingDeductions: wallet.pendingDeductions
-    });
     emitEvent('b2b:lowBalance', `b2b:${companyId}`, {
       balance: wallet.balance,
       required: totalDeduction,
-      message: 'Wallet balance insufficient for completed job deductions. Please top up.'
+      message: 'Wallet balance insufficient to lock escrow. Please top up.'
     });
 
     return { success: false, error: 'Insufficient balance', pending: true };

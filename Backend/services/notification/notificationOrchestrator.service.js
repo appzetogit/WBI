@@ -127,6 +127,10 @@ async function expandRecipients(resolved) {
   return expanded;
 }
 
+/** BullMQ rejects custom job ids containing ':'. */
+const toQueueJobId = (value) =>
+  value ? String(value).replace(/:/g, '_').slice(0, 120) : undefined;
+
 async function enqueueOrInline(jobName, data, opts = {}) {
   try {
     const { notificationQueue } = require('../../jobs/queueSetup');
@@ -136,7 +140,7 @@ async function enqueueOrInline(jobName, data, opts = {}) {
       removeOnComplete: 1000,
       removeOnFail: 5000,
       delay: opts.scheduleDelay || 0,
-      jobId: opts.jobId
+      jobId: toQueueJobId(opts.jobId)
     });
     return { queued: true, jobId: job.id };
   } catch (err) {
@@ -265,7 +269,7 @@ async function emit(eventKey, opts = {}) {
 
       const enq = await enqueueOrInline('deliver_channel', jobPayload, {
         scheduleDelay,
-        jobId: dedupeKey.slice(0, 120)
+        jobId: dedupeKey
       });
       logs.push(logDoc._id);
       jobs.push(enq);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -57,6 +57,12 @@ const Profile = () => {
   const [logoUploading, setLogoUploading] = useState(false);
   const [docUploadingType, setDocUploadingType] = useState(null);
   
+  const [notifPrefs, setNotifPrefs] = useState({
+    email: true,
+    sms: true,
+    push: false
+  });
+
   // React Query: Fetch Profile Data
   const { data: profileData, isLoading, isError, refetch } = useQuery({
     queryKey: ['b2bProfile'],
@@ -66,6 +72,17 @@ const Profile = () => {
       return res.data.company;
     }
   });
+
+  useEffect(() => {
+    const p = profileData?.notificationPreferences;
+    if (p && typeof p === 'object') {
+      setNotifPrefs({
+        email: p.email !== false,
+        sms: p.sms !== false,
+        push: !!p.push
+      });
+    }
+  }, [profileData]);
 
   // React Query: Fetch Active Sessions
   const { data: sessionData } = useQuery({
@@ -86,6 +103,19 @@ const Profile = () => {
   const branchForm = useForm();
 
   // Mutations
+  const updateNotifPrefsMutation = useMutation({
+    mutationFn: async (payload) => {
+      const res = await api.patch('/b2b/company-profile/notification-preferences', payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['b2bProfile']);
+      toast.success('Notification preferences saved');
+      setActiveModal(null);
+    },
+    onError: (err) => toast.error(err.response?.data?.message || 'Failed to save preferences')
+  });
+
   const updateProfileMutation = useMutation({
     mutationFn: async (payload) => {
       const res = await api.patch('/b2b/company-profile', payload);
@@ -719,12 +749,12 @@ const Profile = () => {
               <div className="flex justify-between">
                 <span className="text-gray-400 font-medium">Verified On</span>
                 <span className="font-bold text-gray-700">
-                  {profileData?.verifiedOn ? new Date(profileData.verifiedOn).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '20 Jan 2025'}
+                  {profileData?.verifiedOn ? new Date(profileData.verifiedOn).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : (profileData?.verificationStatus === 'approved' ? 'Approved' : '—')}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400 font-medium">Verified By</span>
-                <span className="font-bold text-gray-700">{profileData?.verifiedBy || 'Admin Team'}</span>
+                <span className="font-bold text-gray-700">{profileData?.verifiedBy || (profileData?.verificationStatus === 'approved' ? 'WBI Admin' : '—')}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-400 font-medium">Status</span>
@@ -1170,27 +1200,47 @@ const Profile = () => {
                   <p className="text-xs font-bold text-gray-700">Email Notifications</p>
                   <p className="text-[10px] text-gray-400">Receive booking invoices & summary emails</p>
                 </div>
-                <input type="checkbox" defaultChecked className="rounded text-[#10AFA5] focus:ring-[#10AFA5]/30 w-4.5 h-4.5" />
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.email}
+                  onChange={(e) => setNotifPrefs((prev) => ({ ...prev, email: e.target.checked }))}
+                  className="rounded text-[#10AFA5] focus:ring-[#10AFA5]/30 w-4.5 h-4.5"
+                />
               </div>
               <div className="flex justify-between items-center">
                 <div>
                   <p className="text-xs font-bold text-gray-700">SMS Alerts</p>
                   <p className="text-[10px] text-gray-400">Receive real-time mobile OTP & dispatch SMS</p>
                 </div>
-                <input type="checkbox" defaultChecked className="rounded text-[#10AFA5] focus:ring-[#10AFA5]/30 w-4.5 h-4.5" />
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.sms}
+                  onChange={(e) => setNotifPrefs((prev) => ({ ...prev, sms: e.target.checked }))}
+                  className="rounded text-[#10AFA5] focus:ring-[#10AFA5]/30 w-4.5 h-4.5"
+                />
               </div>
               <div className="flex justify-between items-center">
                 <div>
                   <p className="text-xs font-bold text-gray-700">Real-time Web Push</p>
                   <p className="text-[10px] text-gray-400">Push status alerts during live job tracking</p>
                 </div>
-                <input type="checkbox" className="rounded text-[#10AFA5] focus:ring-[#10AFA5]/30 w-4.5 h-4.5" />
+                <input
+                  type="checkbox"
+                  checked={notifPrefs.push}
+                  onChange={(e) => setNotifPrefs((prev) => ({ ...prev, push: e.target.checked }))}
+                  className="rounded text-[#10AFA5] focus:ring-[#10AFA5]/30 w-4.5 h-4.5"
+                />
               </div>
             </div>
 
             <div className="flex gap-3 justify-end pt-5 border-t border-gray-50 mt-4">
-              <button onClick={() => setActiveModal(null)} className="px-5 py-2 bg-[#10AFA5] hover:bg-[#0D9488] text-white text-xs font-bold rounded-xl w-full shadow-md text-center">
-                Save Preferences
+              <button
+                type="button"
+                disabled={updateNotifPrefsMutation.isPending}
+                onClick={() => updateNotifPrefsMutation.mutate(notifPrefs)}
+                className="px-5 py-2 bg-[#10AFA5] hover:bg-[#0D9488] disabled:bg-gray-300 text-white text-xs font-bold rounded-xl w-full shadow-md text-center"
+              >
+                {updateNotifPrefsMutation.isPending ? 'Saving…' : 'Save Preferences'}
               </button>
             </div>
           </div>

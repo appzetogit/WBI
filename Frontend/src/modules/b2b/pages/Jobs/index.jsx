@@ -86,20 +86,64 @@ const Jobs = () => {
 
   const stats = statsRes?.stats || {};
   const chartData = statsRes?.chartData || [];
+  const trends = stats.trends || {};
+
+  // Filter metadata (services / cities / batches from live data + ServiceConfig)
+  const { data: filterMetaRes } = useQuery({
+    queryKey: ['b2bJobsFilterMeta'],
+    queryFn: async () => {
+      const res = await api.get('/b2b/jobs/filter-meta');
+      return res.data?.data || {};
+    },
+    staleTime: 60_000
+  });
+
+  const { data: activityRes, isLoading: activityLoading } = useQuery({
+    queryKey: ['b2bJobsRecentActivity'],
+    queryFn: async () => {
+      const res = await api.get('/b2b/jobs/recent-activity', { params: { limit: 12 } });
+      return res.data?.data || [];
+    },
+    refetchInterval: 30000
+  });
+
+  const recentActivity = activityRes || [];
+  const serviceOptions = filterMetaRes?.services?.length
+    ? ['All Services', ...filterMetaRes.services]
+    : ['All Services'];
+  const cityOptions = filterMetaRes?.cities?.length
+    ? ['All Cities', ...filterMetaRes.cities]
+    : ['All Cities'];
+  const batchOptions = filterMetaRes?.batches?.length
+    ? [
+        { label: 'All Batches', value: 'all' },
+        ...filterMetaRes.batches.map((b) => ({
+          label: b.batchId || b.fileName || String(b._id),
+          value: b._id
+        }))
+      ]
+    : [{ label: 'All Batches', value: 'all' }];
 
   // Fetch Jobs List
-  const { data: jobsRes, isLoading } = useQuery({
+  const { data: jobsRes, isLoading, isError: jobsError, error: jobsErr, refetch: refetchJobs } = useQuery({
     queryKey: ['b2bJobsList', currentPage, itemsPerPage, activeTab, filters, debouncedSearch],
     queryFn: async () => {
-      // Merge tab status with filter status
       let effectiveStatus = filters.status;
       if (activeTab !== 'all') {
-        if (activeTab === 'failed_cancelled') {
-          // Special case, backend might need to handle this or we pass multiple statuses. 
-          // Assuming backend handles it, or we just pass activeTab as status
-          effectiveStatus = 'failed'; 
+        if (activeTab === 'failed/cancelled') {
+          effectiveStatus = 'failed,cancelled,rejected';
+        } else if (activeTab === 'pending') {
+          effectiveStatus = 'pending,searching_engineer,pending_wallet';
+        } else if (activeTab === 'in progress') {
+          effectiveStatus = 'in_progress';
+        } else if (activeTab === 'on hold') {
+          effectiveStatus = 'on_hold';
+        } else if (activeTab === 'completed') {
+          effectiveStatus = 'completed,closed';
+        } else if (activeTab === 'escalated') {
+          effectiveStatus = 'escalated';
         } else {
-          effectiveStatus = activeTab.replace(' ', '_').toLowerCase();
+          effectiveStatus = activeTab.replace(/\s+/g, '_').toLowerCase();
         }
       }
 
@@ -112,6 +156,7 @@ const Jobs = () => {
         city: filters.city !== 'all' ? filters.city : undefined,
         priority: filters.priority !== 'all' ? filters.priority : undefined,
         paymentStatus: filters.paymentStatus !== 'all' ? filters.paymentStatus : undefined,
+        batchId: filters.batchId !== 'all' ? filters.batchId : undefined,
         startDate: filters.startDate || undefined,
         endDate: filters.endDate || undefined
       };
@@ -167,34 +212,95 @@ const Jobs = () => {
 
   const cancelJobMutation = useMutation({
     mutationFn: (id) => api.delete(`/b2b/jobs/${id}`),
-    onSuccess: () => {
-      toast.success('Job cancelled successfully');
+    onSuccess: (res) => {
+      toast.success(res?.data?.message || 'Job cancelled successfully');
       queryClient.invalidateQueries(['b2bJobsList']);
       queryClient.invalidateQueries(['b2bJobsStats']);
+      queryClient.invalidateQueries(['b2bWallet']);
     },
-    onError: () => toast.error('Failed to cancel job')
+    onError: (err) => toast.error(err?.response?.data?.message || 'Failed to cancel job')
+  });
+
+  const rematchMutation = useMutation({
+    mutationFn: (id) => api.post(`/b2b/jobs/${id}/rematch`),
+    onSuccess: (res) => {
+      toast.success(res?.data?.message || 'Matching restarted');
+      queryClient.invalidateQueries(['b2bJobsList']);
+      queryClient.invalidateQueries(['b2bJobsStats']);
+      queryClient.invalidateQueries(['b2bJobsRecentActivity']);
+    },
+    onError: (err) => toast.error(err?.response?.data?.message || 'Could not restart matching')
   });
 
   // KPI Card Configs
   const kpiCards = [
-    { label: 'Total Jobs', value: stats.totalJobs || 0, icon: <FiFileText className="w-5 h-5 text-[#10AFA5]" />, trend: '↑ 18% from last month', trendColor: 'text-green-600', bg: 'bg-[#E6F4F2]' },
-    { label: 'Pending', value: stats.pending || 0, icon: <FiClock className="w-5 h-5 text-orange-500" />, trend: '↑ 12% from last month', trendColor: 'text-green-600', bg: 'bg-orange-50' },
-    { label: 'Assigned', value: stats.assigned || 0, icon: <FiCheckSquare className="w-5 h-5 text-purple-600" />, trend: '↑ 8% from last month', trendColor: 'text-green-600', bg: 'bg-purple-50' },
-    { label: 'In Progress', value: stats.inProgress || 0, icon: <FiRefreshCw className="w-5 h-5 text-blue-500" />, trend: '↑ 15% from last month', trendColor: 'text-green-600', bg: 'bg-blue-50' },
-    { label: 'Completed', value: stats.completed || 0, icon: <FiCheckCircle className="w-5 h-5 text-green-600" />, trend: '↓ 20% from last month', trendColor: 'text-red-500', bg: 'bg-green-50' }
+    { label: 'Total Jobs', value: stats.totalJobs || 0, icon: <FiFileText className="w-5 h-5 text-[#10AFA5]" />, trend: trends.totalJobs || '—', trendColor: trends.totalJobsUp === false ? 'text-red-500' : 'text-green-600', bg: 'bg-[#E6F4F2]' },
+    { label: 'Pending', value: (stats.pending || 0) + (stats.pendingWallet || 0), icon: <FiClock className="w-5 h-5 text-orange-500" />, trend: `${stats.pendingWallet || 0} payment pending`, trendColor: 'text-amber-600', bg: 'bg-orange-50' },
+    { label: 'Assigned', value: stats.assigned || 0, icon: <FiCheckSquare className="w-5 h-5 text-purple-600" />, trend: `${stats.searchingEngineer || 0} searching`, trendColor: 'text-gray-500', bg: 'bg-purple-50' },
+    { label: 'In Progress', value: stats.inProgress || 0, icon: <FiRefreshCw className="w-5 h-5 text-blue-500" />, trend: `${stats.onHold || 0} on hold`, trendColor: 'text-gray-500', bg: 'bg-blue-50' },
+    { label: 'Completed', value: stats.completed || 0, icon: <FiCheckCircle className="w-5 h-5 text-green-600" />, trend: trends.completed || '—', trendColor: trends.completedUp === false ? 'text-red-500' : 'text-green-600', bg: 'bg-green-50' }
   ];
 
   const getStatusStyle = (status) => {
     switch (status) {
-      case 'completed': return 'bg-green-50 text-green-600 border border-green-100';
-      case 'pending': return 'bg-yellow-50 text-yellow-600 border border-yellow-100';
+      case 'completed':
+      case 'closed': return 'bg-green-50 text-green-600 border border-green-100';
+      case 'pending':
+      case 'searching_engineer': return 'bg-yellow-50 text-yellow-600 border border-yellow-100';
+      case 'pending_wallet': return 'bg-amber-50 text-amber-700 border border-amber-100';
       case 'assigned': return 'bg-purple-50 text-purple-600 border border-purple-100';
       case 'in_progress': return 'bg-blue-50 text-blue-600 border border-blue-100';
-      case 'engineer_on_way': return 'bg-indigo-50 text-indigo-600 border border-indigo-100';
+      case 'on_hold': return 'bg-slate-50 text-slate-600 border border-slate-200';
+      case 'escalated': return 'bg-orange-50 text-orange-700 border border-orange-100';
+      case 'rejected':
       case 'failed':
       case 'cancelled': return 'bg-red-50 text-red-600 border border-red-100';
       default: return 'bg-gray-50 text-gray-600 border border-gray-200';
     }
+  };
+
+  const formatStatusLabel = (status) => {
+    const map = {
+      pending_wallet: 'Payment Pending',
+      searching_engineer: 'Searching',
+      in_progress: 'In Progress',
+      on_hold: 'On Hold'
+    };
+    return map[status] || String(status || '').replace(/_/g, ' ');
+  };
+
+  const ALLOCATION_STAGES = {
+    not_started: { label: 'Queued', cls: 'bg-gray-50 text-gray-600 border-gray-200' },
+    engineer_waves: { label: 'Finding engineer', cls: 'bg-blue-50 text-blue-600 border-blue-100' },
+    vendor_marketplace: { label: 'With vendors', cls: 'bg-indigo-50 text-indigo-600 border-indigo-100' },
+    freelancer_pool: { label: 'Freelancer pool', cls: 'bg-violet-50 text-violet-600 border-violet-100' },
+    admin_escalation: { label: 'With WBI support', cls: 'bg-orange-50 text-orange-700 border-orange-100' },
+    allocated: { label: 'Allocated', cls: 'bg-green-50 text-green-600 border-green-100' }
+  };
+
+  // Jobs that will never move on their own until someone retries or cancels.
+  const canRematch = (job) =>
+    !job.assignedTo && ['pending', 'searching_engineer', 'escalated', 'failed', 'rejected'].includes(job.status);
+
+  const formatActivityTime = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return `Today, ${time}`;
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
+    return d.toLocaleString();
+  };
+
+  const activityIcon = (status) => {
+    if (['completed', 'closed'].includes(status)) return { Icon: FiCheckCircle, cls: 'bg-green-100 text-green-600' };
+    if (['assigned', 'searching_engineer'].includes(status)) return { Icon: FiUser, cls: 'bg-blue-100 text-blue-600' };
+    if (['failed', 'cancelled', 'rejected'].includes(status)) return { Icon: FiAlertTriangle, cls: 'bg-red-100 text-red-600' };
+    if (status === 'escalated') return { Icon: FiAlertCircle, cls: 'bg-orange-100 text-orange-600' };
+    return { Icon: FiFileText, cls: 'bg-gray-100 text-gray-600' };
   };
 
   return (
@@ -256,12 +362,18 @@ const Jobs = () => {
 
             {/* Dropdowns */}
             {[
-              { label: 'Status', key: 'status', options: ['All Status', 'Pending', 'Assigned', 'In_Progress', 'Completed', 'Failed'] },
-              { label: 'Service', key: 'service', options: ['All Services', 'AC Repair', 'Plumbing', 'Electrical'] },
-              { label: 'City / Location', key: 'city', options: ['All Cities', 'Mumbai', 'Pune', 'Thane'] },
+              {
+                label: 'Status',
+                key: 'status',
+                options: [
+                  'All Status', 'Pending', 'pending_wallet', 'searching_engineer', 'Assigned',
+                  'In_Progress', 'on_hold', 'Completed', 'closed', 'Cancelled', 'Rejected', 'Escalated', 'Failed'
+                ]
+              },
+              { label: 'Service', key: 'service', options: serviceOptions },
+              { label: 'City / Location', key: 'city', options: cityOptions },
               { label: 'Priority', key: 'priority', options: ['All Priorities', 'High', 'Medium', 'Low'] },
-              { label: 'Batch Upload', key: 'batchId', options: ['All Batches'] },
-              { label: 'Payment Status', key: 'paymentStatus', options: ['All Payment Status', 'unpaid', 'deducted', 'pending_deduction'] }
+              { label: 'Payment Status', key: 'paymentStatus', options: ['All Payment Status', 'unpaid', 'escrow_locked', 'released', 'refunded', 'deducted', 'pending_deduction'] }
             ].map((f, i) => (
               <div key={i} className="min-w-[140px]">
                 <label className="block text-[11px] font-semibold text-gray-500 mb-1">{f.label}</label>
@@ -271,12 +383,34 @@ const Jobs = () => {
                   className="w-full h-10 px-3 border border-gray-200 text-sm rounded-lg outline-none focus:ring-1 focus:ring-[#10AFA5] bg-white text-gray-700"
                 >
                   {f.options.map(opt => {
-                    const val = opt.toLowerCase().includes('all') ? 'all' : opt;
-                    return <option key={opt} value={val}>{opt}</option>;
+                    const isAll = String(opt).toLowerCase().includes('all');
+                    let val = 'all';
+                    if (!isAll) {
+                      if (f.key === 'status' || f.key === 'paymentStatus') {
+                        val = String(opt).toLowerCase().replace(/\s+/g, '_');
+                      } else {
+                        val = opt;
+                      }
+                    }
+                    const label = f.key === 'status' ? formatStatusLabel(isAll ? opt : String(opt).toLowerCase()) : opt;
+                    return <option key={opt} value={val}>{label}</option>;
                   })}
                 </select>
               </div>
             ))}
+
+            <div className="min-w-[140px]">
+              <label className="block text-[11px] font-semibold text-gray-500 mb-1">Batch Upload</label>
+              <select
+                value={filters.batchId}
+                onChange={(e) => handleFilterChange('batchId', e.target.value)}
+                className="w-full h-10 px-3 border border-gray-200 text-sm rounded-lg outline-none focus:ring-1 focus:ring-[#10AFA5] bg-white text-gray-700"
+              >
+                {batchOptions.map((b) => (
+                  <option key={b.value} value={b.value}>{b.label}</option>
+                ))}
+              </select>
+            </div>
 
             <div className="min-w-[200px]">
               <label className="block text-[11px] font-semibold text-gray-500 mb-1">Date Range</label>
@@ -298,9 +432,33 @@ const Jobs = () => {
           </div>
         </div>
 
+        {/* Jobs that stopped moving need an explicit nudge, not a silent queue */}
+        {(stats.escalated || 0) > 0 && activeTab !== 'escalated' && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <FiAlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-orange-900">
+                  {stats.escalated} job{stats.escalated > 1 ? 's' : ''} could not be allocated
+                </p>
+                <p className="text-xs text-orange-800 mt-0.5">
+                  No engineer, vendor or freelancer accepted them. Any escrow held has been returned to your wallet —
+                  retry matching or contact WBI support.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => { setActiveTab('escalated'); setCurrentPage(1); }}
+              className="shrink-0 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-4 py-2 rounded-lg"
+            >
+              Review escalated jobs
+            </button>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="flex border-b border-gray-200 gap-6 px-2 overflow-x-auto no-scrollbar">
-          {['all', 'pending', 'assigned', 'in progress', 'completed', 'failed/cancelled'].map(tab => (
+          {['all', 'pending', 'assigned', 'in progress', 'on hold', 'completed', 'escalated', 'failed/cancelled'].map(tab => (
             <button
               key={tab}
               onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
@@ -325,6 +483,7 @@ const Jobs = () => {
                   <th className="py-4 px-4">Location</th>
                   <th className="py-4 px-4">Priority</th>
                   <th className="py-4 px-4">Assigned Engineer</th>
+                  <th className="py-4 px-4">Allocation</th>
                   <th className="py-4 px-4">Status</th>
                   <th className="py-4 px-4">Payment</th>
                   <th className="py-4 px-4">Created On</th>
@@ -334,14 +493,21 @@ const Jobs = () => {
               <tbody className="divide-y divide-gray-100">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={10} className="p-0">
+                    <td colSpan={11} className="p-0">
                       <SkeletonLoader type="list" count={5} className="mx-4 my-2" />
+                    </td>
+                  </tr>
+                ) : jobsError ? (
+                  <tr>
+                    <td colSpan={11} className="text-center py-16">
+                      <p className="text-red-500 font-medium text-sm mb-3">{jobsErr?.response?.data?.message || 'Failed to load jobs'}</p>
+                      <button type="button" onClick={() => refetchJobs()} className="text-[#10AFA5] text-sm font-bold hover:underline">Retry</button>
                     </td>
                   </tr>
                 ) : jobs.length > 0 ? (
                   <>
                     {rowVirtualizer.getVirtualItems().length > 0 && rowVirtualizer.getVirtualItems()[0]?.start > 0 && (
-                      <tr><td style={{ height: `${rowVirtualizer.getVirtualItems()[0]?.start}px` }} colSpan={10}></td></tr>
+                      <tr><td style={{ height: `${rowVirtualizer.getVirtualItems()[0]?.start}px` }} colSpan={11}></td></tr>
                     )}
                     {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                       const job = jobs[virtualRow.index];
@@ -380,21 +546,46 @@ const Jobs = () => {
                             <img src={job.assignedTo.profilePic || 'https://via.placeholder.com/30'} alt="Eng" className="w-7 h-7 rounded-full border border-gray-200" />
                             <div>
                               <p className="font-semibold text-gray-800 text-xs">{job.assignedTo.firstName}</p>
-                              <p className="text-[10px] text-yellow-500 flex items-center gap-0.5">⭐ {job.assignedTo.averageRating || '4.5'}</p>
+                              <p className="text-[10px] text-yellow-500 flex items-center gap-0.5">⭐ {job.assignedTo.averageRating != null ? Number(job.assignedTo.averageRating).toFixed(1) : '—'}</p>
                             </div>
                           </div>
                         ) : (
                           <span className="text-xs text-gray-400 font-medium">Unassigned</span>
                         )}
                       </td>
+                      <td className="py-4 px-4 max-w-[220px]">
+                        {(() => {
+                          const stage = ALLOCATION_STAGES[job.allocationStage] || ALLOCATION_STAGES.not_started;
+                          return (
+                            <>
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${stage.cls}`}>
+                                {stage.label}
+                              </span>
+                              {job.allocationReason && (
+                                <p className="text-[10px] text-gray-500 mt-1 whitespace-normal leading-snug" title={job.allocationReason}>
+                                  {job.allocationReason}
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </td>
                       <td className="py-4 px-4">
-                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${getStatusStyle(job.status)}`}>
-                          {job.status.replace('_', ' ').toUpperCase()}
+                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold capitalize ${getStatusStyle(job.status)}`}>
+                          {formatStatusLabel(job.status)}
                         </span>
                       </td>
                       <td className="py-4 px-4">
-                        <span className={`text-[11px] font-bold ${job.paymentStatus === 'deducted' ? 'text-green-600' : 'text-orange-500'}`}>
-                          {job.paymentStatus === 'deducted' ? 'Deducted' : 'Pending'}
+                        <span className={`text-[11px] font-bold ${
+                          ['escrow_locked', 'deducted'].includes(job.paymentStatus) ? 'text-amber-600' :
+                          job.paymentStatus === 'released' ? 'text-green-600' :
+                          job.paymentStatus === 'refunded' ? 'text-gray-500' :
+                          'text-orange-500'
+                        }`}>
+                          {job.paymentStatus === 'escrow_locked' || job.paymentStatus === 'deducted' ? 'Escrow Locked' :
+                           job.paymentStatus === 'released' ? 'Released' :
+                           job.paymentStatus === 'refunded' ? 'Refunded' :
+                           job.paymentStatus === 'pending_deduction' ? 'Pending' : (job.paymentStatus || 'Unpaid')}
                         </span>
                       </td>
                       <td className="py-4 px-4 text-xs">
@@ -411,6 +602,16 @@ const Jobs = () => {
                               <FiNavigation className="w-3.5 h-3.5" />
                             </button>
                           )}
+                          {canRematch(job) && (
+                            <button
+                              onClick={() => rematchMutation.mutate(job._id)}
+                              disabled={rematchMutation.isPending}
+                              className="w-7 h-7 rounded border border-gray-200 flex items-center justify-center text-gray-500 hover:text-[#10AFA5] hover:bg-[#F0FDFA] disabled:opacity-40"
+                              title="Retry matching"
+                            >
+                              <FiRefreshCw className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <div className="relative">
                             <button onClick={() => setActiveMenu(activeMenu === job._id ? null : job._id)} className="w-7 h-7 rounded border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-50">
                               <FiMoreVertical className="w-3.5 h-3.5" />
@@ -422,7 +623,10 @@ const Jobs = () => {
                                   <button onClick={() => { setSelectedJob(job._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">View Details</button>
                                   <button className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">Download Report</button>
                                   <button className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">Support Ticket</button>
-                                  {['pending', 'searching_engineer', 'assigned'].includes(job.status) && (
+                                  {canRematch(job) && (
+                                    <button onClick={() => { rematchMutation.mutate(job._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">Retry Matching</button>
+                                  )}
+                                  {['pending', 'searching_engineer', 'assigned', 'escalated', 'failed', 'on_hold'].includes(job.status) && (
                                     <button onClick={() => { if(window.confirm('Cancel this job?')) cancelJobMutation.mutate(job._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-2">
                                       Cancel Job
                                     </button>
@@ -437,11 +641,11 @@ const Jobs = () => {
                   );
                 })}
                 {rowVirtualizer.getVirtualItems().length > 0 && rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end > 0 && (
-                  <tr><td style={{ height: `${rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end}px` }} colSpan={10}></td></tr>
+                  <tr><td style={{ height: `${rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1]?.end}px` }} colSpan={11}></td></tr>
                 )}
               </>
             ) : (
-                  <tr><td colSpan={10} className="text-center py-16 text-gray-400 font-medium text-sm">No jobs found matching criteria.</td></tr>
+                  <tr><td colSpan={11} className="text-center py-16 text-gray-400 font-medium text-sm">No jobs found matching criteria.</td></tr>
                 )}
               </tbody>
             </table>
@@ -501,7 +705,7 @@ const Jobs = () => {
               <FiUploadCloud className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Upload New Jobs</span>
             </button>
-            <button className="bg-blue-50 hover:bg-blue-100 text-blue-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
+            <button onClick={exportJobs} className="bg-blue-50 hover:bg-blue-100 text-blue-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
               <FiDownload className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Download Report</span>
             </button>
@@ -509,53 +713,49 @@ const Jobs = () => {
               <FiBriefcase className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Wallet & Payments</span>
             </button>
-            <button className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
+            <button onClick={() => navigate('/b2b/support')} className="bg-orange-50 hover:bg-orange-100 text-orange-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
               <FiHeadphones className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Support Ticket</span>
             </button>
           </div>
         </div>
 
-        {/* Recent Job Activities (Mocked for UI, ideally fetched from a logs API) */}
+        {/* Recent Job Activities — live JobHistory feed */}
         <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-gray-900">Recent Job Activities</h3>
-            <button className="text-[#10AFA5] text-xs font-bold hover:underline">View All</button>
+            <button
+              type="button"
+              onClick={() => queryClient.invalidateQueries(['b2bJobsRecentActivity'])}
+              className="text-[#10AFA5] text-xs font-bold hover:underline"
+            >
+              Refresh
+            </button>
           </div>
           <div className="space-y-4 relative before:absolute before:inset-0 before:ml-[11px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 before:to-transparent">
-            {/* Example static logs mapping to the UI requirement */}
-            <div className="relative flex items-start gap-3 z-10">
-              <div className="w-6 h-6 rounded-full bg-green-100 text-green-600 border-2 border-white flex justify-center items-center shrink-0 mt-0.5 shadow-sm"><FiCheckCircle className="w-3 h-3" /></div>
-              <div>
-                <p className="text-xs font-bold text-gray-900">Job JOB-12500 completed</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">Rahul Sharma marked job as completed</p>
-                <p className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-wider">Today, 11:45 AM</p>
-              </div>
-            </div>
-            <div className="relative flex items-start gap-3 z-10">
-              <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 border-2 border-white flex justify-center items-center shrink-0 mt-0.5 shadow-sm"><FiUser className="w-3 h-3" /></div>
-              <div>
-                <p className="text-xs font-bold text-gray-900">Engineer assigned</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">Amit Singh assigned to JOB-12499</p>
-                <p className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-wider">Today, 10:30 AM</p>
-              </div>
-            </div>
-            <div className="relative flex items-start gap-3 z-10">
-              <div className="w-6 h-6 rounded-full bg-orange-100 text-orange-600 border-2 border-white flex justify-center items-center shrink-0 mt-0.5 shadow-sm"><FiFileText className="w-3 h-3" /></div>
-              <div>
-                <p className="text-xs font-bold text-gray-900">New job uploaded</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">500 new jobs uploaded in batch BJB-2025</p>
-                <p className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-wider">Today, 09:15 AM</p>
-              </div>
-            </div>
-            <div className="relative flex items-start gap-3 z-10">
-              <div className="w-6 h-6 rounded-full bg-red-100 text-red-600 border-2 border-white flex justify-center items-center shrink-0 mt-0.5 shadow-sm"><FiAlertTriangle className="w-3 h-3" /></div>
-              <div>
-                <p className="text-xs font-bold text-gray-900">Job failed</p>
-                <p className="text-[10px] text-gray-500 mt-0.5">JOB-12495 marked as failed</p>
-                <p className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-wider">Yesterday, 09:45 AM</p>
-              </div>
-            </div>
+            {activityLoading && (
+              <p className="text-xs text-gray-400 pl-8">Loading activity…</p>
+            )}
+            {!activityLoading && recentActivity.length === 0 && (
+              <p className="text-xs text-gray-400 pl-8">No recent activity yet. Upload or confirm a bulk batch to see updates here.</p>
+            )}
+            {recentActivity.map((item) => {
+              const { Icon, cls } = activityIcon(item.status);
+              return (
+                <div key={item.id} className="relative flex items-start gap-3 z-10">
+                  <div className={`w-6 h-6 rounded-full ${cls} border-2 border-white flex justify-center items-center shrink-0 mt-0.5 shadow-sm`}>
+                    <Icon className="w-3 h-3" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-gray-900">
+                      Job {item.jobId} — {formatStatusLabel(item.status)}
+                    </p>
+                    <p className="text-[10px] text-gray-500 mt-0.5">{item.remark || 'Status updated'}</p>
+                    <p className="text-[9px] text-gray-400 mt-0.5 uppercase tracking-wider">{formatActivityTime(item.createdAt)}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 

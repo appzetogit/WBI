@@ -43,7 +43,7 @@ const buildMarketplacePayload = (request, schema, formData) => ({
     city: request.contact.city,
     siteAddress: request.contact.address,
     companyName: formData.companyName || '',
-    equipmentType: [schema.subCategoryName],
+    equipmentType: [schema.subCategoryName, schema.subCatCode].filter(Boolean),
     urgency: formData.urgency || 'Normal',
     preferredVisitDate: formData.preferredDate || null,
     requiredEngineers: formData.requiredEngineers || formData.engineerCount || formData.teamSize,

@@ -53,6 +53,30 @@ const B2BLayout = () => {
     } else {
       navigate('/b2b/login');
     }
+
+    // Sync latest status from server
+    let active = true;
+    (async () => {
+      try {
+        const api = (await import('../../../../services/api')).default;
+        const res = await api.get('/b2b/me');
+        if (active && res.data?.company) {
+          const fresh = res.data.company;
+          setCompanyData((prev) => ({ ...prev, ...fresh }));
+          if (localStorage.getItem('b2bData')) {
+            const existing = JSON.parse(localStorage.getItem('b2bData') || '{}');
+            localStorage.setItem('b2bData', JSON.stringify({ ...existing, ...fresh }));
+          } else if (sessionStorage.getItem('b2bData')) {
+            const existing = JSON.parse(sessionStorage.getItem('b2bData') || '{}');
+            sessionStorage.setItem('b2bData', JSON.stringify({ ...existing, ...fresh }));
+          }
+        }
+      } catch (err) {
+        // Ignored if unauthenticated or error
+      }
+    })();
+
+    return () => { active = false; };
   }, [navigate]);
 
   useEffect(() => {
@@ -93,14 +117,7 @@ const B2BLayout = () => {
     navigate('/b2b/login');
   };
 
-  const approved = companyData?.verificationStatus === 'approved';
-  const visibleNavItems = navItems.filter((item) => {
-    if (item.path === '#logout') return true;
-    if (!approved) {
-      return item.onboardingOnly || item.path === '/b2b/company-profile';
-    }
-    return !item.onboardingOnly;
-  });
+  const visibleNavItems = navItems;
 
   return (
     <div className="flex h-screen bg-[#F0FDFA] overflow-hidden font-sans">
@@ -230,8 +247,13 @@ const B2BLayout = () => {
             )}
             <div className="ml-3 overflow-hidden">
               <p className="text-sm font-bold text-gray-800 truncate">{companyData?.companyName || 'Company Name'}</p>
-              <p className="text-xs text-[#10AFA5] font-semibold mt-0.5 truncate">
-                Approved Partner
+              <p className={`text-xs font-semibold mt-0.5 truncate ${
+                companyData?.verificationStatus === 'approved' ? 'text-[#10AFA5]' :
+                companyData?.verificationStatus === 'rejected' ? 'text-red-500' : 'text-amber-600'
+              }`}>
+                {companyData?.verificationStatus === 'approved' ? 'Approved Partner' :
+                 companyData?.verificationStatus === 'rejected' ? 'Verification Rejected' :
+                 'Pending Approval'}
               </p>
             </div>
           </div>

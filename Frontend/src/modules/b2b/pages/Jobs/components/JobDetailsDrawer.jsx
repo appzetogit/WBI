@@ -51,8 +51,8 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
     mutationFn: () => api.post(`/b2b/jobs/${jobId}/approve-work`, { approved: true }),
     onSuccess: (res) => {
       toast.success(res.data?.data?.pending
-        ? 'Approved — awaiting other sign-offs'
-        : 'Work approved — escrow released');
+        ? 'Company approval recorded — awaiting other sign-offs'
+        : 'Company approval complete — escrow released');
       queryClient.invalidateQueries(['b2bJobEnterpriseFlow', jobId]);
       queryClient.invalidateQueries(['b2bJobDetails', jobId]);
     },
@@ -242,12 +242,12 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
                       <>
                         <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
                           <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
-                            <FiShield className="text-[#10AFA5]" /> Escrow & sign-off
+                            <FiShield className="text-[#10AFA5]" /> Escrow & company approval
                           </h3>
                           <p className="text-xs text-gray-500 mb-2">Flow status: <span className="font-semibold text-gray-800">{flow.status?.replace(/_/g, ' ')}</span></p>
                           <div className="grid grid-cols-2 gap-3 text-sm">
                             <div>
-                              <p className="text-gray-500 text-xs">Held</p>
+                              <p className="text-gray-500 text-xs">Escrow Locked</p>
                               <p className="font-bold">₹ {Number(flow.escrow?.heldAmount || 0).toLocaleString()}</p>
                             </div>
                             <div>
@@ -257,10 +257,10 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
                           </div>
                           <div className="flex flex-wrap gap-2 mt-3">
                             <span className="text-[10px] font-semibold px-2 py-1 rounded-md bg-white border">
-                              B2B: {flow.jobSignoffs?.b2b || '—'}
+                              Company Approval: {flow.jobSignoffs?.b2b || '—'}
                             </span>
                             <span className="text-[10px] font-semibold px-2 py-1 rounded-md bg-white border">
-                              Customer: {flow.jobSignoffs?.customer || '—'}
+                              Site Sign-off: {flow.jobSignoffs?.customer || '—'}
                             </span>
                           </div>
                           {showJobApprove && (
@@ -270,7 +270,7 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
                               onClick={() => approveWorkMutation.mutate()}
                               className="mt-4 w-full py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-50"
                             >
-                              Approve completed work
+                              Company Approval — release escrow
                             </button>
                           )}
                         </div>

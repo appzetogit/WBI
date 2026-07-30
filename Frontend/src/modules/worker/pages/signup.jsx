@@ -485,7 +485,7 @@ export default function WorkerSignup() {
           <Link to="/worker/login" className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
             <FiArrowLeft className="w-5 h-5 text-gray-600" />
           </Link>
-          <Logo />
+          <Logo src="/logo/TazkYLogo_circle.png" circle={true} className="w-9 h-9" />
         </div>
         <div className="flex bg-gray-100 p-1 rounded-xl">
           <button 

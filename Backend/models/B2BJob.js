@@ -98,7 +98,20 @@ const b2bJobSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ['pending', 'pending_wallet', 'searching_engineer', 'assigned', 'in_progress', 'completed', 'cancelled', 'failed'], 
+    enum: [
+      'pending',
+      'pending_wallet',
+      'searching_engineer',
+      'assigned',
+      'in_progress',
+      'on_hold',
+      'completed',
+      'cancelled',
+      'rejected',
+      'escalated',
+      'failed',
+      'closed'
+    ], 
     default: 'pending' 
   },
   trackingStatus: {
@@ -175,6 +188,40 @@ const b2bJobSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Engineer'
   }],
+  /**
+   * Where the job currently sits in the allocation funnel. `status` alone cannot
+   * express this: a job waiting on the vendor marketplace and a freshly uploaded
+   * job are both `pending`, which left companies staring at a silent queue.
+   */
+  allocationStage: {
+    type: String,
+    enum: [
+      'not_started',
+      'engineer_waves',
+      'vendor_marketplace',
+      'freelancer_pool',
+      'admin_escalation',
+      'allocated'
+    ],
+    default: 'not_started'
+  },
+  allocationReason: {
+    type: String,
+    default: null
+  },
+  allocationUpdatedAt: {
+    type: Date,
+    default: null
+  },
+  /** Number of times matching was manually retried (company/admin). */
+  rematchCount: {
+    type: Number,
+    default: 0
+  },
+  lastRematchAt: {
+    type: Date,
+    default: null
+  },
   quoteApprovalId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'QuoteApproval',
@@ -203,8 +250,22 @@ const b2bJobSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ['unpaid', 'deducted', 'pending_deduction', 'adjusted'],
+    enum: [
+      'unpaid',
+      'deducted', // legacy: treated as escrow_locked
+      'pending_deduction',
+      'adjusted',
+      'escrow_locked',
+      'released',
+      'refunded'
+    ],
     default: 'unpaid'
+  },
+  /** Engineer / vendor payout after escrow release */
+  payoutStatus: {
+    type: String,
+    enum: ['none', 'pending_release', 'released', 'refunded'],
+    default: 'none'
   },
   invoiceId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -227,6 +288,8 @@ b2bJobSchema.index({ assignedTo: 1, status: 1 });
 
 b2bJobSchema.index({ 'coordinates.coordinates': '2d' }); // 2d index for standard coordinates querying if 2dsphere is too strict
 b2bJobSchema.index({ status: 1 });
+b2bJobSchema.index({ companyId: 1, allocationStage: 1 });
+b2bJobSchema.index({ status: 1, allocationStage: 1, allocationUpdatedAt: -1 });
 b2bJobSchema.index({ phone: 1 });
 b2bJobSchema.index({ address: 1 });
 

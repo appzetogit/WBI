@@ -170,20 +170,25 @@ exports.listFreelancerPool = async (req, res) => {
   }
 };
 
-/** Engineer: accept from pool with team size */
+/** Engineer: accept from pool with confirmation checklist */
 exports.acceptFreelancerPool = async (req, res) => {
   try {
     const engineerId = req.user._id || req.user.id;
     const { id } = req.params;
-    const { availableTeamSize } = req.body || {};
-    const result = await freelancerAcceptProject(id, engineerId, availableTeamSize);
+    const body = req.body || {};
+    const result = await freelancerAcceptProject(id, engineerId, body);
     if (!result.ok) {
       return res.status(result.status || 400).json({ success: false, message: result.message });
     }
     res.json({
       success: true,
       message: 'Project accepted. Coordinate your team and begin execution.',
-      data: { opportunityId: result.opportunity._id, projectId: result.projectId || null, opsWarning: result.opsWarning || null }
+      data: {
+        opportunityId: result.opportunity._id,
+        projectId: result.projectId || null,
+        opsWarning: result.opsWarning || null,
+        confirmation: result.confirmation || null
+      }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

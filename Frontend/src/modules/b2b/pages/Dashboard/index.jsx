@@ -8,6 +8,7 @@ import {
   FiX, FiSend, FiChevronRight, FiChevronDown
 } from 'react-icons/fi';
 import api from '../../../../services/api';
+import toast from 'react-hot-toast';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 // Helper for Circular Gauge SVG
@@ -78,7 +79,7 @@ const B2BCommandCenter = () => {
   };
 
   // Queries for new intelligence modules
-  const { data: execMetrics, isLoading: loadExec } = useQuery({
+  const { data: execMetrics, isLoading: loadExec, error: execError } = useQuery({
     queryKey: ['execMetrics'],
     queryFn: async () => (await api.get('/b2b/dashboard/executive-metrics')).data.data
   });
@@ -116,6 +117,27 @@ const B2BCommandCenter = () => {
           Viewing: <span className="text-[#10AFA5]">Last 30 Days</span>
         </div>
       </div>
+
+      {/* Account Verification Pending Banner */}
+      {execError?.response?.status === 403 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <FiAlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <h3 className="text-base font-bold text-amber-900">B2B Account Verification Pending</h3>
+              <p className="text-sm text-amber-700 mt-1">
+                Your enterprise account is currently pending admin verification. Dashboard intelligence metrics and operational dispatches unlock as soon as your onboarding audit is completed.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/b2b/onboarding"
+            className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 transition-colors shadow-sm"
+          >
+            Complete Onboarding →
+          </Link>
+        </div>
+      )}
 
       {/* Wallet / pending activation gate */}
       {!loadExec && execMetrics?.walletGate?.pendingJobCount > 0 && (
@@ -464,7 +486,24 @@ const B2BCommandCenter = () => {
               </div>
             </div>
             <div className="p-4 border-t border-gray-100 bg-gray-50 text-right">
-              <button className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await api.post('/b2b/support/tickets', {
+                      subject: `OEM escalation: ${timelineModal.deviceId}`,
+                      category: 'Other',
+                      priority: 'High',
+                      description: `Root-cause escalation for device ${timelineModal.deviceId} at ${timelineModal.site}. Timeline events: ${(timelineModal.timeline || []).map((e) => e.issue).join('; ')}`
+                    });
+                    toast.success('Escalation ticket created');
+                    setTimelineModal(null);
+                  } catch (err) {
+                    toast.error(err.response?.data?.message || 'Failed to create escalation ticket');
+                  }
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl transition-colors"
+              >
                 Escalate to OEM
               </button>
             </div>

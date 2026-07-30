@@ -1408,7 +1408,7 @@ export default function EngineerSignup() {
             {currentStep === submitStep && (
               <div className="text-center py-8">
                 <div className="w-28 h-28 bg-white border border-gray-100 shadow-[0_4px_20px_rgb(0,0,0,0.05)] rounded-full flex items-center justify-center mx-auto mb-6 overflow-hidden p-2">
-                  <Logo className="w-16 h-auto" />
+                  <Logo src="/logo/TazkYLogo_circle.png" circle={true} className="w-20 h-20" />
                 </div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-3">Ready to Submit!</h2>
                 <p className="text-gray-500 max-w-sm mx-auto mb-8">Please review your details carefully. Once submitted, your profile will be sent to our admin team for verification.</p>
@@ -1494,7 +1494,7 @@ export default function EngineerSignup() {
           <Link to="/engineer/login" className="p-2 -ml-2 rounded-full hover:bg-gray-100 transition-colors">
             <FiArrowLeft className="w-5 h-5 text-gray-600" />
           </Link>
-          <Logo />
+          <Logo src="/logo/TazkYLogo_circle.png" circle={true} className="w-9 h-9" />
         </div>
         <div className="flex bg-gray-100 p-1 rounded-xl">
           <button 

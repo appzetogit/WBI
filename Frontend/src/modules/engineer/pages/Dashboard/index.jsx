@@ -193,8 +193,8 @@ const Dashboard = () => {
       {/* Top Header */}
       <header className="px-5 pt-6 pb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="h-9 cursor-pointer" onClick={() => navigate('/engineer/dashboard')}>
-            <img fetchPriority="low" loading="lazy" src="/logo/WBILogo.jpg" alt="WBI Logo" className="h-full object-contain mix-blend-multiply" />
+          <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200/80 shadow-sm flex items-center justify-center bg-white shrink-0 cursor-pointer" onClick={() => navigate('/engineer/dashboard')}>
+            <img fetchPriority="low" loading="lazy" src="/logo/TazkYLogo_circle.png" alt="TazkY Logo" className="w-full h-full object-cover rounded-full" />
           </div>
         </div>
         <div className="flex items-center gap-4">

@@ -110,11 +110,11 @@ const isApprovedB2B = (req, res, next) => {
       message: 'Access denied. B2B role required.'
     });
   }
-  if (req.user.verificationStatus !== 'approved') {
+  if (req.user.verificationStatus === 'rejected') {
     return res.status(403).json({
       success: false,
       verificationStatus: req.user.verificationStatus,
-      message: 'Access denied. B2B account must be approved by admin.'
+      message: 'Access denied. B2B account verification was rejected.'
     });
   }
   next();
