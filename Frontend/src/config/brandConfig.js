@@ -1,8 +1,8 @@
 export const brandConfig = {
-  brandName: "TazkY",
+  brandName: "WBI",
   tagline: "Field Engineering & Services",
-  logoPath: "/logo/TazkYLogo_circle.png",
-  logoAltPath: "/logo/TazkYLogo.jpeg"
+  logoPath: "/logo/WBILogo.jpg",
+  logoAltPath: "/logo/WBILogo.jpg"
 };
 
 export default brandConfig;
