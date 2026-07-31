@@ -28,8 +28,8 @@ const Logo = forwardRef(({ className = 'h-8 w-auto', onDark = false, circle = fa
           setSrc(propSrc);
         } else if (src !== brandConfig.logoAltPath) {
           setSrc(brandConfig.logoAltPath);
-        } else if (src !== '/logo/WBILogo.jpg') {
-          setSrc('/logo/WBILogo.jpg');
+        } else if (src !== '/logo/TazkYLogo_circle.png') {
+          setSrc('/logo/TazkYLogo_circle.png');
         }
       }}
       {...props}
