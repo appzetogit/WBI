@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { FiCamera, FiImage, FiX, FiUser } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { compressImageForUpload } from '../../utils/cloudinaryUpload';
 
 const ProfilePhotoUploader = ({ currentPhoto, onUploadSuccess, uploadFunction }) => {
   const [showOptions, setShowOptions] = useState(false);
@@ -14,37 +15,48 @@ const ProfilePhotoUploader = ({ currentPhoto, onUploadSuccess, uploadFunction })
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('File size must be less than 5MB');
-      return;
-    }
-
-    setPreviewPhoto(URL.createObjectURL(file));
     setShowOptions(false);
+    const loadingToast = toast.loading('Optimizing & uploading photo...');
 
     try {
       setIsUploading(true);
+
+      // 1. Client-side automatic compression (handles 5MB-20MB photos smoothly)
+      const compressedFile = await compressImageForUpload(file, {
+        maxWidth: 1000,
+        maxHeight: 1000,
+        quality: 0.82
+      });
+
+      // 2. Local instant preview
+      const previewUrl = URL.createObjectURL(compressedFile);
+      setPreviewPhoto(previewUrl);
+
+      // 3. Prepare FormData (appending both profileImage & photo field names)
       const formData = new FormData();
-      formData.append('profileImage', file);
+      formData.append('profileImage', compressedFile);
+      formData.append('photo', compressedFile);
 
       const response = await uploadFunction(formData);
-      
-      if (response.success) {
+      toast.dismiss(loadingToast);
+
+      if (response && (response.success || response.imageUrl || response.user)) {
         toast.success('Profile photo updated successfully!');
+        const finalUrl = response.imageUrl || response.user?.profilePhoto || response.engineer?.profilePhoto || response.worker?.profilePhoto || previewUrl;
         if (onUploadSuccess) {
-          onUploadSuccess(response.user.profilePhoto || response.imageUrl);
+          onUploadSuccess(finalUrl);
         }
       } else {
-        toast.error(response.message || 'Failed to upload photo');
+        toast.error(response?.message || 'Upload failed. Please try again.');
         setPreviewPhoto(null);
       }
     } catch (error) {
+      toast.dismiss(loadingToast);
       console.error('Photo upload error:', error);
-      toast.error(error?.response?.data?.message || 'Unable to upload photo. Please try again.');
+      toast.error(error?.response?.data?.message || 'Unable to upload photo. Please check your connection.');
       setPreviewPhoto(null);
     } finally {
       setIsUploading(false);
-      // Reset input values to allow uploading the same file again if it failed
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       if (galleryInputRef.current) galleryInputRef.current.value = '';
     }

@@ -131,14 +131,26 @@ const uploadProfilePhoto = multer({
   }
 }).single('photo');
 
-// Profile photo upload (New) - Expecting 'profileImage' field
-const uploadProfileImage = multer({
-  storage: cloudinaryStorage, 
-  fileFilter: imageFilter,
-  limits: {
-    fileSize: 5 * 1024 * 1024
-  }
-}).single('profileImage');
+// Profile photo upload - Robust middleware accepting any field name and up to 15MB
+const uploadProfileImage = (req, res, next) => {
+  const upload = multer({
+    storage: cloudinaryStorage, 
+    fileFilter: imageFilter,
+    limits: {
+      fileSize: 15 * 1024 * 1024 // 15MB safety limit
+    }
+  }).any();
+
+  upload(req, res, (err) => {
+    if (err) {
+      return handleMulterError(err, req, res, next);
+    }
+    if (req.files && req.files.length > 0) {
+      req.file = req.files[0];
+    }
+    next();
+  });
+};
 
 // Document upload (multiple files)
 const uploadDocuments = multer({

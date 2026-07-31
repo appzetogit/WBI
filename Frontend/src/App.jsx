@@ -103,10 +103,42 @@ function App() {
                       position="top-center"
                       reverseOrder={false}
                       toastOptions={{
-                        duration: 2000,
-                        style: { background: '#333', color: '#fff', borderRadius: '10px', padding: '12px 20px' },
-                        success: { duration: 1000, style: { background: '#10B981' } },
-                        error: { duration: 2000, style: { background: '#EF4444' } },
+                        duration: 3000,
+                        style: {
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          borderRadius: '16px',
+                          padding: '12px 20px',
+                          fontSize: '14px',
+                          fontWeight: '500',
+                          boxShadow: '0 10px 30px rgba(15, 23, 42, 0.25)',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          maxWidth: '90vw'
+                        },
+                        success: {
+                          duration: 2500,
+                          iconTheme: {
+                            primary: '#10b981',
+                            secondary: '#ffffff',
+                          },
+                          style: {
+                            background: '#0f172a',
+                            color: '#ffffff',
+                            borderLeft: '4px solid #10b981',
+                          }
+                        },
+                        error: {
+                          duration: 3500,
+                          iconTheme: {
+                            primary: '#f43f5e',
+                            secondary: '#ffffff',
+                          },
+                          style: {
+                            background: '#0f172a',
+                            color: '#ffffff',
+                            borderLeft: '4px solid #f43f5e',
+                          }
+                        },
                       }}
                     />
                   </ErrorBoundary>
