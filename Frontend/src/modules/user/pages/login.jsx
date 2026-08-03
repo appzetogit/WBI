@@ -373,8 +373,18 @@ const Login = () => {
       </div>
 
       {/* Footer */}
-      <div className="w-full text-center text-xs text-gray-400 mt-4 shrink-0 pb-2">
-        &copy; {new Date().getFullYear()} WBI. All rights reserved.
+      <div className="w-full text-center text-xs text-gray-400 mt-4 shrink-0 pb-2 space-y-1.5">
+        <p className="text-[11px] leading-relaxed max-w-xs mx-auto">
+          By continuing, you agree to WBI's{' '}
+          <Link to="/user/terms-services" className="font-semibold text-gray-600 underline hover:text-[#FF8A00] transition-colors">
+            Terms & Services
+          </Link>
+          {' '}and{' '}
+          <Link to="/user/privacy-policy" className="font-semibold text-gray-600 underline hover:text-[#FF8A00] transition-colors">
+            Privacy Policy
+          </Link>
+        </p>
+        <p>&copy; {new Date().getFullYear()} WBI. All rights reserved.</p>
       </div>
       <DebugConsole />
     </div>

@@ -355,6 +355,17 @@ const VendorLogin = () => {
                   Sign up now
                 </Link>
               </p>
+
+              <p className="mt-3 text-center text-xs text-gray-400 leading-relaxed max-w-xs mx-auto">
+                By continuing, you agree to Vendor Portal's{' '}
+                <Link to="/vendor/terms-services" className="font-medium text-gray-600 underline hover:text-[#0D8A72] transition-colors">
+                  Terms & Services
+                </Link>
+                {' '}and{' '}
+                <Link to="/vendor/privacy-policy" className="font-medium text-gray-600 underline hover:text-[#0D8A72] transition-colors">
+                  Privacy Policy
+                </Link>
+              </p>
             </form>
           </div>
           )}

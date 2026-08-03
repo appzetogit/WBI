@@ -139,6 +139,7 @@ const Finance = lazyLoad(() => import('../pages/Finance/Finance'));
 const Performance = lazyLoad(() => import('../pages/Performance/Performance'));
 const Compliance = lazyLoad(() => import('../pages/Compliance/Compliance'));
 const Support = lazyLoad(() => import('../pages/Support/Support'));
+const CmsPage = lazyLoad(() => import('../../user/pages/CmsPage'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-white flex flex-col items-center justify-center gap-4 px-4">
@@ -159,6 +160,9 @@ const VendorRoutes = () => {
             <Route path="signup" element={<AnimatedPage><PublicRoute userType="vendor"><Signup /></PublicRoute></AnimatedPage>} />
             <Route path="forgot-password" element={<AnimatedPage><PublicRoute userType="vendor"><ForgotPassword /></PublicRoute></AnimatedPage>} />
             <Route path="pending-approval" element={<AnimatedPage><PendingApproval /></AnimatedPage>} />
+            <Route path="terms-services" element={<AnimatedPage><CmsPage slug="terms-services" defaultTitle="Vendor Terms" targetPanel="vendor" /></AnimatedPage>} />
+            <Route path="privacy-policy" element={<AnimatedPage><CmsPage slug="privacy-policy" defaultTitle="Vendor Privacy Policy" targetPanel="vendor" /></AnimatedPage>} />
+            <Route path="about-us" element={<AnimatedPage><CmsPage slug="about-us" defaultTitle="About Vendor Portal" targetPanel="vendor" /></AnimatedPage>} />
 
             {/* Base Redirect — resolve registered service slug from API */}
             <Route path="/" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />
@@ -192,6 +196,9 @@ const VendorRoutes = () => {
               <Route path="digital-solution/profile/details" element={<AnimatedPage><ProfileDetails /></AnimatedPage>} />
               <Route path="digital-solution/profile/edit" element={<AnimatedPage><EditProfile /></AnimatedPage>} />
               <Route path="digital-solution/settings" element={<AnimatedPage><Settings /></AnimatedPage>} />
+              <Route path="digital-solution/terms-services" element={<AnimatedPage><CmsPage slug="terms-services" defaultTitle="Vendor Terms" targetPanel="vendor" /></AnimatedPage>} />
+              <Route path="digital-solution/privacy-policy" element={<AnimatedPage><CmsPage slug="privacy-policy" defaultTitle="Vendor Privacy Policy" targetPanel="vendor" /></AnimatedPage>} />
+              <Route path="digital-solution/about-us" element={<AnimatedPage><CmsPage slug="about-us" defaultTitle="About Vendor Portal" targetPanel="vendor" /></AnimatedPage>} />
               <Route path="digital-solution/address-management" element={<AnimatedPage><AddressManagement /></AnimatedPage>} />
               <Route path="digital-solution/notifications" element={<AnimatedPage><Notifications /></AnimatedPage>} />
               <Route path="digital-solution/my-ratings" element={<AnimatedPage><MyRatings /></AnimatedPage>} />

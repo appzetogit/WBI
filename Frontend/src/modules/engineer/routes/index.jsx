@@ -42,6 +42,7 @@ const B2BJobs = lazy(() => import('../pages/B2BJobs'));
 const OpsJobs = lazy(() => import('../pages/OpsJobs'));
 const OpsJobDetail = lazy(() => import('../pages/OpsJobs/OpsJobDetail'));
 const FreelancerPool = lazy(() => import('../pages/FreelancerPool'));
+const CmsPage = lazy(() => import('../../user/pages/CmsPage'));
 
 const PageLoader = () => (
   <div className="min-h-[60vh] flex items-center justify-center">
@@ -84,7 +85,7 @@ const EngineerRoutes = () => {
   return (
     <ErrorBoundary>
       {/* Main content area - leaves space for bottom nav when needed */}
-      <div className={shouldShowBottomNav ? "pb-24" : ""}>
+      <div className={`min-h-screen bg-[#F8FCFC] ${shouldShowBottomNav ? "pb-20" : ""}`}>
             <Routes>
               {/* Public routes — signup lives at App level (/engineer/signup) for smooth role switch */}
               <Route path="/login" element={publicPage(Login)} />
@@ -125,6 +126,9 @@ const EngineerRoutes = () => {
               <Route path="/wallet" element={protectedPage(Wallet)} />
               <Route path="/schedule" element={protectedPage(Schedule)} />
               <Route path="/proposals" element={protectedPage(Proposals)} />
+              <Route path="/terms-services" element={withSuspense(<CmsPage slug="terms-services" defaultTitle="Terms & Services" targetPanel="engineer" />)} />
+              <Route path="/privacy-policy" element={withSuspense(<CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" targetPanel="engineer" />)} />
+              <Route path="/about-us" element={withSuspense(<CmsPage slug="about-us" defaultTitle="About Us" targetPanel="engineer" />)} />
             </Routes>
             </div>
 

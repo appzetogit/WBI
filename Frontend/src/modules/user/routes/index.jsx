@@ -220,9 +220,9 @@ const UserRoutes = () => {
               <Route path="/notifications" element={<AnimatedPage><ProtectedRoute userType="user"><Notifications /></ProtectedRoute></AnimatedPage>} />
               <Route path="/help-support" element={<AnimatedPage><ProtectedRoute userType="user"><HelpSupport /></ProtectedRoute></AnimatedPage>} />
               <Route path="/cancellation-policy" element={<AnimatedPage><ProtectedRoute userType="user"><CancellationPolicy /></ProtectedRoute></AnimatedPage>} />
-              <Route path="/about-us" element={<AnimatedPage><ProtectedRoute userType="user"><CmsPage slug="about-us" defaultTitle="About Us" /></ProtectedRoute></AnimatedPage>} />
-              <Route path="/terms-services" element={<AnimatedPage><ProtectedRoute userType="user"><CmsPage slug="terms-services" defaultTitle="Terms & Services" /></ProtectedRoute></AnimatedPage>} />
-              <Route path="/privacy-policy" element={<AnimatedPage><ProtectedRoute userType="user"><CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" /></ProtectedRoute></AnimatedPage>} />
+              <Route path="/about-us" element={<AnimatedPage><CmsPage slug="about-us" defaultTitle="About Us" /></AnimatedPage>} />
+              <Route path="/terms-services" element={<AnimatedPage><CmsPage slug="terms-services" defaultTitle="Terms & Services" /></AnimatedPage>} />
+              <Route path="/privacy-policy" element={<AnimatedPage><CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" /></AnimatedPage>} />
               <Route path="/web-development-enquiry" element={<AnimatedPage><ProtectedRoute userType="user"><WebDevelopmentEnquiry /></ProtectedRoute></AnimatedPage>} />
               <Route path="/app-development-enquiry" element={<AnimatedPage><ProtectedRoute userType="user"><AppDevelopmentEnquiry /></ProtectedRoute></AnimatedPage>} />
               <Route path="/crm-enquiry" element={<AnimatedPage><ProtectedRoute userType="user"><CrmEnquiry /></ProtectedRoute></AnimatedPage>} />
