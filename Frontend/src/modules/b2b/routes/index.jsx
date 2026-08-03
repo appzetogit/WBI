@@ -54,6 +54,7 @@ const Engineers = lazyLoad(() => import('../pages/Engineers'));
 const Users = lazyLoad(() => import('../pages/Users'));
 const EnterpriseOnboarding = lazyLoad(() => import('../pages/EnterpriseOnboarding'));
 const AcceptInvite = lazyLoad(() => import('../pages/AcceptInvite'));
+const CmsPage = lazyLoad(() => import('../../user/pages/CmsPage'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F0FDFA]" />
@@ -72,6 +73,9 @@ const B2BRoutes = () => {
             <Route path="/register" element={<AnimatedPage><PublicRoute userType="b2b"><LoginRegister defaultTab="register" /></PublicRoute></AnimatedPage>} />
             <Route path="/forgot-password" element={<AnimatedPage><PublicRoute userType="b2b"><ForgotPassword /></PublicRoute></AnimatedPage>} />
             <Route path="/accept-invite" element={<AnimatedPage><PublicRoute userType="b2b"><AcceptInvite /></PublicRoute></AnimatedPage>} />
+            <Route path="/terms-services" element={<AnimatedPage><CmsPage slug="terms-services" defaultTitle="Terms & SLA" targetPanel="b2b" /></AnimatedPage>} />
+            <Route path="/privacy-policy" element={<AnimatedPage><CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" targetPanel="b2b" /></AnimatedPage>} />
+            <Route path="/about-us" element={<AnimatedPage><CmsPage slug="about-us" defaultTitle="About Us" targetPanel="b2b" /></AnimatedPage>} />
 
             {/* Base Redirect */}
             <Route path="/" element={<Navigate to="dashboard" replace />} />
@@ -97,6 +101,9 @@ const B2BRoutes = () => {
               <Route path="/engineers" element={<AnimatedPage><Engineers /></AnimatedPage>} />
               <Route path="/users" element={<AnimatedPage><Users /></AnimatedPage>} />
               <Route path="/settings" element={<AnimatedPage><Settings /></AnimatedPage>} />
+              <Route path="/terms-services" element={<AnimatedPage><CmsPage slug="terms-services" defaultTitle="Terms & SLA" targetPanel="b2b" /></AnimatedPage>} />
+              <Route path="/privacy-policy" element={<AnimatedPage><CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" targetPanel="b2b" /></AnimatedPage>} />
+              <Route path="/about-us" element={<AnimatedPage><CmsPage slug="about-us" defaultTitle="About Us" targetPanel="b2b" /></AnimatedPage>} />
               <Route path="/*" element={<Navigate to="dashboard" replace />} />
             </Route>
           </Routes>

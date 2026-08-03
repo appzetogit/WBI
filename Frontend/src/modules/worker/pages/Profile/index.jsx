@@ -1,11 +1,22 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useLayoutEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiUser, FiEdit, FiStar, FiChevronRight, FiShield, FiCreditCard, FiFileText, FiMapPin, FiBell, FiHelpCircle, FiLogOut } from 'react-icons/fi';
+import {
+  FiUser,
+  FiEdit,
+  FiStar,
+  FiChevronRight,
+  FiShield,
+  FiCreditCard,
+  FiFileText,
+  FiMapPin,
+  FiBell,
+  FiHeadphones,
+  FiInfo,
+  FiLogOut
+} from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { workerAuthService } from '../../../../services/authService';
-import { workerTheme as themeColors } from '../../../../theme';
-import Header from '../../components/layout/Header';
 import LogoLoader from '../../../../components/common/LogoLoader';
 import { useQuery } from '@tanstack/react-query';
 
@@ -29,7 +40,7 @@ const Profile = () => {
     };
   }, []);
 
-  const { data: profileData, isLoading, error } = useQuery({
+  const { data: profileData, isLoading } = useQuery({
     queryKey: ['workerProfileData'],
     queryFn: async () => {
       const [profileRes, completionRes] = await Promise.all([
@@ -75,27 +86,33 @@ const Profile = () => {
   // Determine base path dynamically
   const basePath = window.location.pathname.startsWith('/engineer') ? '/engineer' : '/worker';
 
-  const menuItems = [
-    { id: 'personal', title: 'Personal Information', icon: <FiUser />, route: `${basePath}/profile/personal-info`, color: 'text-gray-800', bgColor: 'bg-gray-50' },
-    { id: 'skills', title: 'Skills & Expertise', icon: <FiStar />, route: `${basePath}/profile/skills`, color: 'text-gray-800', bgColor: 'bg-gray-50' },
-    { id: 'bank', title: 'Bank Details', icon: <FiCreditCard />, route: `${basePath}/profile/bank-details`, color: 'text-gray-800', bgColor: 'bg-gray-50' },
-    { id: 'documents', title: 'Documents', icon: <FiFileText />, route: `${basePath}/profile/documents`, color: 'text-gray-800', bgColor: 'bg-gray-50' },
-    { id: 'locations', title: 'Work Locations', icon: <FiMapPin />, route: `${basePath}/profile/work-locations`, color: 'text-gray-800', bgColor: 'bg-gray-50' },
+  const accountMenuItems = [
+    { id: 'personal', title: 'Personal Information', icon: <FiUser />, route: `${basePath}/profile/personal-info` },
+    { id: 'skills', title: 'Skills & Expertise', icon: <FiStar />, route: `${basePath}/profile/skills` },
+    { id: 'bank', title: 'Bank Details', icon: <FiCreditCard />, route: `${basePath}/profile/bank-details` },
+    { id: 'documents', title: 'Documents', icon: <FiFileText />, route: `${basePath}/profile/documents` },
+    { id: 'locations', title: 'Work Locations', icon: <FiMapPin />, route: `${basePath}/profile/work-locations` },
+    { id: 'notifications', title: 'Notification Settings', icon: <FiBell />, route: `${basePath}/profile/notifications` }
+  ];
 
-    { id: 'notifications', title: 'Notification Settings', icon: <FiBell />, route: `${basePath}/profile/notifications`, color: 'text-gray-800', bgColor: 'bg-gray-50' },
-    { id: 'support', title: 'Help & Support', icon: <FiHelpCircle />, route: `${basePath}/profile/support`, color: 'text-gray-800', bgColor: 'bg-gray-50' }
+  const policyMenuItems = [
+    { id: 'support', title: 'Help & Support', icon: <FiHeadphones />, route: `${basePath}/profile/support` },
+    { id: 'about-us', title: 'About Us', icon: <FiInfo />, route: `${basePath}/about-us` },
+    { id: 'terms-services', title: 'Terms & Services', icon: <FiFileText />, route: `${basePath}/terms-services` },
+    { id: 'privacy-policy', title: 'Privacy Policy', icon: <FiShield />, route: `${basePath}/privacy-policy` }
   ];
 
   if (isLoading) return <LogoLoader />;
   if (!profile) return null;
 
   return (
-    <div className="flex flex-col font-sans text-[#0F172A] bg-[#F8FCFC]">
+    <div className="flex flex-col font-sans text-[#0F172A] bg-[#F8FCFC] min-h-screen">
       {/* Header */}
       <div className="sticky top-0 z-40 bg-[#F8FCFC] border-b border-gray-100 px-4 py-4 flex items-center justify-between">
         <div className="w-10">
-           {/* Menu Icon Placeholder */}
-           <svg className="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+           <svg className="w-6 h-6 text-gray-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
+           </svg>
         </div>
         <h1 className="text-lg font-bold">Profile</h1>
         <button 
@@ -106,7 +123,7 @@ const Profile = () => {
         </button>
       </div>
 
-      <main className="flex flex-col px-4 pt-6 pb-6">
+      <main className="flex flex-col px-4 pt-6 pb-4">
         {/* Profile Card */}
         <div className="bg-white rounded-3xl p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-50 mb-6 flex items-center gap-5 relative overflow-hidden">
           <div className="w-20 h-20 rounded-full bg-gray-100 border-4 border-gray-200 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -131,7 +148,7 @@ const Profile = () => {
         </div>
 
         {/* Completion Progress */}
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="flex justify-between items-end mb-3">
             <h3 className="font-bold text-gray-900 text-[15px]">Profile Completion</h3>
             <span className="font-black text-gray-900 text-lg">{completion}%</span>
@@ -146,31 +163,50 @@ const Profile = () => {
           </div>
         </div>
 
-        {/* Menu Sections */}
+        {/* Account Details Group */}
         <div className="bg-white rounded-[2rem] shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-gray-50 mb-6 py-2">
-          {menuItems.map((item, index) => (
+          {accountMenuItems.map((item, index) => (
             <React.Fragment key={item.id}>
               <button
                 onClick={() => navigate(item.route)}
                 className="w-full px-5 py-4 flex items-center justify-between bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors"
               >
                 <div className="flex items-center gap-5">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${item.bgColor} ${item.color}`}>
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-gray-50 text-gray-800">
                     {React.cloneElement(item.icon, { className: 'w-5 h-5' })}
                   </div>
                   <span className="font-bold text-[#0F172A] text-[15px]">{item.title}</span>
                 </div>
                 <FiChevronRight className="w-5 h-5 text-gray-400" />
               </button>
-              {index < menuItems.length - 1 && (
+              {index < accountMenuItems.length - 1 && (
                 <div className="mx-6 h-[1px] bg-gray-50/80" />
               )}
             </React.Fragment>
           ))}
         </div>
 
+        {/* Support & Legal Policies Section (Exact screenshot UI) */}
+        <div className="space-y-3.5 mb-6">
+          {policyMenuItems.map((policy) => (
+            <button
+              key={policy.id}
+              onClick={() => navigate(policy.route)}
+              className="w-full bg-white rounded-2xl p-4 flex items-center justify-between shadow-[0_2px_15px_rgb(0,0,0,0.03)] border border-gray-100/90 hover:border-[#00a6a6]/40 transition-all active:scale-[0.98]"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-[#EBF7F6] text-[#00a6a6] flex items-center justify-center font-bold shrink-0">
+                  {React.cloneElement(policy.icon, { className: 'w-5.5 h-5.5' })}
+                </div>
+                <span className="font-bold text-[#0F172A] text-[15.5px] tracking-tight">{policy.title}</span>
+              </div>
+              <FiChevronRight className="w-5 h-5 text-gray-300" />
+            </button>
+          ))}
+        </div>
+
         {/* Logout */}
-        <div className="pt-6">
+        <div className="pt-2">
           <button
             onClick={handleLogout}
             className="w-full bg-white rounded-2xl p-4 flex items-center justify-between shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-gray-50 active:scale-[0.98] transition-transform"
@@ -184,8 +220,6 @@ const Profile = () => {
           </button>
         </div>
       </main>
-
-      
     </div>
   );
 };

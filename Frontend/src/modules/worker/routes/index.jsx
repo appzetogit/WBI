@@ -65,6 +65,7 @@ const SubmitMilestone = lazyLoad(() => import('../pages/SubmitMilestone'));
 const ProjectUnderReview = lazyLoad(() => import('../pages/ProjectUnderReview'));
 const Wallet = lazyLoad(() => import('../pages/Wallet'));
 const BillingPage = lazyLoad(() => import('../pages/BillingPage'));
+const CmsPage = lazyLoad(() => import('../../user/pages/CmsPage'));
 
 const LoadingFallback = () => (
   <div className="min-h-screen bg-[#F8FCFC]" />
@@ -94,7 +95,7 @@ const WorkerRoutes = () => {
   return (
     <ErrorBoundary>
       {/* Main content area - leaves space for bottom nav when needed */}
-      <div className={shouldShowBottomNav ? "pb-24" : ""}>
+      <div className={`min-h-screen bg-[#F8FCFC] ${shouldShowBottomNav ? "pb-20" : ""}`}>
         <Suspense fallback={<LoadingFallback />}>
             <Routes>
               {/* Public routes — signup lives at App level (/worker/signup) for smooth role switch */}
@@ -129,6 +130,9 @@ const WorkerRoutes = () => {
               <Route path="/settings" element={<ProtectedRoute userType="worker"><Settings /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute userType="worker"><Notifications /></ProtectedRoute>} />
               <Route path="/wallet" element={<ProtectedRoute userType="worker"><Wallet /></ProtectedRoute>} />
+              <Route path="/terms-services" element={withSuspense(<CmsPage slug="terms-services" defaultTitle="Terms & Services" targetPanel="engineer" />)} />
+              <Route path="/privacy-policy" element={withSuspense(<CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" targetPanel="engineer" />)} />
+              <Route path="/about-us" element={withSuspense(<CmsPage slug="about-us" defaultTitle="About Us" targetPanel="engineer" />)} />
             </Routes>
             </Suspense>
       </div>

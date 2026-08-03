@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiBell, FiVolume2, FiGlobe, FiLogOut } from 'react-icons/fi';
+import { FiBell, FiVolume2, FiGlobe, FiLogOut, FiFileText, FiShield, FiChevronRight } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { workerTheme as themeColors } from '../../../../theme';
 import { engineerAuthService } from '../../../../services/authService';
@@ -261,6 +261,40 @@ const Settings = () => {
                 {lang.name}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Legal & Policies */}
+        <div
+          className="bg-white rounded-xl p-4 mb-6 shadow-md"
+          style={{
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+          }}
+        >
+          <h3 className="font-bold text-gray-800 mb-4">Legal & Terms</h3>
+
+          <div className="space-y-3">
+            <button
+              onClick={() => navigate('/engineer/terms-services')}
+              className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <FiFileText className="w-5 h-5" style={{ color: themeColors.icon }} />
+                <span className="text-gray-800 font-medium text-sm">Terms & Services</span>
+              </div>
+              <FiChevronRight className="w-4 h-4 text-gray-400" />
+            </button>
+
+            <button
+              onClick={() => navigate('/engineer/privacy-policy')}
+              className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <FiShield className="w-5 h-5" style={{ color: themeColors.icon }} />
+                <span className="text-gray-800 font-medium text-sm">Privacy Policy</span>
+              </div>
+              <FiChevronRight className="w-4 h-4 text-gray-400" />
+            </button>
           </div>
         </div>
 

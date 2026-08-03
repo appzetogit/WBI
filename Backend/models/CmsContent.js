@@ -1,10 +1,16 @@
 const mongoose = require('mongoose');
 
 const cmsContentSchema = new mongoose.Schema({
+  targetPanel: {
+    type: String,
+    required: true,
+    enum: ['user', 'engineer', 'b2b', 'vendor'],
+    default: 'user',
+    index: true
+  },
   slug: {
     type: String,
     required: true,
-    unique: true,
     enum: ['about-us', 'terms-services', 'privacy-policy'],
     index: true
   },
@@ -29,5 +35,8 @@ const cmsContentSchema = new mongoose.Schema({
     ref: 'Admin'
   }
 }, { timestamps: true });
+
+// Compound unique index for panel + slug
+cmsContentSchema.index({ targetPanel: 1, slug: 1 }, { unique: true });
 
 module.exports = mongoose.model('CmsContent', cmsContentSchema);

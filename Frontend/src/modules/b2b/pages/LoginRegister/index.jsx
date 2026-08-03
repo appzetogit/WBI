@@ -708,6 +708,17 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                       Apply Now
                     </button>
                   </p>
+
+                  <p className="mt-4 text-center text-xs text-slate-400 leading-relaxed max-w-xs mx-auto">
+                    By continuing, you agree to B2B's{' '}
+                    <Link to="/b2b/terms-services" className="font-medium text-slate-600 underline hover:text-[#10AFA5] transition-colors">
+                      Terms & SLA
+                    </Link>
+                    {' '}and{' '}
+                    <Link to="/b2b/privacy-policy" className="font-medium text-slate-600 underline hover:text-[#10AFA5] transition-colors">
+                      Privacy Policy
+                    </Link>
+                  </p>
                 </form>
               </div>
             )}

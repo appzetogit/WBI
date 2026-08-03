@@ -39,7 +39,7 @@ const DEFAULT_LEGAL_TEXTS = {
   `
 };
 
-const CmsPage = ({ slug, defaultTitle }) => {
+const CmsPage = ({ slug, defaultTitle, targetPanel = 'user' }) => {
   const navigate = useNavigate();
   const [pageData, setPageData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,7 +53,7 @@ const CmsPage = ({ slug, defaultTitle }) => {
     const fetchContent = async () => {
       setIsLoading(true);
       try {
-        const response = await cmsService.getCmsContent(slug);
+        const response = await cmsService.getCmsContent(slug, targetPanel);
         if (isMounted) {
           if (response && response.success && response.data) {
             setPageData(response.data);
@@ -68,7 +68,7 @@ const CmsPage = ({ slug, defaultTitle }) => {
         }
       } catch (err) {
         if (isMounted) {
-          console.error(`Failed to load CMS content for ${slug}:`, err);
+          console.error(`Failed to load CMS content for ${slug} (${targetPanel}):`, err);
           setPageData({
             title: defaultTitle,
             subtitle: '',
@@ -88,7 +88,7 @@ const CmsPage = ({ slug, defaultTitle }) => {
     return () => {
       isMounted = false;
     };
-  }, [slug, defaultTitle]);
+  }, [slug, defaultTitle, targetPanel]);
 
   const title = pageData?.title || defaultTitle;
   const content = pageData?.content && pageData.content.trim().length > 0
