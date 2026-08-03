@@ -166,9 +166,13 @@ const getHomeData = async (req, res) => {
           id: item._id ? item._id.toString() : item.id,
           title: item.title,
           rating: item.rating,
+          reviews: item.reviews,
           price: item.price,
+          originalPrice: item.originalPrice,
+          discount: item.discount,
           imageUrl: item.imageUrl,
           targetCategoryId: item.targetCategoryId?.toString() || null,
+          slug: item.slug,
           order: item.order
         }));
       }

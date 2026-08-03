@@ -8,8 +8,12 @@
  * @returns {string} - Generated OTP
  */
 const generateOTP = (length = 6) => {
-  if (process.env.USE_DEFAULT_OTP === 'true') {
-    return '123456';
+  // Static OTP only for local/dev when explicitly enabled — never in production
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.USE_DEFAULT_OTP === 'true'
+  ) {
+    return '123456'.slice(0, length).padEnd(length, '0');
   }
 
   const digits = '0123456789';

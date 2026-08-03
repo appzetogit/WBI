@@ -357,12 +357,13 @@ const Home = () => {
       order: promo.sortOrder || idx
     }));
 
-    if (homeData.mostBookedServices && homeData.mostBookedServices.length > 0) {
+    if ((!homeContentToSet.booked || homeContentToSet.booked.length === 0) && homeData.mostBookedServices && homeData.mostBookedServices.length > 0) {
       homeContentToSet.booked = homeData.mostBookedServices.map(service => ({
         id: service._id,
         title: service.name,
         slug: service.slug,
         image: toAssetUrl(service.image || service.imageUrl, 400),
+        imageUrl: service.image || service.imageUrl,
         rating: service.rating || "4.8",
         reviews: service.totalReviews ? `${service.totalReviews}+` : "10k+",
         price: service.startingPrice || 0,
@@ -600,13 +601,13 @@ const Home = () => {
         <div className="absolute top-0 left-0 w-full h-[300px] bg-gradient-to-b from-[#ebfae6]/20 to-transparent pointer-events-none z-0"></div>
         <div className="relative z-10">
           <div className="sticky top-0 z-50">
-            <div className="absolute inset-0 bg-[#F8FCFC] bg-opacity-95 backdrop-blur-md border-b flex-none border-transparent z-0 pointer-events-none shadow-sm"></div>
+            <div className="absolute inset-0 bg-[#F8FCFC]/95 backdrop-blur-md border-b border-[#E2E8F0]/70 rounded-b-[24px] sm:rounded-b-[32px] z-0 pointer-events-none shadow-[0_8px_20px_rgba(15,23,42,0.04)] transition-all"></div>
             <div className="relative max-w-lg lg:max-w-2xl mx-auto w-full z-10">
               <Header
                 location={address}
                 onLocationClick={handleLocationClick}
               />
-              <div className="pb-2 pt-0">
+              <div className="pb-3 pt-0">
                 <SearchBar onInputClick={() => setIsSearchOpen(true)} />
               </div>
             </div>
@@ -648,14 +649,14 @@ const Home = () => {
 
       <div className="relative z-10">
         <div className="sticky top-0 z-50">
-          <div className="absolute inset-0 bg-[#F8FCFC] bg-opacity-95 backdrop-blur-md border-b flex-none border-transparent z-0 pointer-events-none shadow-sm"></div>
+          <div className="absolute inset-0 bg-[#F8FCFC]/95 backdrop-blur-md border-b border-[#E2E8F0]/70 rounded-b-[24px] sm:rounded-b-[32px] z-0 pointer-events-none shadow-[0_8px_20px_rgba(15,23,42,0.04)] transition-all"></div>
           
           <div className="relative max-w-lg lg:max-w-2xl mx-auto w-full z-10">
             <Header
               location={address}
               onLocationClick={handleLocationClick}
             />
-            <div className="pb-2 pt-0">
+            <div className="pb-3 pt-0">
               <SearchBar onInputClick={() => setIsSearchOpen(true)} />
             </div>
           </div>
@@ -743,7 +744,7 @@ const Home = () => {
                         price: item.price,
                         originalPrice: item.originalPrice,
                         discount: item.discount,
-                        image: item.image || (item.imageUrl ? toAssetUrl(item.imageUrl, 400) : null),
+                        image: item.image ? toAssetUrl(item.image, 400) : (item.imageUrl ? toAssetUrl(item.imageUrl, 400) : null),
                         targetCategoryId: item.targetCategoryId,
                         slug: item.slug
                       }))}

@@ -9,7 +9,6 @@ import LogoLoader from '../../../components/common/LogoLoader';
 import GlobalWorkerJobAlert from '../components/common/GlobalWorkerJobAlert';
 
 const Login = lazy(() => import('../pages/login'));
-const Signup = lazy(() => import('../pages/signup'));
 const ForgotPassword = lazy(() => import('../pages/ForgotPassword'));
 const Dashboard = lazy(() => import('../pages/Dashboard'));
 const AssignedJobs = lazy(() => import('../pages/AssignedJobs'));
@@ -86,10 +85,9 @@ const EngineerRoutes = () => {
     <ErrorBoundary>
       {/* Main content area - leaves space for bottom nav when needed */}
       <div className={shouldShowBottomNav ? "pb-24" : ""}>
-            <Routes location={location || undefined}>
-              {/* Public routes */}
+            <Routes>
+              {/* Public routes — signup lives at App level (/engineer/signup) for smooth role switch */}
               <Route path="/login" element={publicPage(Login)} />
-              <Route path="/signup" element={publicPage(Signup)} />
               <Route path="/forgot-password" element={publicPage(ForgotPassword)} />
 
               {/* Protected routes (auth required) */}

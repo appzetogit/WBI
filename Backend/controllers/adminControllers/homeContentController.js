@@ -1,6 +1,6 @@
 const HomeContent = require('../../models/HomeContent');
 const { validationResult } = require('express-validator');
-const { delCache } = require('../../services/redisService');
+const { delCache } = require('../../utils/cacheHelper');
 
 /**
  * Get Home Content

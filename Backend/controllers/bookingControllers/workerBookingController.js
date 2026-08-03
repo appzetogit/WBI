@@ -300,7 +300,9 @@ const startJob = async (req, res) => {
     }
 
     // Generate Visit OTP
-    const otp = process.env.USE_DEFAULT_OTP === 'true' ? '1234' : Math.floor(1000 + Math.random() * 9000).toString();
+    const otp = (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true')
+      ? '1234'
+      : Math.floor(1000 + Math.random() * 9000).toString();
 
     // Update booking
     booking.status = BOOKING_STATUS.JOURNEY_STARTED;
@@ -522,7 +524,9 @@ const completeJob = async (req, res) => {
     booking.status = BOOKING_STATUS.WORK_DONE;
 
     // Reuse existing Payment OTP or generate new one
-    const defaultOtp = process.env.USE_DEFAULT_OTP === 'true' ? '1234' : Math.floor(1000 + Math.random() * 9000).toString();
+    const defaultOtp = (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true')
+      ? '1234'
+      : Math.floor(1000 + Math.random() * 9000).toString();
     const payOtp = booking.paymentOtp || defaultOtp;
     booking.paymentOtp = payOtp;
 

@@ -554,7 +554,9 @@ const reassignEngineer = async (req, res) => {
     job.assignedToName = engineer.name || `${engineer.firstName || ''} ${engineer.lastName || ''}`.trim();
     job.status = 'assigned';
     // Issue fresh start OTP on reassign
-    const otp = process.env.USE_DEFAULT_OTP === 'true' ? '123456' : Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true')
+      ? '123456'
+      : Math.floor(100000 + Math.random() * 900000).toString();
     job.startOtp = otp;
     job.startOtpSentAt = new Date();
     job.startOtpVerifiedAt = null;

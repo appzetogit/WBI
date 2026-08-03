@@ -23,7 +23,8 @@ import {
   FiGift,
   FiShield,
   FiZap,
-  FiCheckCircle
+  FiCheckCircle,
+  FiInfo
 } from 'react-icons/fi';
 import { MdAccountBalanceWallet } from 'react-icons/md';
 import NotificationBell from '../../components/common/NotificationBell';
@@ -177,7 +178,7 @@ const Account = () => {
   }
 
   return (
-    <div className="min-h-[100dvh] pb-24 bg-[#F7F7FB] relative">
+    <div className="bg-[#F7F7FB] relative">
       <div className="relative z-10">
         <header className="pt-6 pb-4 px-5 flex items-center justify-between">
           <h1 className="text-2xl font-extrabold text-gray-900 font-poppins tracking-tight">Profile</h1>
@@ -247,11 +248,14 @@ const Account = () => {
           </motion.div>
 
           {/* Menu Items */}
-          <motion.div variants={itemVariants} className="mb-8">
+          <motion.div variants={itemVariants} className="mb-2">
             <MenuItem icon={FiMapPin} label="My Addresses" onClick={() => navigate('/user/manage-addresses')} />
             <MenuItem icon={FiCreditCard} label="Payment Methods" onClick={() => navigate('/user/manage-payment-methods')} />
             <MenuItem icon={FiBell} label="Notifications" onClick={() => navigate('/user/notifications')} />
             <MenuItem icon={FiHeadphones} label="Help & Support" onClick={() => navigate('/user/help-support')} />
+            <MenuItem icon={FiInfo} label="About Us" onClick={() => navigate('/user/about-us')} />
+            <MenuItem icon={FiFileText} label="Terms & Services" onClick={() => navigate('/user/terms-services')} />
+            <MenuItem icon={FiShield} label="Privacy Policy" onClick={() => navigate('/user/privacy-policy')} />
             <MenuItem icon={FiLogOut} label="Logout" onClick={handleLogout} color="text-red-500" />
           </motion.div>
         </motion.main>

@@ -37,6 +37,7 @@ const Scrap = lazy(() => import('../pages/Scrap'));
 const Reviews = lazy(() => import('../pages/Reviews'));
 const TrustVideos = lazy(() => import('../pages/TrustVideos'));
 const HomeContentManagement = lazy(() => import('../pages/HomeContent'));
+const CmsContentManagement = lazy(() => import('../pages/CmsContent'));
 const WebEnquiries = lazy(() => import('../pages/WebEnquiries'));
 const AppEnquiries = lazy(() => import('../pages/AppEnquiries'));
 const CrmEnquiries = lazy(() => import('../pages/CrmEnquiries'));
@@ -129,6 +130,7 @@ const AdminRoutes = () => {
           <Route path="reviews" element={<AnimatedPage><Reviews /></AnimatedPage>} />
           <Route path="trust-videos" element={<AnimatedPage><TrustVideos /></AnimatedPage>} />
           <Route path="home-content" element={<AnimatedPage><HomeContentManagement /></AnimatedPage>} />
+          <Route path="cms-content" element={<AnimatedPage><CmsContentManagement /></AnimatedPage>} />
           <Route path="web-enquiries" element={<AnimatedPage><WebEnquiries /></AnimatedPage>} />
           <Route path="app-enquiries" element={<AnimatedPage><AppEnquiries /></AnimatedPage>} />
           <Route path="crm-enquiries" element={<AnimatedPage><CrmEnquiries /></AnimatedPage>} />

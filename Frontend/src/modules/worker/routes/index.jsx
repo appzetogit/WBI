@@ -39,7 +39,6 @@ const lazyLoad = (importFunc) => {
 
 // Lazy load worker pages for code splitting
 const Login = lazyLoad(() => import('../pages/login'));
-const Signup = lazyLoad(() => import('../pages/signup'));
 const ForgotPassword = lazyLoad(() => import('../pages/ForgotPassword'));
 const Dashboard = lazyLoad(() => import('../pages/Dashboard'));
 const AssignedJobs = lazyLoad(() => import('../pages/AssignedJobs'));
@@ -97,10 +96,9 @@ const WorkerRoutes = () => {
       {/* Main content area - leaves space for bottom nav when needed */}
       <div className={shouldShowBottomNav ? "pb-24" : ""}>
         <Suspense fallback={<LoadingFallback />}>
-            <Routes location={location || undefined}>
-              {/* Public routes */}
+            <Routes>
+              {/* Public routes — signup lives at App level (/worker/signup) for smooth role switch */}
               <Route path="/login" element={<PublicRoute userType="worker"><Login /></PublicRoute>} />
-              <Route path="/signup" element={<PublicRoute userType="worker"><Signup /></PublicRoute>} />
               <Route path="/forgot-password" element={<PublicRoute userType="worker"><ForgotPassword /></PublicRoute>} />
 
               {/* Protected routes (auth required) */}

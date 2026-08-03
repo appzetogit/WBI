@@ -365,3 +365,23 @@ html, body, * {
   -ms-overflow-style: none; /* IE and Edge */
   scrollbar-width: none; /* Firefox */
 }
+
+/* Top Toast Notifications Positioning & Big-App Premium Styling */
+[data-sonner-toaster] {
+  top: 16px !important;
+  bottom: auto !important;
+  z-index: 999999 !important;
+}
+
+[data-sonner-toast] {
+  border-radius: 16px !important;
+  font-family: inherit !important;
+  font-weight: 600 !important;
+  box-shadow: 0 20px 30px -10px rgba(15, 23, 42, 0.35) !important;
+}
+
+/* Ensure React Hot Toast container is fixed at top center with highest z-index */
+#root > div:last-child,
+div[aria-live="polite"] {
+  z-index: 999999 !important;
+}

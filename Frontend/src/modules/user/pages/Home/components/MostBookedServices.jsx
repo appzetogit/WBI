@@ -54,40 +54,65 @@ const MostBookedServices = React.memo(({ services, onServiceClick, onAddClick, o
         {serviceList.map((service, index) => (
           <div 
             key={service.id || index}
-            className="flex-shrink-0 w-[156px] sm:w-[170px] snap-center bg-white rounded-[16px] overflow-hidden border border-[#F1F5F9] shadow-[0_4px_16px_rgba(15,23,42,0.04)] cursor-pointer"
+            className="flex-shrink-0 w-[156px] sm:w-[170px] snap-center bg-white rounded-[16px] overflow-hidden border border-[#F1F5F9] shadow-[0_4px_16px_rgba(15,23,42,0.04)] cursor-pointer flex flex-col justify-between"
             onClick={() => onServiceClick?.(service)}
           >
-            {/* Image section */}
-            <div className="h-[96px] w-full bg-[#f8fafc] relative">
-              {service.image ? (
-                <OptimizedImage 
-                  src={service.image} 
-                  alt={service.title} 
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-300">
-                  <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+            <div>
+              {/* Image section */}
+              <div className="h-[96px] w-full bg-[#f8fafc] relative">
+                {service.image ? (
+                  <OptimizedImage 
+                    src={service.image} 
+                    alt={service.title} 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-gray-300">
+                    <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  </div>
+                )}
+                {service.discount && (
+                  <span className="absolute top-2 left-2 bg-[#10AFA5] text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded-md shadow-xs">
+                    {service.discount}
+                  </span>
+                )}
+              </div>
+              
+              {/* Content section */}
+              <div className="p-3">
+                <h3 className="text-[#0F172A] font-bold text-[13px] leading-[1.3] mb-1 line-clamp-2 pr-1">
+                  {service.title}
+                </h3>
+                
+                <div className="flex items-center gap-1 mb-2">
+                  <MdStar className="text-[#F59E0B] w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[#0F172A] font-bold text-[11px]">{service.rating || '4.8'}</span>
+                  <span className="text-[#64748B] text-[11px]">({service.reviews || '10K+'})</span>
                 </div>
-              )}
+              </div>
             </div>
-            
-            {/* Content section */}
-            <div className="p-3">
-              <h3 className="text-[#0F172A] font-bold text-[13px] leading-[1.3] mb-2 min-h-[34px] line-clamp-2 pr-2">
-                {service.title}
-              </h3>
-              
-              <div className="flex items-center gap-1 mb-2.5">
-                <MdStar className="text-[#F59E0B] w-3.5 h-3.5" />
-                <span className="text-[#0F172A] font-bold text-[11px]">{service.rating || '4.8'}</span>
-                <span className="text-[#64748B] text-[11px]">({service.reviews || '10K+'})</span>
+
+            {/* Bottom price and action row */}
+            <div className="px-3 pb-3 pt-0 flex items-center justify-between">
+              <div>
+                <span className="text-[#64748B] font-medium text-[10px] block leading-none mb-0.5">From</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-[#10AFA5] font-extrabold text-[13px] tracking-tight">₹{service.price}</span>
+                  {service.originalPrice && Number(service.originalPrice) > Number(service.price) && (
+                    <span className="text-gray-400 line-through text-[10px]">₹{service.originalPrice}</span>
+                  )}
+                </div>
               </div>
-              
-              <div className="flex items-center gap-1.5">
-                <span className="text-[#64748B] font-medium text-[11px]">From</span>
-                <span className="text-[#10AFA5] font-extrabold text-[13px] tracking-tight">₹{service.price}</span>
-              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddClick ? onAddClick(service) : onServiceClick?.(service);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-[#F0FDFA] text-[#10AFA5] hover:bg-[#10AFA5] hover:text-white border border-[#10AFA5]/30 text-[11px] font-bold transition-all shrink-0 active:scale-95 shadow-xs"
+              >
+                ADD
+              </button>
             </div>
           </div>
         ))}

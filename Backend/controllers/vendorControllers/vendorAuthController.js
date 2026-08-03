@@ -71,14 +71,28 @@ const sendOTP = async (req, res) => {
     await storeOTP(phone, otpHash);
     console.timeEnd('sendOTP_store');
 
-    // 4. Send OTP via SMS
+    // 4. Send OTP via SMS — await so client knows if delivery failed
     console.time('sendOTP_sms_trigger');
-    sendSMSOTP(phone, otp, 'vendor').then(smsResult => {
-      if (!smsResult.success) {
-        console.warn(`[OTP] SMS failed for vendor ${phone}, but OTP stored`);
-      }
-    }).catch(err => console.error(`[OTP] SMS error for ${phone}:`, err));
+    const smsResult = await sendSMSOTP(phone, otp).catch((err) => {
+      console.error(`[OTP] SMS error for vendor ${phone}:`, err);
+      return { success: false };
+    });
     console.timeEnd('sendOTP_sms_trigger');
+
+    if (
+      !smsResult.success &&
+      process.env.USE_DEFAULT_OTP !== 'true' &&
+      process.env.NODE_ENV === 'production'
+    ) {
+      console.timeEnd('sendOTP_total');
+      return res.status(502).json({
+        success: false,
+        message: 'Unable to send OTP SMS. Please check your mobile number and try again.'
+      });
+    }
+    if (!smsResult.success) {
+      console.warn(`[OTP] SMS failed for vendor ${phone}, but OTP stored`);
+    }
 
     // Log OTP in development mode
     if (process.env.NODE_ENV === 'development' || process.env.USE_DEFAULT_OTP === 'true') {

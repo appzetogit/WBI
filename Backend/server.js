@@ -458,6 +458,7 @@ app.use('/api/admin/banners', require('./routes/admin-routes/bannerManagement.ro
 app.use('/api/admin', require('./routes/admin-routes/reviewManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/trustVideoManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/reportManagement.routes'));
+app.use('/api/cms', require('./routes/cmsContent.routes'));
 app.use('/api/admin/settlements', require('./routes/admin-routes/settlementManagement.routes'));
 app.use('/api/admin/admins', require('./routes/admin-routes/adminManagement.routes'));
 app.use('/api/admin', require('./routes/admin-routes/verificationAdmin.routes'));

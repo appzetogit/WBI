@@ -45,6 +45,7 @@ const iconMap = {
   "Scrap Items": FiTrash2,
   Settlements: FiDollarSign,
   Settings: FiSettings,
+  "CMS Content": FiFileText,
   Plans: FiPackage,
   "Trust Videos": FiVideo,
   "Premium Services": FiStar,

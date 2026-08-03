@@ -2482,22 +2482,74 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         <div className="space-y-5">
           <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
             <label className="block text-sm font-bold text-gray-700 mb-3">Banner Image</label>
-            <div className="flex items-center gap-4">
-              <div className="flex-1">
-                <input
-                  type="text"
-                  value={offerBannerForm.imageUrl}
-                  onChange={(e) => setOfferBannerForm({ ...offerBannerForm, imageUrl: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all bg-white"
-                  placeholder="Image URL"
-                />
-              </div>
+            <div className="space-y-3">
+              <input
+                type="file"
+                accept="image/*"
+                disabled={uploading}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setUploading(true);
+                    setUploadProgress(0);
+                    try {
+                      const response = await serviceService.uploadImage(file, 'banners', (progress) => {
+                        setUploadProgress(progress);
+                      });
+                      if (response.success) {
+                        setOfferBannerForm((p) => ({ ...p, imageUrl: response.imageUrl }));
+                        toast.success("Image uploaded!");
+                      }
+                    } catch (error) {
+                      console.error('Offer banner upload error:', error);
+                      const msg = error.response?.data?.message || error.message || "Failed to upload image";
+                      toast.error(msg);
+                    } finally {
+                      setUploading(false);
+                      setUploadProgress(0);
+                    }
+                  }
+                }}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all bg-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              />
+              {uploading && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-blue-600 text-sm font-medium">
+                    <div className="flex items-center gap-2">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                      Uploading...
+                    </div>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-blue-100 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-full transition-all duration-300 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+              {offerBannerForm.imageUrl && !uploading && (
+                <div className="relative block w-full max-w-[300px] group">
+                  <img fetchPriority="low" loading="lazy" src={offerBannerForm.imageUrl} alt="Preview" className="w-full aspect-[21/10] object-fill rounded-lg border border-gray-200 shadow-sm" />
+                  <button
+                    type="button"
+                    onClick={() => setOfferBannerForm((p) => ({ ...p, imageUrl: "" }))}
+                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                    title="Remove image"
+                  >
+                    <FiTrash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+              <input
+                type="text"
+                value={offerBannerForm.imageUrl}
+                onChange={(e) => setOfferBannerForm((p) => ({ ...p, imageUrl: e.target.value }))}
+                className="w-full mt-2 px-4 py-2.5 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm bg-white"
+                placeholder="Or paste image URL"
+              />
             </div>
-            {offerBannerForm.imageUrl && (
-              <div className="mt-4 p-1 bg-white rounded-xl border border-gray-100 shadow-sm block w-full max-w-[300px]">
-                <img fetchPriority="low" loading="lazy" src={offerBannerForm.imageUrl} alt="Preview" className="w-full aspect-[21/10] object-fill rounded-lg" />
-              </div>
-            )}
           </div>
           <RedirectionSelector
             categories={categories}
@@ -2513,14 +2565,15 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
               className={`flex-1 py-3.5 text-white rounded-xl font-semibold transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg ${(uploading || isSyncing) ? 'opacity-50 cursor-not-allowed bg-gray-400' : ''}`}
               style={{ backgroundColor: (uploading || isSyncing) ? '#cbd5e1' : '#2874F0' }}
             >
-              {uploading ? (
+              {(uploading || isSyncing) ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
               ) : <FiSave className="w-5 h-5" />}
-              {uploading ? "Uploading..." : "Save Banner"}
+              {uploading ? "Uploading..." : isSyncing ? "Saving..." : "Save Banner"}
             </button>
             <button
               onClick={resetOfferBannerForm}
-              className="px-6 py-3.5 text-gray-700 rounded-xl font-medium hover:bg-gray-100 transition-all border border-gray-200"
+              disabled={isSyncing}
+              className="px-6 py-3.5 text-gray-700 rounded-xl font-medium hover:bg-gray-100 transition-all border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
             </button>

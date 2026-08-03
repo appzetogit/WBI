@@ -4,9 +4,16 @@ const { BOOKING_STATUS } = require('../../utils/constants');
 const { getIO } = require('../../sockets');
 const crypto = require('crypto');
 
-// Generate OTP (Hardcoded to 1234 for testing)
-const generateOTP = () => '1234';
-// Original logic: const generateOTP = () => Math.floor(1000 + Math.random() * 9000).toString();
+// 4-digit visit OTP — static only outside production when USE_DEFAULT_OTP=true
+const generateOTP = () => {
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.USE_DEFAULT_OTP === 'true'
+  ) {
+    return '1234';
+  }
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
 
 exports.startJourney = async (req, res) => {
   try {

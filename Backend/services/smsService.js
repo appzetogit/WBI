@@ -37,7 +37,9 @@ const sendSMS = async (phone, message, options = {}) => {
     console.log('[SMS] Sending request to (HTTPS):', baseUrl);
     console.log('[SMS] Constructed URL (Masked):', finalUrl.replace(process.env.SMS_INDIA_HUB_API_KEY, '***'));
 
-    const response = await axios.get(finalUrl, { timeout: 5000 });
+    // SMS India Hub can be slow from local/home networks; 5s was too aggressive
+    const timeoutMs = Number(process.env.SMS_TIMEOUT_MS) || 15000;
+    const response = await axios.get(finalUrl, { timeout: timeoutMs });
 
     console.log('[SMS] Response status:', response.status);
     console.log('[SMS] Response data:', response.data);
@@ -64,6 +66,9 @@ const sendSMS = async (phone, message, options = {}) => {
     console.error('[SMS] ❌ SMS Provider Error:', JSON.stringify(response.data));
     if (typeof data === 'string' && data.includes('Invalid Login')) {
       console.error('[SMS] ⚠️  Authentication failed - check SMS_INDIA_HUB_USERNAME and SMS_INDIA_HUB_API_KEY');
+    }
+    if (typeof data === 'string' && /senderid not valid/i.test(data)) {
+      console.error('[SMS] ⚠️  Invalid sender — OTP/TaskY DLT must use WBINFS, not BGADEC');
     }
     return { success: false, error: response.data };
   } catch (error) {
@@ -101,10 +106,9 @@ const sendRegistrationOTP = async (phone, otp) => {
   const message = TASKY_REGISTRATION_OTP_SMS_TEMPLATE(otp);
   const templateId =
     process.env.SMS_INDIA_HUB_DLT_TEMPLATE_ID_TASKY || TASKY_DLT_TEMPLATE_ID;
+  // TaskY DLT template is registered with sender WBINFS only — never use BGADEC here
   const senderId =
-    process.env.SMS_INDIA_HUB_SENDER_ID_TASKY ||
-    process.env.SMS_INDIA_HUB_SENDER_ID ||
-    TASKY_REGISTRATION_SENDER_ID;
+    process.env.SMS_INDIA_HUB_SENDER_ID_TASKY || TASKY_REGISTRATION_SENDER_ID;
   const bodyPreview = message.replace(String(otp), '######');
 
   console.log(
@@ -118,7 +122,7 @@ const sendRegistrationOTP = async (phone, otp) => {
   });
   if (!result.success) {
     console.error(`[SMS] Failed to send registration OTP to ${phone}:`, result.error);
-    console.error('[SMS] Check TaskY DLT template text/id, sender, API key, EC2 IP whitelist');
+    console.error('[SMS] Check TaskY DLT template text/id, sender WBINFS, API key, IP whitelist');
   }
   return result;
 };

@@ -20,7 +20,7 @@ const VISIT_FEE_SPARE_PARTS = parseFloat(process.env.B2B_SPARE_PARTS_VISIT_FEE |
 const CLIENT_DEPENDENCY_PENALTY = parseFloat(process.env.B2B_CLIENT_DEPENDENCY_PENALTY || '250');
 
 const generateOtp = () => {
-  if (process.env.USE_DEFAULT_OTP === 'true') return '123456';
+  if (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true') return '123456';
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
@@ -97,7 +97,7 @@ exports.resendStartOtp = async (req, res) => {
       }
     }
 
-    if (process.env.USE_DEFAULT_OTP === 'true') {
+    if (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true') {
       console.log(`[DEV] B2B Start OTP resent for ${job.jobId}: ${otp}`);
     }
 

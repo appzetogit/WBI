@@ -40,7 +40,10 @@ const logAuthActivity = async (data) => {
 
 // Helper to generate a 6-digit OTP
 const generateOTP = () => {
-  if (process.env.USE_DEFAULT_OTP === 'true') {
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.USE_DEFAULT_OTP === 'true'
+  ) {
     return '123456';
   }
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -50,8 +53,11 @@ const generateOTP = () => {
 const sendOTP = async (identifier, otp, role) => {
   const isEmail = identifier.includes('@');
   
-  // Bypass actual sending if using default OTP for testing
-  if (process.env.USE_DEFAULT_OTP === 'true') {
+  // Bypass actual sending only in non-prod default-OTP mode
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.USE_DEFAULT_OTP === 'true'
+  ) {
     console.log(`[DEV MODE] Default OTP ${otp} generated for ${identifier} (Role: ${role})`);
     return true;
   }

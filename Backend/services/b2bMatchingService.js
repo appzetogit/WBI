@@ -46,7 +46,7 @@ const emitSocket = (room, event, data) => {
 };
 
 const generateStartOtp = () => {
-  if (process.env.USE_DEFAULT_OTP === 'true') return '123456';
+  if (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true') return '123456';
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
@@ -256,7 +256,7 @@ const assignJobToEngineer = async (b2bJob, engineer, radiusKm = null, waveNumber
       await sendSMS(fresh.phone, msg);
     } catch (smsErr) {
       console.warn(`[Matching] Start OTP SMS failed for ${fresh.jobId}:`, smsErr.message);
-      if (process.env.NODE_ENV !== 'production' || process.env.USE_DEFAULT_OTP === 'true') {
+      if (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true') {
         console.log(`[DEV] B2B Start OTP for ${fresh.jobId}: ${startOtp}`);
       }
     }

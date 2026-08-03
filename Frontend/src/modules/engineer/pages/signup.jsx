@@ -8,6 +8,7 @@ import { engineerAuthService } from '../../../services/authService';
 import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import Logo from '../../../components/common/Logo';
 import ValidatedInput from '../../../components/common/ValidatedInput';
+import FieldRoleSignupToggle from '../../../components/auth/FieldRoleSignupToggle';
 import { validators } from '../../../utils/validationUtils';
 import { uploadSelfieToCloudinary, uploadToCloudinary } from '../../../utils/cloudinaryUpload';
 import optimizeCloudinaryUrl from '../../../utils/cloudinaryOptimize';
@@ -1496,22 +1497,7 @@ export default function EngineerSignup() {
           </Link>
           <Logo src="/logo/TazkYLogo_circle.png" circle={true} className="w-9 h-9" />
         </div>
-        <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button 
-            onClick={() => {
-              localStorage.removeItem('workerAccessToken');
-              localStorage.removeItem('workerRefreshToken');
-              localStorage.removeItem('workerData');
-              navigate('/worker/signup', { replace: true });
-            }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all text-gray-500 hover:text-gray-700"
-          >
-            Worker
-          </button>
-          <button className="px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-white text-[#4F46E5] shadow-sm">
-            Engineer
-          </button>
-        </div>
+        <FieldRoleSignupToggle />
       </nav>
       {renderContent()}
     </div>

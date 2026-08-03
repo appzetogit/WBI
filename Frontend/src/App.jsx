@@ -97,46 +97,62 @@ function App() {
                 <div className="App">
                   <ErrorBoundary>
                     <AppRoutes />
-                    <LocationPermissionChecker />
-                    <SonnerToaster richColors position="bottom-right" closeButton />
+                    <SonnerToaster
+                      position="top-center"
+                      closeButton
+                      theme="dark"
+                      toastOptions={{
+                        style: {
+                          background: '#0F172A',
+                          color: '#FFFFFF',
+                          borderRadius: '16px',
+                          border: '1px solid rgba(255, 255, 255, 0.12)',
+                          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.25)',
+                          padding: '12px 18px',
+                          fontSize: '14px',
+                          fontWeight: '600'
+                        }
+                      }}
+                    />
                     <Toaster
                       position="top-center"
                       reverseOrder={false}
+                      containerStyle={{ top: 16, zIndex: 999999 }}
                       toastOptions={{
-                        duration: 3000,
+                        duration: 3200,
                         style: {
-                          background: '#0f172a',
-                          color: '#ffffff',
+                          background: '#0F172A',
+                          color: '#FFFFFF',
                           borderRadius: '16px',
                           padding: '12px 20px',
                           fontSize: '14px',
-                          fontWeight: '500',
-                          boxShadow: '0 10px 30px rgba(15, 23, 42, 0.25)',
-                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          fontWeight: '600',
+                          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.25)',
+                          border: '1px solid rgba(255, 255, 255, 0.12)',
                           maxWidth: '90vw'
                         },
                         success: {
-                          duration: 2500,
+                          duration: 2800,
                           iconTheme: {
-                            primary: '#10b981',
-                            secondary: '#ffffff',
+                            primary: '#10B981',
+                            secondary: '#FFFFFF',
                           },
                           style: {
-                            background: '#0f172a',
-                            color: '#ffffff',
-                            borderLeft: '4px solid #10b981',
+                            background: '#0F172A',
+                            color: '#FFFFFF',
+                            borderLeft: '4px solid #10B981',
                           }
                         },
                         error: {
-                          duration: 3500,
+                          duration: 3800,
                           iconTheme: {
-                            primary: '#f43f5e',
-                            secondary: '#ffffff',
+                            primary: '#F43F5E',
+                            secondary: '#FFFFFF',
                           },
                           style: {
-                            background: '#0f172a',
-                            color: '#ffffff',
-                            borderLeft: '4px solid #f43f5e',
+                            background: '#0F172A',
+                            color: '#FFFFFF',
+                            borderLeft: '4px solid #F43F5E',
                           }
                         },
                       }}

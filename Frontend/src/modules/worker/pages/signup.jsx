@@ -7,6 +7,7 @@ import Logo from '../../../components/common/Logo';
 import LogoLoader from '../../../components/common/LogoLoader';
 import KYCVerificationStep from '../../../components/kyc/KYCVerificationStep';
 import ValidatedInput from '../../../components/common/ValidatedInput';
+import FieldRoleSignupToggle from '../../../components/auth/FieldRoleSignupToggle';
 import { validators } from '../../../utils/validationUtils';
 import { z } from "zod";
 import useRegistrationDraft from '../../../hooks/useRegistrationDraft';
@@ -487,24 +488,7 @@ export default function WorkerSignup() {
           </Link>
           <Logo src="/logo/TazkYLogo_circle.png" circle={true} className="w-9 h-9" />
         </div>
-        <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button 
-            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all bg-white text-black shadow-sm"
-          >
-            Worker
-          </button>
-          <button 
-            onClick={() => {
-              localStorage.removeItem('engineerAccessToken');
-              localStorage.removeItem('engineerRefreshToken');
-              localStorage.removeItem('engineerData');
-              navigate('/engineer/signup', { replace: true });
-            }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold transition-all text-gray-500 hover:text-gray-700"
-          >
-            Engineer
-          </button>
-        </div>
+        <FieldRoleSignupToggle />
       </nav>
       {renderContent()}
     </div>

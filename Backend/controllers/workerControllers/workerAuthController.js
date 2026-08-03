@@ -40,12 +40,24 @@ const sendOTP = async (req, res) => {
     // 3. Store OTP (Redis primary, MongoDB fallback)
     await storeOTP(phone, otpHash);
 
-    // 4. Send OTP via SMS
-    sendRegistrationOTP(phone, otp).then(smsResult => {
-      if (!smsResult.success) {
-        console.warn(`[OTP] SMS failed for worker ${phone}, but OTP stored`);
-      }
-    }).catch(err => console.error(`[OTP] SMS error for ${phone}:`, err));
+    // 4. Send OTP via SMS — await so client knows if delivery failed
+    const smsResult = await sendRegistrationOTP(phone, otp).catch((err) => {
+      console.error(`[OTP] SMS error for worker ${phone}:`, err);
+      return { success: false };
+    });
+    if (
+      !smsResult.success &&
+      process.env.USE_DEFAULT_OTP !== 'true' &&
+      process.env.NODE_ENV === 'production'
+    ) {
+      return res.status(502).json({
+        success: false,
+        message: 'Unable to send OTP SMS. Please check your mobile number and try again.'
+      });
+    }
+    if (!smsResult.success) {
+      console.warn(`[OTP] SMS failed for worker ${phone}, but OTP stored`);
+    }
 
     // Log OTP
     if (process.env.NODE_ENV === 'development' || process.env.USE_DEFAULT_OTP === 'true') {
