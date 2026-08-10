@@ -13,6 +13,12 @@ const serviceCategorySchema = new mongoose.Schema({
     unique: true,
     lowercase: true
   },
+  type: {
+    type: String,
+    enum: ['ONE_TIME', 'PROJECT'],
+    default: 'ONE_TIME',
+    index: true
+  },
   description: {
     type: String,
     trim: true,
@@ -65,9 +71,10 @@ const serviceCategorySchema = new mongoose.Schema({
     enum: ['worker', 'engineer'],
     default: 'worker'
   }],
+  // legacy serviceType field kept for backward compatibility if needed
   serviceType: {
     type: String,
-    enum: ['one_time', 'enterprise'],
+    enum: ['one_time', 'enterprise', 'ONE_TIME', 'PROJECT'],
     default: 'one_time',
     index: true
   },

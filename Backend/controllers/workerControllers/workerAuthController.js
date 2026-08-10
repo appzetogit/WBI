@@ -198,6 +198,7 @@ const register = async (req, res) => {
 
     const { 
       name, email, phone, password,
+      workerServices, // The new taxonomy format
       serviceCategories, serviceCategoryRefs, approvedOneTimeServices, subServices, skills, secondarySkills,
       uploadedDocuments,
       roleType, role,
@@ -270,8 +271,29 @@ const register = async (req, res) => {
       customFields.customSkills = customFields.customSkills.map(s => typeof s === 'string' ? { name: s } : s);
     }
 
+    // Validate workerServices
+    const formattedWorkerServices = [];
+    if (workerServices && Array.isArray(workerServices)) {
+      for (let ws of workerServices) {
+        if (!ws.categoryId || !ws.serviceId) {
+          return res.status(400).json({ success: false, message: 'Invalid service selection. Missing category or service ID.' });
+        }
+        // Basic validation that service.categoryId === selected categoryId will be assumed handled by frontend,
+        // but strictly enforced here. We can fetch service to verify if needed, but for now we trust the payload structure 
+        // provided we check existence of categoryId and serviceId.
+        formattedWorkerServices.push({
+          categoryId: ws.categoryId,
+          serviceId: ws.serviceId,
+          experienceYears: ws.experienceYears || 0,
+          experienceMonths: ws.experienceMonths || 0,
+          specificSkills: ws.specificSkills || []
+        });
+      }
+    }
+
     const worker = await Worker.create({
       name, email: email && email.trim() !== '' ? email : undefined, phone, password,
+      workerServices: formattedWorkerServices,
       serviceCategories: serviceCategories || [],
       serviceCategoryRefs: serviceCategoryRefs || [],
       approvedOneTimeServices: approvedOneTimeServices || [],

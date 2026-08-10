@@ -15,6 +15,21 @@ import optimizeCloudinaryUrl from '../../../utils/cloudinaryOptimize';
 import { loadRazorpay } from '../../../utils/loadRazorpay';
 import useRegistrationDraft from '../../../hooks/useRegistrationDraft';
 
+const toAssetUrl = (url) => {
+  if (!url) return '';
+  let finalUrl = url;
+  const clean = url.replace('/api/upload', '/upload');
+  if (clean.startsWith('http')) {
+    finalUrl = clean;
+  } else if (clean.startsWith('/') && !clean.startsWith('/upload')) {
+    return clean;
+  } else {
+    const base = (import.meta.env.VITE_API_BASE_URL || 'https://app.wbinfs.com').replace(/\/api$/, '');
+    finalUrl = `${base}${clean.startsWith('/') ? '' : '/'}${clean}`;
+  }
+  return finalUrl;
+};
+
 /** Handle 429 Too Many Requests gracefully */
 const handleApiError = (err, fallbackMsg) => {
   if (err?.response?.status === 429) {
@@ -1126,7 +1141,14 @@ export default function EngineerSignup() {
                       
                       const renderIcon = (iconStr) => {
                         if (!iconStr) return <FiBriefcase className="w-4 h-4 mr-2" />;
-                        if (iconStr.includes('/') || iconStr.includes('.')) return <img fetchPriority="low" loading="lazy" src={iconStr} className={`w-5 h-5 mr-2 object-contain ${isSelected ? '' : 'grayscale opacity-60'}`} alt=""/>;
+                        if (iconStr.includes('/') || iconStr.includes('.')) {
+                          return (
+                            <>
+                              <img fetchPriority="low" loading="lazy" src={toAssetUrl(iconStr)} className={`w-5 h-5 mr-2 object-contain ${isSelected ? '' : 'grayscale opacity-60'}`} alt="" onError={(e) => { e.target.onerror = null; e.target.style.display = 'none'; e.target.nextSibling.style.display = 'block'; }} />
+                              <FiBriefcase className={`w-4 h-4 mr-2 ${isSelected ? 'text-[#4F46E5]' : 'text-gray-400'}`} style={{ display: 'none' }} />
+                            </>
+                          );
+                        }
                         return <FiBriefcase className={`w-4 h-4 mr-2 ${isSelected ? 'text-[#4F46E5]' : 'text-gray-400'}`} />;
                       };
 

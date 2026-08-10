@@ -86,6 +86,11 @@ const workerSchema = new mongoose.Schema({
     enum: ['pending', 'approved', 'rejected', 'suspended'],
     default: 'pending'
   },
+  verificationStatus: {
+    type: String,
+    enum: ['unverified', 'pending', 'verified', 'rejected'],
+    default: 'unverified'
+  },
   serviceCategories: [{
     type: String
   }],
@@ -115,6 +120,27 @@ const workerSchema = new mongoose.Schema({
     }],
     experienceLevel: String,
     yearsOfExperience: Number
+  }],
+  workerServices: [{
+    categoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ServiceCategory',
+      required: true
+    },
+    serviceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Service',
+      required: true
+    },
+    experienceYears: {
+      type: Number,
+      default: 0
+    },
+    experienceMonths: {
+      type: Number,
+      default: 0
+    },
+    specificSkills: [{ type: String }]
   }],
   skills: [{
     type: mongoose.Schema.Types.ObjectId,

@@ -257,8 +257,14 @@ class MatchingService {
         }
       }
 
-      // Check Service Category & SubService matching
+      // Check Service Category & Service matching for One-Time Jobs
       if (isEligible && booking.serviceId) {
+        const matchesWorkerService = worker.workerServices?.some(ws => 
+          ws.serviceId?.toString() === booking.serviceId?._id?.toString() || 
+          ws.serviceId?.toString() === booking.serviceId?.toString()
+        );
+
+        // Fallback checks for older structure
         const matchesSubService = worker.subServices?.some(s => s.subServiceId?.toString() === booking.subServiceId?._id?.toString() || s.subServiceId?.toString() === booking.subServiceId?.toString());
         
         const serviceTitle = booking.serviceId?.title || booking.serviceName || '';
@@ -267,9 +273,9 @@ class MatchingService {
           cat.toLowerCase().trim() === booking.serviceCategory?.toLowerCase().trim()
         );
         
-        if (!matchesSubService && !matchesCategory) {
+        if (!matchesWorkerService && !matchesSubService && !matchesCategory) {
           isEligible = false;
-          rejectReason = !matchesCategory ? 'service mismatch' : 'sub-service mismatch';
+          rejectReason = 'service mismatch';
         }
       }
 

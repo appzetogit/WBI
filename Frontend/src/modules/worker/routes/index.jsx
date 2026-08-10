@@ -130,9 +130,9 @@ const WorkerRoutes = () => {
               <Route path="/settings" element={<ProtectedRoute userType="worker"><Settings /></ProtectedRoute>} />
               <Route path="/notifications" element={<ProtectedRoute userType="worker"><Notifications /></ProtectedRoute>} />
               <Route path="/wallet" element={<ProtectedRoute userType="worker"><Wallet /></ProtectedRoute>} />
-              <Route path="/terms-services" element={withSuspense(<CmsPage slug="terms-services" defaultTitle="Terms & Services" targetPanel="engineer" />)} />
-              <Route path="/privacy-policy" element={withSuspense(<CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" targetPanel="engineer" />)} />
-              <Route path="/about-us" element={withSuspense(<CmsPage slug="about-us" defaultTitle="About Us" targetPanel="engineer" />)} />
+              <Route path="/terms-services" element={<CmsPage slug="terms-services" defaultTitle="Terms & Services" targetPanel="worker" />} />
+              <Route path="/privacy-policy" element={<CmsPage slug="privacy-policy" defaultTitle="Privacy Policy" targetPanel="worker" />} />
+              <Route path="/about-us" element={<CmsPage slug="about-us" defaultTitle="About Us" targetPanel="worker" />} />
             </Routes>
             </Suspense>
       </div>

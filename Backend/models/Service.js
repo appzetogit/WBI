@@ -9,7 +9,19 @@ const serviceSchema = new mongoose.Schema({
   brandId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Brand',
-    required: [true, 'Please provide a brand ID'],
+    required: false, // Optional for one-time worker services
+    index: true
+  },
+  categoryId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ServiceCategory',
+    required: false, // Optional for backward compatibility, required for one-time worker services
+    index: true
+  },
+  type: {
+    type: String,
+    enum: ['ONE_TIME', 'PROJECT'],
+    default: 'ONE_TIME',
     index: true
   },
   title: {
@@ -49,6 +61,18 @@ const serviceSchema = new mongoose.Schema({
   description: {
     type: String,
     trim: true
+  },
+  requiresCertification: {
+    type: Boolean,
+    default: false
+  },
+  requiredDocuments: [{
+    type: String,
+    trim: true
+  }],
+  sortOrder: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true

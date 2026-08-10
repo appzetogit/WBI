@@ -1,4 +1,5 @@
 const OneTimeService = require('../../models/OneTimeService');
+const Service = require('../../models/Service');
 const WorkerDocumentConfig = require('../../models/WorkerDocumentConfig');
 const WorkerRegistrationConfig = require('../../models/WorkerRegistrationConfig');
 const ServiceCategory = require('../../models/ServiceCategory');
@@ -12,10 +13,10 @@ const getRegistrationConfig = async (req, res) => {
   try {
     const role = 'worker';
 
-    const categories = await ServiceCategory.find({ isActive: true, audience: 'b2c' }).select('name icon').lean();
+    const categories = await ServiceCategory.find({ isActive: true, type: 'ONE_TIME', roles: 'worker' }).select('name icon image description').lean();
 
-    const subServices = await OneTimeService.find({ isActive: true })
-      .select('name categoryId image')
+    const subServices = await Service.find({ status: 'active', type: 'ONE_TIME' })
+      .select('title name categoryId image requiresCertification requiredDocuments')
       .lean();
 
     const documents = await WorkerDocumentConfig.find({ isActive: true }).sort({ order: 1 }).lean();
@@ -93,12 +94,12 @@ const getRegistrationConfig = async (req, res) => {
           .map((s) => ({
             id: s._id.toString(),
             _id: s._id.toString(),
-            name: s.name,
-            title: s.name,
+            name: s.title || s.name,
+            title: s.title || s.name,
             categoryId: s.categoryId ? s.categoryId.toString() : null,
-            requiredSkills: s.requiredSkills || [],
-            suggestedTools: s.suggestedTools || [],
-            suggestedBrands: s.suggestedBrands || []
+            image: s.image || '',
+            requiresCertification: s.requiresCertification || false,
+            requiredDocuments: s.requiredDocuments || []
           })),
         documents: documents.map((d) => ({
           key: d.key,
