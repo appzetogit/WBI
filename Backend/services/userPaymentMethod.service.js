@@ -395,9 +395,40 @@ async function verifyUpi(userId, { vpa }, req) {
     throw err;
   }
 
+  // Live CGPE VPA verification (audited)
+  const { verifyVpa } = require('./upiVerification.service');
+  let cgpeProfile = null;
+  try {
+    const verified = await verifyVpa({
+      vpa: cleaned,
+      entityType: 'user',
+      entityId: userId,
+      actorType: 'user',
+      actorId: userId,
+      ipAddress: req?.ip,
+      userAgent: req?.get?.('user-agent')
+    });
+    cgpeProfile = verified.profile;
+  } catch (e) {
+    const err = new Error(e.message || 'UPI verification failed');
+    err.status = e.statusCode || 422;
+    err.code = e.code;
+    throw err;
+  }
+
   const vpaH = hashVpa(cleaned);
   const existing = await UserPaymentMethod.findOne({ userId, vpaHash: vpaH, deletedAt: null });
-  if (existing) return { method: toPublicMethod(existing), idempotent: true };
+  if (existing) {
+    existing.isVerified = true;
+    existing.metadata = {
+      ...(existing.metadata || {}),
+      source: 'cgpe_vpa',
+      accountHolderName: cgpeProfile?.accountHolderName || null,
+      verificationId: existing.metadata?.verificationId
+    };
+    await existing.save();
+    return { method: toPublicMethod(existing), idempotent: true, profile: cgpeProfile };
+  }
 
   const count = await UserPaymentMethod.countDocuments({ userId, deletedAt: null, status: 'active' });
   const doc = await UserPaymentMethod.create({
@@ -408,7 +439,11 @@ async function verifyUpi(userId, { vpa }, req) {
     isDefault: count === 0,
     isVerified: true,
     status: 'active',
-    metadata: { source: 'manual_vpa' }
+    metadata: {
+      source: 'cgpe_vpa',
+      accountHolderName: cgpeProfile?.accountHolderName || null,
+      transactionId: cgpeProfile?.transactionId || null
+    }
   });
 
   await writeAudit({
@@ -418,12 +453,12 @@ async function verifyUpi(userId, { vpa }, req) {
     action: 'upi_verify',
     targetType: 'UserPaymentMethod',
     targetId: doc._id,
-    meta: { masked: maskVpa(cleaned) },
+    meta: { masked: maskVpa(cleaned), holder: cgpeProfile?.accountHolderName },
     req
   });
 
   emitUserPayment(userId, { type: 'instrument_added', method: toPublicMethod(doc) });
-  return { method: toPublicMethod(doc), idempotent: false };
+  return { method: toPublicMethod(doc), idempotent: false, profile: cgpeProfile };
 }
 
 async function setDefault(userId, methodId, { otp } = {}, req) {

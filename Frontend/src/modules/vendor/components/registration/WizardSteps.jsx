@@ -8,6 +8,10 @@ import api from '../../../../services/api';
 import ValidatedInput from '../../../../components/common/ValidatedInput';
 import { validators } from '../../../../utils/validationUtils';
 import { sendOTP, verifyLogin } from '../../services/authService';
+import GstVerificationPanel from '../../../../components/gst/GstVerificationPanel';
+import CinVerificationPanel from '../../../../components/cin/CinVerificationPanel';
+import UpiVerificationPanel from '../../../../components/verification/UpiVerificationPanel';
+import LocationDetectorPanel from '../../../../components/verification/LocationDetectorPanel';
 
 const OTP_RESEND_SECONDS = 45;
 
@@ -455,8 +459,26 @@ export const Step4BankDetails = ({ data, updateData }) => {
             <input type="text" className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72]" value={data.ifscCode || ''} onChange={e => updateData({ ifscCode: e.target.value.toUpperCase() })} disabled={data.bankStatus === 'verified'} placeholder="HDFC0001234" />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">UPI ID (Optional)</label>
-            <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.upiId || ''} onChange={e => updateData({ upiId: e.target.value })} disabled={data.bankStatus === 'verified'} placeholder="vendor@upi" />
+            <UpiVerificationPanel
+              value={data.upiId || ''}
+              onChange={(upiId) => updateData({ upiId, upiVerified: false, upiProfile: null })}
+              mobile={data.mobile || ''}
+              entityType="vendor"
+              entityId={data.vendorId || null}
+              required={false}
+              profile={data.upiProfile || null}
+              accountHolderName={data.accountHolderName || ''}
+              onAccountHolderChange={(name) => updateData({ accountHolderName: name })}
+              onVerified={(fields, meta) => {
+                updateData({
+                  upiId: fields.vpa || data.upiId,
+                  accountHolderName: fields.accountHolderName || fields.mobileLinkedName || data.accountHolderName,
+                  upiProfile: fields,
+                  upiVerificationId: meta.verificationId,
+                  upiVerified: true
+                });
+              }}
+            />
           </div>
 
           <div className="pt-2">
@@ -510,19 +532,99 @@ export const Step5Review = ({ data }) => (
 
 // --- New Dynamic Steps ---
 
-export const StepBusinessInfo = ({ data, updateData }) => (
+export const StepBusinessInfo = ({ data, updateData }) => {
+  const gstLocked = Boolean(data.gstVerificationLocked && data.gstin);
+  const cinLocked = Boolean(data.cinVerificationLocked && data.cinNumber);
+  const requiresCin = /private|public|llp/i.test(String(data.incorporationType || ''));
+
+  return (
   <div className="space-y-4 animate-fade-in">
     <h3 className="text-xl font-bold">Business Information</h3>
-    <p className="text-gray-500 text-sm mb-4">Please provide your registered business details.</p>
-    
+    <p className="text-gray-500 text-sm mb-4">Verify GSTIN and CIN (for incorporated companies) to auto-fill MCA / portal details.</p>
+
+    <GstVerificationPanel
+      value={data.gstin || ''}
+      onChange={(gstin) => updateData({ gstin, gstVerificationLocked: false, gstProfile: null })}
+      entityType="vendor"
+      entityId={data.vendorId || data.entityId || null}
+      expectedPan={data.panNumber || ''}
+      required={false}
+      profile={data.gstProfile || null}
+      onVerified={(fields, meta) => {
+        updateData({
+          gstin: fields.gstin,
+          companyName: fields.legalName || data.companyName,
+          businessName: fields.legalName || fields.tradeName || data.businessName,
+          panNumber: fields.pan || data.panNumber,
+          officeAddress: fields.businessAddress || data.officeAddress,
+          state: fields.state || data.state,
+          pincode: fields.pincode || data.pincode,
+          gstProfile: fields,
+          gstVerificationId: meta.verificationId,
+          gstVerificationLocked: meta.locked !== false,
+          gstVerified: true
+        });
+      }}
+    />
+
+    <CinVerificationPanel
+      value={data.cinNumber || data.cin || ''}
+      onChange={(cinNumber) =>
+        updateData({
+          cinNumber,
+          cin: cinNumber,
+          cinVerificationLocked: false,
+          cinProfile: null,
+          cinVerified: false
+        })
+      }
+      entityType="vendor"
+      entityId={data.vendorId || data.entityId || null}
+      required={requiresCin}
+      profile={data.cinProfile || null}
+      onVerified={(fields, meta) => {
+        updateData({
+          cinNumber: fields.cin,
+          cin: fields.cin,
+          companyName: fields.companyName || data.companyName,
+          officeAddress: fields.registeredAddress || data.officeAddress,
+          state: fields.state || data.state,
+          pincode: fields.pincode || data.pincode,
+          incorporationType:
+            /private/i.test(String(fields.companyClass || fields.companyType || ''))
+              ? 'Private Limited'
+              : /llp/i.test(String(fields.companyType || ''))
+                ? 'LLP'
+                : data.incorporationType,
+          cinProfile: fields,
+          cinVerificationId: meta.verificationId,
+          cinVerificationLocked: meta.locked !== false,
+          cinVerified: true
+        });
+      }}
+    />
+
     <div>
       <label className="block text-sm font-medium mb-1">Company / Legal Name</label>
-      <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.companyName || ''} onChange={e => updateData({ companyName: e.target.value })} placeholder="e.g. Acme Services Pvt Ltd" />
+      <input
+        type="text"
+        className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72] disabled:bg-gray-50"
+        value={data.companyName || ''}
+        onChange={e => updateData({ companyName: e.target.value })}
+        placeholder="e.g. Acme Services Pvt Ltd"
+        disabled={gstLocked || cinLocked}
+        readOnly={gstLocked || cinLocked}
+      />
     </div>
     
     <div>
       <label className="block text-sm font-medium mb-1">Incorporation Type</label>
-      <select className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-[#0D8A72]" value={data.incorporationType || 'Proprietorship'} onChange={e => updateData({ incorporationType: e.target.value })}>
+      <select
+        className="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-[#0D8A72] disabled:bg-gray-50"
+        value={data.incorporationType || data.gstProfile?.constitutionOfBusiness || 'Proprietorship'}
+        onChange={e => updateData({ incorporationType: e.target.value })}
+        disabled={gstLocked && Boolean(data.gstProfile?.constitutionOfBusiness)}
+      >
         <option value="Proprietorship">Proprietorship</option>
         <option value="Partnership">Partnership</option>
         <option value="LLP">LLP</option>
@@ -533,23 +635,67 @@ export const StepBusinessInfo = ({ data, updateData }) => (
     <div className="grid grid-cols-2 gap-4">
       <div>
         <label className="block text-sm font-medium mb-1">PAN Number</label>
-        <input type="text" className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72]" value={data.panNumber || ''} onChange={e => updateData({ panNumber: e.target.value })} placeholder="ABCDE1234F" />
+        <input
+          type="text"
+          className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72] disabled:bg-gray-50"
+          value={data.panNumber || ''}
+          onChange={e => updateData({ panNumber: e.target.value })}
+          placeholder="ABCDE1234F"
+          disabled={gstLocked && Boolean(data.gstProfile?.pan)}
+          readOnly={gstLocked && Boolean(data.gstProfile?.pan)}
+        />
       </div>
       <div>
-        <label className="block text-sm font-medium mb-1">GSTIN (Optional for Proprietors)</label>
-        <input type="text" className="w-full p-3 border rounded-xl uppercase focus:ring-2 focus:ring-[#0D8A72]" value={data.gstin || ''} onChange={e => updateData({ gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" />
+        <label className="block text-sm font-medium mb-1">Taxpayer Type</label>
+        <input
+          type="text"
+          className="w-full p-3 border rounded-xl bg-gray-50 text-gray-700"
+          value={data.gstProfile?.taxpayerType || data.taxpayerType || '—'}
+          readOnly
+        />
       </div>
     </div>
 
     <div>
       <label className="block text-sm font-medium mb-1">Office Address</label>
-      <textarea className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" rows="2" value={data.officeAddress || ''} onChange={e => updateData({ officeAddress: e.target.value })} placeholder="Full address" />
+      <LocationDetectorPanel
+        entityType="vendor"
+        purpose="office"
+        onDetected={(fields) => {
+          const a = fields.address || {};
+          updateData({
+            officeAddress: fields.fullAddress || fields.displayName || data.officeAddress,
+            city: a.city || data.city,
+            state: a.state || data.state,
+            pincode: a.pincode || data.pincode,
+            latitude: fields.latitude,
+            longitude: fields.longitude,
+            locationProfile: fields
+          });
+        }}
+      />
+      <textarea
+        className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72] disabled:bg-gray-50 mt-2"
+        rows="2"
+        value={data.officeAddress || ''}
+        onChange={e => updateData({ officeAddress: e.target.value })}
+        placeholder="Full address"
+        disabled={gstLocked && Boolean(data.gstProfile?.businessAddress)}
+        readOnly={gstLocked && Boolean(data.gstProfile?.businessAddress)}
+      />
     </div>
     
     <div className="grid grid-cols-3 gap-4">
       <div className="col-span-1">
         <label className="block text-sm font-medium mb-1">Pincode</label>
-        <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.pincode || ''} onChange={e => updateData({ pincode: e.target.value })} />
+        <input
+          type="text"
+          className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72] disabled:bg-gray-50"
+          value={data.pincode || ''}
+          onChange={e => updateData({ pincode: e.target.value })}
+          disabled={gstLocked && Boolean(data.gstProfile?.pincode)}
+          readOnly={gstLocked && Boolean(data.gstProfile?.pincode)}
+        />
       </div>
       <div className="col-span-1">
         <label className="block text-sm font-medium mb-1">City</label>
@@ -557,11 +703,19 @@ export const StepBusinessInfo = ({ data, updateData }) => (
       </div>
       <div className="col-span-1">
         <label className="block text-sm font-medium mb-1">State</label>
-        <input type="text" className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72]" value={data.state || ''} onChange={e => updateData({ state: e.target.value })} />
+        <input
+          type="text"
+          className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-[#0D8A72] disabled:bg-gray-50"
+          value={data.state || ''}
+          onChange={e => updateData({ state: e.target.value })}
+          disabled={gstLocked && Boolean(data.gstProfile?.state)}
+          readOnly={gstLocked && Boolean(data.gstProfile?.state)}
+        />
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export const StepChooseModel = ({ data, updateData }) => {
   const models = data.models || [];

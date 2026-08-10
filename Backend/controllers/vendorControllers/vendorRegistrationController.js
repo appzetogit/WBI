@@ -22,6 +22,16 @@ const {
   buildKycSnapshot,
   syncVendorComplianceFromKyc
 } = require('../../services/vendorOnboardingKyc.service');
+const {
+  requireSuccessfulGstVerification,
+  buildEntityGstPayload
+} = require('../../services/gstVerification.service');
+const { normalizeGstin, isValidGstinFormat } = require('../../utils/gst.util');
+const {
+  requireSuccessfulCinVerification,
+  buildEntityCinPayload
+} = require('../../services/cinVerification.service');
+const { normalizeCin, isValidCinFormat } = require('../../utils/cin.util');
 
 async function resolveOnboardingVendor(req, res, { requireAuth = false } = {}) {
   const authId = req.user?.id || req.user?._id;
@@ -66,29 +76,82 @@ const getConfig = async (req, res) => {
 
 const updateBusinessDetails = async (req, res) => {
   try {
-    // Expect req.user.id to be set by auth middleware
     const vendorId = req.user?.id || req.body.vendorId;
     const vendor = await Vendor.findById(vendorId);
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
 
-    const { companyName, incorporationType, gstin, panNumber, panUrl, officeAddress, city, state, pincode, latitude, longitude } = req.body;
-    
-    vendor.businessName = companyName;
+    const {
+      companyName,
+      incorporationType,
+      gstin,
+      panNumber,
+      panUrl,
+      officeAddress,
+      city,
+      state,
+      pincode,
+      latitude,
+      longitude,
+      gstVerificationId
+    } = req.body;
+
     vendor.incorporationType = incorporationType;
-    vendor.gstin = gstin;
+    vendor.businessName = companyName;
     vendor.pan = { number: panNumber, document: panUrl };
+
+    if (gstin) {
+      const normalized = normalizeGstin(gstin);
+      if (!isValidGstinFormat(normalized)) {
+        return res.status(400).json({
+          success: false,
+          code: 'GST_INVALID_FORMAT',
+          message: 'Invalid GSTIN format'
+        });
+      }
+      try {
+        const { record, profile } = await requireSuccessfulGstVerification({
+          gstin: normalized,
+          verificationId: gstVerificationId || null,
+          entityType: 'vendor',
+          entityId: vendor._id
+        });
+        vendor.gstin = normalized;
+        vendor.businessName = profile.legalName || companyName || vendor.businessName;
+        vendor.gstVerification = buildEntityGstPayload(profile, record._id);
+        vendor.compliance = vendor.compliance || {};
+        vendor.compliance.gstVerified = true;
+        if (profile.pan) {
+          vendor.pan = {
+            number: profile.pan,
+            document: panUrl || vendor.pan?.document
+          };
+        }
+      } catch (gstErr) {
+        return res.status(gstErr.statusCode || 422).json({
+          success: false,
+          code: gstErr.code,
+          message: gstErr.message
+        });
+      }
+    } else {
+      vendor.gstin = null;
+    }
+
     vendor.address = {
       fullAddress: officeAddress,
-      city, state, pincode,
-      lat: latitude, lng: longitude
+      city,
+      state,
+      pincode,
+      lat: latitude,
+      lng: longitude
     };
     if (longitude && latitude) {
       vendor.geoLocation = { type: 'Point', coordinates: [longitude, latitude] };
     }
-    
+
     vendor.onboarding.currentStep = 2;
     if (!vendor.onboarding.completedSteps.includes(1)) vendor.onboarding.completedSteps.push(1);
-    
+
     await vendor.save();
     res.status(200).json({ success: true, message: 'Business details updated', vendor });
   } catch (error) {
@@ -282,7 +345,7 @@ const submitApplication = async (req, res) => {
         accountHolderName, accountNumber, ifscCode, upiId,
         workingCity, latitude, longitude, bankStatus, aadhaarVerified,
         serviceDocuments, brandName, website, companyDescription, registeredAddress,
-        yearEstablished, authorizedPerson
+        yearEstablished, authorizedPerson, gstVerificationId, cinNumber, cinVerificationId
       } = req.body;
 
       if (!ownerName || !mobile) {
@@ -330,7 +393,7 @@ const submitApplication = async (req, res) => {
       vendor.phone = normalizedPhone || mobile;
       vendor.isPhoneVerified = true;
       vendor.businessName = companyName;
-      vendor.gstin = gstin;
+      vendor.gstin = gstin ? normalizeGstin(gstin) : null;
       vendor.pan = { number: panNumber, document: panUrl };
       vendor.incorporationType = incorporationType || 'Proprietorship';
       vendor.address = { fullAddress: officeAddress, city, state, pincode, lat: latitude, lng: longitude };
@@ -339,6 +402,75 @@ const submitApplication = async (req, res) => {
       vendor.serviceRadiusKm = serviceRadiusKm || 10;
       if (bankStatus === 'verified') vendor.bankStatus = 'verified';
       vendor.kycStatus = 'pending';
+
+      // Live GST verification required whenever GSTIN is supplied or Project model is used
+      const requiresGst =
+        Boolean(vendor.gstin) ||
+        (Array.isArray(models) && models.includes('PROJECT')) ||
+        process.env.GST_REQUIRE_VENDOR === 'true';
+      if (requiresGst) {
+        if (!vendor.gstin || !isValidGstinFormat(vendor.gstin)) {
+          return res.status(400).json({
+            success: false,
+            code: 'GST_REQUIRED',
+            message: 'A valid GSTIN is required for this vendor type. Please verify GST before submitting.'
+          });
+        }
+        try {
+          const { record, profile } = await requireSuccessfulGstVerification({
+            gstin: vendor.gstin,
+            verificationId: gstVerificationId || null,
+            entityType: 'unbound'
+          });
+          vendor.businessName = profile.legalName || companyName || vendor.businessName;
+          if (profile.pan) vendor.pan = { number: profile.pan, document: panUrl };
+          vendor.gstVerification = buildEntityGstPayload(profile, record._id);
+          vendor.compliance = vendor.compliance || {};
+          vendor.compliance.gstVerified = true;
+          // bind after vendor id known
+          vendor._pendingGstVerificationId = record._id;
+        } catch (gstErr) {
+          return res.status(gstErr.statusCode || 422).json({
+            success: false,
+            code: gstErr.code || 'GST_NOT_VERIFIED',
+            message: gstErr.message
+          });
+        }
+      }
+
+      // MCA CIN: required for Pvt Ltd / Public Ltd / LLP, or when cinNumber supplied
+      const needsCin =
+        Boolean(cinNumber && String(cinNumber).trim()) ||
+        /private|public|llp/i.test(String(incorporationType || '')) ||
+        process.env.CIN_REQUIRE_VENDOR === 'true';
+      if (needsCin) {
+        const normalizedCin = normalizeCin(cinNumber);
+        if (!isValidCinFormat(normalizedCin)) {
+          return res.status(400).json({
+            success: false,
+            code: 'CIN_REQUIRED',
+            message: 'A valid CIN is required for this incorporation type. Please verify CIN before submitting.'
+          });
+        }
+        try {
+          const { record, profile } = await requireSuccessfulCinVerification({
+            cinNumber: normalizedCin,
+            verificationId: cinVerificationId || null,
+            entityType: 'unbound'
+          });
+          vendor.cin = normalizedCin;
+          vendor.cinNumber = normalizedCin;
+          vendor.businessName = profile.companyName || vendor.businessName;
+          vendor.cinVerification = buildEntityCinPayload(profile, record._id);
+          vendor._pendingCinVerificationId = record._id;
+        } catch (cinErr) {
+          return res.status(cinErr.statusCode || 422).json({
+            success: false,
+            code: cinErr.code || 'CIN_NOT_VERIFIED',
+            message: cinErr.message
+          });
+        }
+      }
 
       if (companyDescription) vendor.companyDescription = companyDescription;
       if (website) vendor.website = website;
@@ -397,6 +529,31 @@ const submitApplication = async (req, res) => {
       // Basic init
       vendor.onboarding = { status: 'SUBMITTED', progressPercentage: 100 };
       await vendor.save();
+
+      if (vendor.gstVerification?.verificationId || vendor._pendingGstVerificationId) {
+        try {
+          await requireSuccessfulGstVerification({
+            gstin: vendor.gstin,
+            verificationId: vendor.gstVerification?.verificationId || vendor._pendingGstVerificationId,
+            entityType: 'vendor',
+            entityId: vendor._id
+          });
+        } catch (bindErr) {
+          console.warn('[VENDOR_REGISTER] GST bind warning:', bindErr.message);
+        }
+      }
+      if (vendor.cinVerification?.verificationId || vendor._pendingCinVerificationId) {
+        try {
+          await requireSuccessfulCinVerification({
+            cinNumber: vendor.cin || vendor.cinNumber,
+            verificationId: vendor.cinVerification?.verificationId || vendor._pendingCinVerificationId,
+            entityType: 'vendor',
+            entityId: vendor._id
+          });
+        } catch (bindErr) {
+          console.warn('[VENDOR_REGISTER] CIN bind warning:', bindErr.message);
+        }
+      }
 
       if (serviceDocuments && typeof serviceDocuments === 'object') {
         const entries = Object.entries(serviceDocuments).filter(([, url]) => !!url);

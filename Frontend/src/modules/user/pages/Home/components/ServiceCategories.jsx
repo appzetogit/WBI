@@ -1,12 +1,12 @@
 import React, { useMemo } from 'react';
 
 const HARDCODED_CATEGORIES = [
-  { id: 'ac', title: 'AC Repair', slug: 'ac-repair', icon: '/icones/Ac.jpeg' },
-  { id: 'wm', title: 'Washing Machine', slug: 'washing-machine', icon: '/icones/electric.jpeg' },
-  { id: 'plumb', title: 'Plumbing', slug: 'plumbing', icon: '/icones/water.jpeg' },
-  { id: 'cctv', title: 'CCTV Camera', slug: 'cctv-camera', icon: '/icones/camera.jpeg' },
+  { id: 'ac', title: 'AC Repair', slug: 'ac-repair', icon: '/icones/Ac.jpeg', isService: true },
+  { id: 'wm', title: 'Washing Machine', slug: 'washing-machine-repair', icon: '/icones/electric.jpeg', isService: true },
+  { id: 'plumb', title: 'Plumbing', slug: 'plumbing', icon: '/icones/water.jpeg', isService: true },
+  { id: 'cctv', title: 'CCTV Camera', slug: 'cctv', icon: '/icones/camera.jpeg' },
   { id: 'ro', title: 'RO & Purifier', slug: 'ro-purifier', icon: '/icones/null.jpeg' },
-  { id: 'repair', title: 'Home Repair', slug: 'home-repair', icon: '/icones/repair.jpeg' },
+  { id: 'repair', title: 'Home Repair', slug: 'home-maintenance', icon: '/icones/repair.jpeg', isService: true },
   { id: 'net', title: 'Networking', slug: 'networking', icon: '/icones/wifi.jpeg' },
 ];
 
@@ -25,15 +25,13 @@ const ServiceCategories = React.memo(({ categories = [], onCategoryClick, onSeeA
     }
 
     if (categories && categories.length > 0) {
-      const keywords = item.title.toLowerCase().split(' ');
-      const matched = categories.find(c => {
-        const dbTitle = (c.title || c.name || '').toLowerCase();
-        const dbSlug = (c.slug || '').toLowerCase();
-        return keywords.some(kw => kw.length > 2 && (dbTitle.includes(kw) || dbSlug.includes(kw)));
-      });
+      const matched = categories.find(c => c.slug === item.slug || c.id === item.id);
 
       if (matched) {
-        onCategoryClick?.(matched);
+        onCategoryClick?.({
+          ...matched,
+          isService: item.isService || matched.isService
+        });
         return;
       }
     }

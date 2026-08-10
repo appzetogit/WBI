@@ -4,6 +4,16 @@ const B2BUser = require('../../models/B2BUser');
 const B2BRole = require('../../models/B2BRole');
 const { generateTokenPair } = require('../../utils/tokenService');
 const bcrypt = require('bcryptjs');
+const {
+  requireSuccessfulGstVerification,
+  buildEntityGstPayload
+} = require('../../services/gstVerification.service');
+const { normalizeGstin, isValidGstinFormat } = require('../../utils/gst.util');
+const {
+  requireSuccessfulCinVerification,
+  buildEntityCinPayload
+} = require('../../services/cinVerification.service');
+const { normalizeCin, isValidCinFormat } = require('../../utils/cin.util');
 
 const ensureDefaultRoles = async (companyId) => {
   const defaults = [
@@ -101,15 +111,77 @@ const registerCompany = async (req, res) => {
       email,
       phone,
       password,
-      documents
+      documents,
+      gstVerificationId,
+      cinVerificationId
     } = req.body;
+
+    const normalizedGst = normalizeGstin(gstNumber);
+    if (!normalizedGst || !isValidGstinFormat(normalizedGst)) {
+      return res.status(400).json({
+        success: false,
+        code: 'GST_REQUIRED',
+        message: 'A valid GSTIN is required for B2B company registration'
+      });
+    }
+
+    let gstVerify;
+    try {
+      gstVerify = await requireSuccessfulGstVerification({
+        gstin: normalizedGst,
+        verificationId: gstVerificationId || null,
+        entityType: 'unbound'
+      });
+    } catch (gstErr) {
+      return res.status(gstErr.statusCode || 422).json({
+        success: false,
+        code: gstErr.code || 'GST_NOT_VERIFIED',
+        message: gstErr.message || 'Please verify your GSTIN before registering'
+      });
+    }
+
+    const profile = gstVerify.profile || {};
+    let cinVerify = null;
+    let normalizedCin = null;
+    const cinProvided = Boolean(cinNumber && String(cinNumber).trim());
+    if (cinProvided || process.env.CIN_REQUIRE_B2B === 'true') {
+      normalizedCin = normalizeCin(cinNumber);
+      if (!isValidCinFormat(normalizedCin)) {
+        return res.status(400).json({
+          success: false,
+          code: 'CIN_INVALID_FORMAT',
+          message: 'A valid CIN is required. Example: U72900MH2019PTC123456'
+        });
+      }
+      try {
+        cinVerify = await requireSuccessfulCinVerification({
+          cinNumber: normalizedCin,
+          verificationId: cinVerificationId || null,
+          entityType: 'unbound'
+        });
+      } catch (cinErr) {
+        return res.status(cinErr.statusCode || 422).json({
+          success: false,
+          code: cinErr.code || 'CIN_NOT_VERIFIED',
+          message: cinErr.message || 'Please verify your CIN with MCA before registering'
+        });
+      }
+    }
+
+    const cinProfile = cinVerify?.profile || {};
+    const resolvedCompanyName =
+      companyName || cinProfile.companyName || profile.legalName || profile.tradeName;
+    const resolvedPan = panNumber || profile.pan;
+    const resolvedAddress =
+      companyAddress || cinProfile.registeredAddress || profile.businessAddress;
 
     // 1. Check for duplicates dynamically
     const orConditions = [];
     if (email) orConditions.push({ email: email.toLowerCase().trim() });
     if (phone) orConditions.push({ phone: phone.trim() });
-    if (gstNumber) orConditions.push({ gstNumber: gstNumber.trim() });
-    if (panNumber) orConditions.push({ panNumber: panNumber.trim() });
+    if (normalizedGst) orConditions.push({ gstNumber: normalizedGst });
+    if (resolvedPan) orConditions.push({ panNumber: String(resolvedPan).trim().toUpperCase() });
+    if (normalizedCin) orConditions.push({ cinNumber: normalizedCin });
 
     if (orConditions.length > 0) {
       const existingCompany = await B2BCompany.findOne({ $or: orConditions });
@@ -121,10 +193,13 @@ const registerCompany = async (req, res) => {
         if (phone && existingCompany.phone === phone.trim()) {
           return res.status(400).json({ success: false, message: 'A B2B company is already registered with this phone number' });
         }
-        if (gstNumber && existingCompany.gstNumber === gstNumber.trim()) {
-          return res.status(400).json({ success: false, message: 'A B2B company is already registered with this GSTIN' });
+        if (existingCompany.gstNumber === normalizedGst) {
+          return res.status(400).json({ success: false, code: 'GST_DUPLICATE', message: 'A B2B company is already registered with this GSTIN' });
         }
-        if (panNumber && existingCompany.panNumber === panNumber.trim()) {
+        if (normalizedCin && existingCompany.cinNumber === normalizedCin) {
+          return res.status(400).json({ success: false, code: 'CIN_DUPLICATE', message: 'A B2B company is already registered with this CIN' });
+        }
+        if (resolvedPan && existingCompany.panNumber === String(resolvedPan).trim().toUpperCase()) {
           return res.status(400).json({ success: false, message: 'A B2B company is already registered with this PAN' });
         }
         return res.status(400).json({ success: false, message: 'A B2B company is already registered with these details' });
@@ -144,15 +219,15 @@ const registerCompany = async (req, res) => {
       uploadedAt: new Date()
     }));
 
-    // 4. Create company record
-    const company = await B2BCompany.create({
-      companyName,
-      gstNumber,
-      panNumber,
+    // 4. Create company record (locked GST + CIN snapshots)
+    const companyCreate = {
+      companyName: resolvedCompanyName,
+      gstNumber: normalizedGst,
+      panNumber: resolvedPan,
       tanNumber,
-      cinNumber: cinNumber || null,
+      cinNumber: normalizedCin || null,
       logoUrl: logoUrl || null,
-      companyAddress,
+      companyAddress: resolvedAddress,
       billingAddress,
       branches: branches || [],
       authorizedPerson,
@@ -162,8 +237,46 @@ const registerCompany = async (req, res) => {
       documents: companyDocs,
       verificationStatus: 'pending',
       isActive: true,
-      walletBalance: 0
-    });
+      walletBalance: 0,
+      gstVerification: buildEntityGstPayload(
+        { ...profile, gstin: normalizedGst },
+        gstVerify.record._id,
+        gstVerify.record.verificationStatus === 'admin_approved' ? 'admin_approved' : 'verified'
+      )
+    };
+    if (cinVerify) {
+      companyCreate.cinVerification = buildEntityCinPayload(
+        { ...cinProfile, cin: normalizedCin },
+        cinVerify.record._id,
+        cinVerify.record.verificationStatus === 'admin_approved' ? 'admin_approved' : 'verified'
+      );
+    }
+
+    const company = await B2BCompany.create(companyCreate);
+
+    // Bind unbound verification to the new company
+    try {
+      await requireSuccessfulGstVerification({
+        gstin: normalizedGst,
+        verificationId: gstVerify.record._id,
+        entityType: 'b2b',
+        entityId: company._id
+      });
+    } catch (bindErr) {
+      console.warn('[B2B_REGISTER] GST bind warning:', bindErr.message);
+    }
+    if (cinVerify) {
+      try {
+        await requireSuccessfulCinVerification({
+          cinNumber: normalizedCin,
+          verificationId: cinVerify.record._id,
+          entityType: 'b2b',
+          entityId: company._id
+        });
+      } catch (bindErr) {
+        console.warn('[B2B_REGISTER] CIN bind warning:', bindErr.message);
+      }
+    }
 
     // Seed default roles and create main Company Admin B2BUser profile
     await ensureDefaultRoles(company._id);

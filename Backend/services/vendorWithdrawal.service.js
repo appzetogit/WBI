@@ -188,20 +188,37 @@ async function verifyBankAccount(vendorId, bankId) {
   if (!bank) throw Object.assign(new Error('Bank account not found'), { status: 404 });
 
   if (bank.method === 'upi') {
-    // UPI handle format check; full VPA resolve depends on provider
-    if (!/^[a-zA-Z0-9.\-_]{2,}@[a-zA-Z]{2,}$/.test(bank.upiId || '')) {
+    const { verifyVpa } = require('./upiVerification.service');
+    try {
+      const result = await verifyVpa({
+        vpa: bank.upiId,
+        entityType: 'vendor',
+        entityId: vendorId,
+        actorType: 'vendor',
+        actorId: vendorId,
+        bankId: bank._id
+      });
+      bank.verificationStatus = 'verified';
+      bank.pennyDropStatus = 'not_required';
+      bank.verifiedAccountName =
+        result.profile?.accountHolderName || bank.accountHolderName;
+      bank.accountHolderName =
+        result.profile?.accountHolderName || bank.accountHolderName;
+      bank.verifiedAt = new Date();
+      bank.providerRef = result.profile?.transactionId || String(result.verification._id);
+      bank.rejectionReason = null;
+      await bank.save();
+      return bank;
+    } catch (e) {
       bank.verificationStatus = 'rejected';
       bank.pennyDropStatus = 'failed';
-      bank.rejectionReason = 'Invalid UPI ID format';
+      bank.rejectionReason = e.message || 'UPI verification failed';
       await bank.save();
-      throw Object.assign(new Error('Invalid UPI ID format'), { status: 400 });
+      throw Object.assign(new Error(e.message || 'UPI verification failed'), {
+        status: e.statusCode || 400,
+        code: e.code
+      });
     }
-    bank.verificationStatus = 'verified';
-    bank.pennyDropStatus = 'success';
-    bank.verifiedAccountName = bank.accountHolderName;
-    bank.verifiedAt = new Date();
-    await bank.save();
-    return bank;
   }
 
   const accountNumber = decrypt(bank.accountNumberEncrypted);
@@ -320,6 +337,38 @@ async function createWithdrawalRequest(vendorId, {
     throw Object.assign(new Error('Bank withdrawals are disabled'), { status: 400 });
   }
 
+  const bank = await VendorBank.findOne({ _id: bankAccountId, vendorId });
+  if (!bank) throw Object.assign(new Error('Select a linked bank / UPI account'), { status: 400 });
+
+  // Live UPI verify required when withdrawing to UPI (or bank record is method=upi)
+  if (method === 'upi' || bank.method === 'upi') {
+    if (process.env.UPI_REQUIRE_FOR_WITHDRAWAL !== 'false') {
+      const { requireVerifiedVpa } = require('./upiVerification.service');
+      try {
+        await requireVerifiedVpa({ vpa: bank.upiId });
+      } catch (e) {
+        // Attempt live re-verify once
+        try {
+          const { verifyVpa } = require('./upiVerification.service');
+          await verifyVpa({
+            vpa: bank.upiId,
+            entityType: 'vendor',
+            entityId: vendorId,
+            actorType: 'vendor',
+            actorId: vendorId,
+            bankId: bank._id,
+            forceRefresh: true
+          });
+        } catch (re) {
+          throw Object.assign(new Error(re.message || 'UPI must be verified before withdrawal'), {
+            status: re.statusCode || 422,
+            code: re.code || 'UPI_NOT_VERIFIED'
+          });
+        }
+      }
+    }
+  }
+
   const daily = await getDailyWithdrawn(vendorId);
   if (daily + amt > config.dailyWithdrawalLimit) {
     throw Object.assign(new Error('Daily withdrawal limit exceeded'), { status: 400 });
@@ -329,9 +378,10 @@ async function createWithdrawalRequest(vendorId, {
   const existing = await Withdrawal.findOne({ idempotencyKey: key });
   if (existing) return { withdrawal: existing, reused: true };
 
-  const bank = await VendorBank.findOne({ _id: bankAccountId, vendorId });
-  if (!bank) throw Object.assign(new Error('Select a linked bank / UPI account'), { status: 400 });
-  if (config.requireVerifiedBank && bank.verificationStatus !== 'verified') {
+  // reload bank after possible verify
+  const bankFresh = await VendorBank.findOne({ _id: bankAccountId, vendorId });
+  if (!bankFresh) throw Object.assign(new Error('Select a linked bank / UPI account'), { status: 400 });
+  if (config.requireVerifiedBank && bankFresh.verificationStatus !== 'verified') {
     throw Object.assign(new Error('Bank account must be verified (penny drop) before withdrawal'), { status: 400 });
   }
 
@@ -346,7 +396,7 @@ async function createWithdrawalRequest(vendorId, {
     );
   }
 
-  const accountNumber = bank.method === 'upi' ? '' : decrypt(bank.accountNumberEncrypted);
+  const accountNumber = bankFresh.method === 'upi' ? '' : decrypt(bankFresh.accountNumberEncrypted);
   const approvalMode = amt <= config.autoApproveMaxAmount ? 'auto' : 'manual';
 
   const session = await mongoose.startSession();
@@ -376,14 +426,14 @@ async function createWithdrawalRequest(vendorId, {
           settlementSchedule: config.settlementSchedule,
           amount: amt,
           status: 'pending',
-          bankAccountId: bank._id,
+          bankAccountId: bankFresh._id,
           bankDetails: {
             accountNumber,
-            accountNumberMasked: bank.accountNumberMasked,
-            ifscCode: bank.ifsc,
-            accountHolderName: bank.accountHolderName,
-            bankName: bank.bankName,
-            upiId: bank.upiId
+            accountNumberMasked: bankFresh.accountNumberMasked,
+            ifscCode: bankFresh.ifsc,
+            accountHolderName: bankFresh.accountHolderName,
+            bankName: bankFresh.bankName,
+            upiId: bankFresh.upiId
           },
           financeTransactionId: txn._id,
           idempotencyKey: key,

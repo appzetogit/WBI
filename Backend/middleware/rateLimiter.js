@@ -72,6 +72,41 @@ const verificationLimiter = rateLimit({
   store: createRedisStore('verify')
 });
 
+/** GST verify — slightly higher limit for multi-step registration UX */
+const gstVerifyLimiter = rateLimit({
+  ...baseOpts,
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.GST_VERIFY_RATE_LIMIT_MAX, 10) || 10,
+  message: { success: false, code: 'GST_RATE_LIMIT', message: 'Too many GST verification attempts. Please wait 15 minutes.' },
+  store: createRedisStore('gst')
+});
+
+/** CIN / MCA verify */
+const cinVerifyLimiter = rateLimit({
+  ...baseOpts,
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.CIN_VERIFY_RATE_LIMIT_MAX, 10) || 10,
+  message: {
+    success: false,
+    code: 'CIN_RATE_LIMIT',
+    message: 'Too many CIN verification attempts. Please wait 15 minutes.'
+  },
+  store: createRedisStore('cin')
+});
+
+/** UPI / Mobile-UPI / Location suite */
+const cgpeSuiteLimiter = rateLimit({
+  ...baseOpts,
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.CGPE_SUITE_RATE_LIMIT_MAX, 10) || 20,
+  message: {
+    success: false,
+    code: 'CGPE_SUITE_RATE_LIMIT',
+    message: 'Too many verification attempts. Please wait 15 minutes.'
+  },
+  store: createRedisStore('cgpe-suite')
+});
+
 /** OTP HTTP — 5 req/hour/IP (Phase 9) */
 const otpLimiter = rateLimit({
   ...baseOpts,
@@ -143,6 +178,9 @@ const engineerActionLimiter = rateLimit({
 });
 
 rateLimiter.verificationLimiter = verificationLimiter;
+rateLimiter.gstVerifyLimiter = gstVerifyLimiter;
+rateLimiter.cinVerifyLimiter = cinVerifyLimiter;
+rateLimiter.cgpeSuiteLimiter = cgpeSuiteLimiter;
 rateLimiter.otpLimiter = otpLimiter;
 rateLimiter.paymentLimiter = paymentLimiter;
 rateLimiter.paymentVerifyLimiter = paymentVerifyLimiter;

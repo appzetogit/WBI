@@ -4,9 +4,10 @@ const https = require('https');
 class CgpeService {
   constructor() {
     this.baseUrl = process.env.CGPE_BASE_URL || process.env.VERIFY_API_BASE_URL || 'https://verify.cgpey.com';
-    this.apiKey = process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY || 'pk_a7e260f3f70602e79d2551b04389bf94';
-    this.clientId = process.env.CGPE_CLIENT_ID || process.env.VERIFY_MERCHANT_ID || '6a226d16b27283a7438b2f44';
-    this.clientSecret = process.env.CGPE_CLIENT_SECRET || process.env.VERIFY_SECRET_KEY || '0949dfd379ce77ab141f9808569d0f451f0afc8b187ac653cb13b2c8965c3c27';
+    // Never hardcode production secrets — set CGPE_* in environment
+    this.apiKey = process.env.CGPE_API_KEY || process.env.VERIFY_API_KEY || '';
+    this.clientId = process.env.CGPE_CLIENT_ID || process.env.VERIFY_MERCHANT_ID || '';
+    this.clientSecret = process.env.CGPE_CLIENT_SECRET || process.env.VERIFY_SECRET_KEY || '';
   }
 
   /**
@@ -93,6 +94,81 @@ class CgpeService {
         'Verification failed due to invalid details or provider error.';
       throw new Error(`Verification Failed: ${errorMessage} (Status: ${error.response?.status || 'Unknown'})`);
     }
+  }
+
+  /**
+   * Live GST verification (CGPE / GSP)
+   * POST /api/v1/verify/gst  body: { gstNumber }  (also accepts { gstin })
+   */
+  async verifyGst(gstin) {
+    const normalized = String(gstin || '').trim().toUpperCase();
+    if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(normalized)) {
+      throw new Error('Invalid GSTIN format. Please enter a valid 15-character GSTIN (e.g., 27ABCDE1234F1Z5).');
+    }
+    // Provider samples use gstNumber; some integrations use gstin — send both
+    return this.makeRequest('/api/v1/verify/gst', {
+      gstNumber: normalized,
+      gstin: normalized
+    });
+  }
+
+  /**
+   * Live CIN / MCA verification (CGPE)
+   * POST /api/v1/verify/cin  body: { cinNumber }  (also accepts { cin })
+   */
+  async verifyCin(cinNumber) {
+    const normalized = String(cinNumber || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (
+      !/^[LU][0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}$/.test(normalized) &&
+      !/^[A-Z]{3}-[0-9]{4}$/.test(normalized)
+    ) {
+      throw new Error('Invalid CIN format. Please enter a valid 21-character CIN (e.g., U72900MH2019PTC123456).');
+    }
+    return this.makeRequest('/api/v1/verify/cin', {
+      cinNumber: normalized,
+      cin: normalized
+    });
+  }
+
+  /**
+   * Live UPI VPA verification
+   * POST /api/v1/verify/upi  { vpa }
+   */
+  async verifyUpi(vpa) {
+    const normalized = String(vpa || '').trim().toLowerCase().replace(/\s+/g, '');
+    if (!/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/.test(normalized)) {
+      throw new Error('Invalid UPI format. Please enter a valid VPA (e.g., name@paytm).');
+    }
+    return this.makeRequest('/api/v1/verify/upi', { vpa: normalized });
+  }
+
+  /**
+   * Mobile → linked UPI lookup
+   * POST /api/v1/verify/mobile-upi  { mobile }
+   */
+  async lookupMobileUpi(mobile) {
+    const digits = String(mobile || '').replace(/\D/g, '').slice(-10);
+    if (!/^[6-9]\d{9}$/.test(digits)) {
+      throw new Error('Invalid mobile format. Enter a valid 10-digit Indian mobile number.');
+    }
+    return this.makeRequest('/api/v1/verify/mobile-upi', { mobile: digits });
+  }
+
+  /**
+   * Reverse geocode
+   * POST /api/v1/verify/location-detector  { latitude, longitude, detailed }
+   */
+  async detectLocation(latitude, longitude, detailed = false) {
+    const lat = Number(latitude);
+    const lng = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error('Invalid coordinates for location detector.');
+    }
+    return this.makeRequest('/api/v1/verify/location-detector', {
+      latitude: lat,
+      longitude: lng,
+      detailed: Boolean(detailed)
+    });
   }
 
   /**
@@ -496,31 +572,107 @@ class CgpeService {
     }
     
     if (endpoint.includes('gst')) {
-      const gstin = (data.gstin || '').toUpperCase();
+      const gstin = String(data.gstin || data.gstNumber || '').toUpperCase();
       if (gstin.endsWith('Z0')) {
         throw new Error('GSTIN not found or inactive');
       }
+      if (gstin.endsWith('Z1')) {
+        throw new Error('GSTIN status is Cancelled');
+      }
+      if (gstin.endsWith('Z2')) {
+        throw new Error('GSTIN status is Suspended');
+      }
+      const pan = gstin.length === 15 ? gstin.slice(2, 12) : null;
+      const stateCode = gstin.slice(0, 2);
       return {
         success: true,
+        message: 'GST verification completed',
         transactionId: `req_gst_${Date.now()}`,
-        status: 'SUCCESS',
-        result: {
-          legal_name: 'ACME ENTERPRISES PRIVATE LIMITED',
-          status: 'Active',
-          gstin
+        statusCode: 200,
+        data: {
+          service: 'GST_VERIFICATION',
+          gstNumber: gstin,
+          gstin,
+          legalName: 'ACME ENTERPRISES PRIVATE LIMITED',
+          tradeName: 'ACME SERVICES',
+          registrationStatus: 'ACTIVE',
+          status: 'ACTIVE',
+          pan,
+          constitutionOfBusiness: 'Private Limited Company',
+          taxpayerType: 'Regular',
+          registrationDate: '01/04/2018',
+          natureOfBusiness: 'Services',
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          stateCode,
+          pradr: {
+            addr: {
+              bnm: 'Business Plaza',
+              st: 'MG Road',
+              loc: 'Commercial Area',
+              dst: 'Sample District',
+              stcd: stateCode,
+              pncd: '400001'
+            }
+          }
         }
       };
     }
 
     if (endpoint.includes('cin')) {
+      const cin = String(data.cinNumber || data.cin || '').toUpperCase();
+      if (cin.endsWith('000000')) {
+        throw new Error('Company not found on MCA records');
+      }
+      if (cin.endsWith('111111')) {
+        throw new Error('Company status is Struck Off');
+      }
       return {
         success: true,
-        transactionId: `req_cin_${Date.now()}`,
-        status: 'SUCCESS',
-        result: {
-          company_name: 'ACME ENTERPRISES PRIVATE LIMITED',
-          status: 'Active',
-          cin: data.cin
+        message: 'CIN verification completed',
+        requestId: `REQ_${Date.now()}_mock`,
+        statusCode: 200,
+        data: {
+          transactionId: `tx_cin_${Date.now()}`,
+          service: 'CIN_VERIFICATION',
+          success: true,
+          status: 'SUCCESS',
+          message: 'CIN verification completed',
+          cin,
+          companyId: cin,
+          companyName: 'ACME TECHNOLOGIES PRIVATE LIMITED',
+          companyType: 'Private',
+          companyMasterData: {
+            cin,
+            company_llp_name: 'ACME TECHNOLOGIES PRIVATE LIMITED',
+            roc_code: 'ROC Mumbai',
+            registration_number: cin.slice(-6),
+            company_category: 'Company limited by shares',
+            class_of_company: 'Private',
+            authorised_capital: '1000000',
+            paid_up_capital: '500000',
+            date_of_incorporation: '2019-05-20',
+            registered_address: '123 MG Road, Andheri, Mumbai, Maharashtra, India, 400053',
+            company_status: 'Active',
+            whether_listed_or_not: 'Unlisted'
+          },
+          presentDirectors: [
+            {
+              din_pan: '01234567',
+              name: 'ROHAN SHARMA',
+              date_of_appointment: '20/05/2019',
+              nationality: 'Indian',
+              gender: 'Male'
+            }
+          ],
+          pastDirectors: [],
+          charges: [],
+          relatedParties: [],
+          allDirectorships: [],
+          chargeable: true,
+          userConsent: true,
+          timestamp: new Date().toISOString(),
+          clientRefNum: `REQ_${Date.now()}_mock`,
+          requestId: `tx_cin_${Date.now()}`
         }
       };
     }
@@ -539,6 +691,95 @@ class CgpeService {
           panNumberMasked: num.slice(0, 2) + 'XXXXX' + num.slice(-3),
           status: 'ACTIVE',
           category: 'INDIVIDUAL'
+        }
+      };
+    }
+
+    if (endpoint.includes('mobile-upi') || endpoint.includes('mobile_upi')) {
+      const mobile = String(data.mobile || '').replace(/\D/g, '').slice(-10);
+      if (mobile.endsWith('0000')) {
+        return {
+          success: true,
+          message: 'Mobile to UPI lookup completed',
+          statusCode: 200,
+          data: {
+            service: 'MOBILE_TO_UPI_VERIFICATION',
+            mobile,
+            mobileLinkedName: null,
+            vpa: null
+          }
+        };
+      }
+      return {
+        success: true,
+        message: 'Mobile to UPI lookup completed',
+        statusCode: 200,
+        data: {
+          service: 'MOBILE_TO_UPI_VERIFICATION',
+          mobile,
+          mobileLinkedName: 'Mock User',
+          vpa: `${mobile}@paytm`,
+          transactionId: `tx_mupi_${Date.now()}`
+        }
+      };
+    }
+
+    if (endpoint.includes('upi') && !endpoint.includes('mobile')) {
+      const vpa = String(data.vpa || '').toLowerCase();
+      if (vpa.includes('invalid@') || vpa.endsWith('@fail')) {
+        throw new Error('UPI ID not found or inactive');
+      }
+      return {
+        success: true,
+        message: 'UPI verification completed',
+        statusCode: 200,
+        transactionId: `tx_upi_${Date.now()}`,
+        data: {
+          service: 'UPI_VERIFICATION',
+          vpa,
+          accountHolderName: 'Mock Account Holder',
+          transactionId: `tx_upi_${Date.now()}`
+        }
+      };
+    }
+
+    if (endpoint.includes('location-detector') || endpoint.includes('location_detector')) {
+      const lat = Number(data.latitude) || 21.2514;
+      const lng = Number(data.longitude) || 81.6296;
+      return {
+        success: true,
+        message: 'Location detector completed',
+        requestId: `REQ_${Date.now()}_mock`,
+        timestamp: new Date().toISOString(),
+        statusCode: 200,
+        data: {
+          transactionId: `tx_loc_${Date.now()}`,
+          service: 'LOCATION_DETECTOR',
+          success: true,
+          status: 'SUCCESS',
+          message: 'Location detected successfully',
+          displayName: 'Raipur, Chhattisgarh, India',
+          latitude: lat,
+          longitude: lng,
+          detailed: Boolean(data.detailed),
+          address: {
+            house: '',
+            road: 'Sample Road',
+            suburb: '',
+            city: 'Raipur',
+            state: 'Chhattisgarh',
+            postcode: '492001',
+            country: 'India',
+            countryCode: 'in',
+            county: '',
+            district: 'Raipur'
+          },
+          osmData: {
+            osmId: 1234567,
+            osmType: 'relation',
+            boundingBox: ['21.15', '81.55', '21.35', '81.75']
+          },
+          clientRefNum: `REQ_${Date.now()}_mock`
         }
       };
     }

@@ -152,6 +152,12 @@ const OneTimeServiceDetail = () => {
       const problemsData = detailRes.data.problems || [];
       setIssues(problemsData);
 
+      // Skip logic for services that don't need brand/problem selection
+      if (!srv.requiresBrand && !srv.requiresProblem) {
+        navigate(`/user/service/${slug}/packages`, { replace: true });
+        return;
+      }
+
       // Auto-preselect 'other' if problems list is empty
       if (problemsData.length === 0 && srv.allowsOtherProblem !== false) {
         setSelectedIssues(['other']);

@@ -17,6 +17,9 @@ import ServiceManagement from '../ServiceManagement';
 import FormBuilder from '../FormBuilder';
 import VendorSupport from './VendorSupport';
 import VendorSettings from './VendorSettings';
+import GstVerificationsAdmin from '../GstVerifications';
+import CinVerificationsAdmin from '../CinVerifications';
+import CgpeSuiteAdmin from '../CgpeSuite';
 import AdminHubTabs from '../../components/layout/AdminHubTabs';
 
 const VENDOR_TABS = [
@@ -32,7 +35,10 @@ const VENDOR_TABS = [
   { to: 'parts-catalog', label: 'Parts' },
   { to: 'project-templates', label: 'Templates', activePrefix: 'project-templates' },
   { to: 'assignment-engine', label: 'Assignment' },
-  { to: 'form-builder', label: 'Forms' }
+  { to: 'form-builder', label: 'Forms' },
+  { to: 'gst-verifications', label: 'GST Verify' },
+  { to: 'cin-verifications', label: 'CIN Verify' },
+  { to: 'cgpe-suite', label: 'CGPE Suite' }
 ];
 
 const Vendors = () => {
@@ -64,6 +70,9 @@ const Vendors = () => {
           <Route path="project-templates/*" element={<ProjectTemplates />} />
           <Route path="assignment-engine" element={<AssignmentConfig />} />
           <Route path="form-builder" element={<FormBuilder />} />
+          <Route path="gst-verifications" element={<GstVerificationsAdmin />} />
+          <Route path="cin-verifications" element={<CinVerificationsAdmin />} />
+          <Route path="cgpe-suite" element={<CgpeSuiteAdmin />} />
         </Routes>
       </motion.div>
     </div>

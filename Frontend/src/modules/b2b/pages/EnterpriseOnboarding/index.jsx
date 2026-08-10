@@ -425,10 +425,60 @@ export default function EnterpriseOnboarding() {
           {step === 14 && (
             <StepBlock title="API verification & documents">
               <div className="flex flex-wrap gap-2 mb-4">
-                <VerifyButton label="Verify GST" status={kyc.gst?.status} onClick={async () => { await verifyGst(form.companyInfo.gstNumber); await load(); }} />
+                <VerifyButton
+                  label="Verify GST"
+                  status={kyc.gst?.status}
+                  onClick={async () => {
+                    const res = await verifyGst(form.companyInfo.gstNumber);
+                    const payload = res?.data?.data || res?.data || {};
+                    const fields = payload.fields || payload.profile || payload.raw || {};
+                    if (fields?.legalName || fields?.gstin) {
+                      setForm((f) => ({
+                        ...f,
+                        companyInfo: {
+                          ...f.companyInfo,
+                          gstNumber: fields.gstin || f.companyInfo.gstNumber,
+                          legalName: fields.legalName || f.companyInfo.legalName,
+                          tradeName: fields.tradeName || f.companyInfo.tradeName,
+                          panNumber: fields.pan || f.companyInfo.panNumber,
+                          address: fields.businessAddress || f.companyInfo.address,
+                          state: fields.state || f.companyInfo.state,
+                          pincode: fields.pincode || f.companyInfo.pincode
+                        }
+                      }));
+                    }
+                    await load();
+                  }}
+                />
                 <VerifyButton label="Verify PAN" status={kyc.pan?.status} onClick={async () => { await verifyPan(form.companyInfo.panNumber); await load(); }} />
                 {form.companyInfo.cinNumber && (
-                  <VerifyButton label="Verify CIN" status={kyc.cin?.status} onClick={async () => { await verifyCin(form.companyInfo.cinNumber); await load(); }} />
+                  <VerifyButton
+                    label="Verify CIN"
+                    status={kyc.cin?.status}
+                    onClick={async () => {
+                      const res = await verifyCin(form.companyInfo.cinNumber);
+                      const payload = res?.data?.data || res?.data || {};
+                      const fields = payload.fields || payload.profile || payload.raw || {};
+                      if (fields?.companyName || fields?.cin) {
+                        setForm((f) => ({
+                          ...f,
+                          companyInfo: {
+                            ...f.companyInfo,
+                            cinNumber: fields.cin || f.companyInfo.cinNumber,
+                            legalName: fields.companyName || f.companyInfo.legalName,
+                            address: fields.registeredAddress || f.companyInfo.address,
+                            state: fields.state || f.companyInfo.state,
+                            pincode: fields.pincode || f.companyInfo.pincode
+                          },
+                          addresses: {
+                            ...f.addresses,
+                            registered: fields.registeredAddress || f.addresses?.registered
+                          }
+                        }));
+                      }
+                      await load();
+                    }}
+                  />
                 )}
               </div>
               <h3 className="font-semibold text-sm mt-4 mb-2">Required documents</h3>

@@ -79,6 +79,10 @@ const getChildRoute = (parentRoute, childName) => {
       "Project OS Templates": "/admin/vendors/project-templates",
       "Project Assignment Engine": "/admin/vendors/assignment-engine",
       "Service Form Builder": "/admin/vendors/form-builder",
+      "GST Verifications": "/admin/vendors/gst-verifications",
+      "CIN Verifications": "/admin/vendors/cin-verifications",
+      "UPI / Location Suite": "/admin/vendors/cgpe-suite",
+      "CGPE Suite": "/admin/vendors/cgpe-suite",
     },
     "/admin/b2b": {
       "Company Approvals": "/admin/b2b/companies",

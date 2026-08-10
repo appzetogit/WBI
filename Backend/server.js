@@ -438,6 +438,10 @@ app.use('/api/admin/dynamic-form-configs', require('./routes/admin-routes/dynami
 
 // Shared routes (e.g. unified forgot password)
 app.use('/api/auth', require('./routes/shared/auth.routes'));
+// GST + CIN (CGPE/GSP) — mounted before worker/engineer verification so paths are claimed first
+app.use('/api/verification', require('./routes/gstVerification.routes'));
+app.use('/api/verification', require('./routes/cinVerification.routes'));
+app.use('/api/verification', require('./routes/cgpeSuiteVerification.routes'));
 app.use('/api/verification', require('./routes/verification.routes'));
 app.use('/api/admin/job-checklist-configs', require('./routes/admin-routes/jobChecklistConfig.routes'));
 app.use('/api/admin', require('./routes/admin-routes/categoryManagement.routes'));

@@ -11,6 +11,10 @@ import toast from 'react-hot-toast';
 import truckImg from '../../../../assets/b2b_warehouse_truck.png';
 import KYCVerificationStep from '../../../../components/kyc/KYCVerificationStep';
 import useRegistrationDraft, { genObjectId } from '../../../../hooks/useRegistrationDraft';
+import GstVerificationPanel from '../../../../components/gst/GstVerificationPanel';
+import CinVerificationPanel from '../../../../components/cin/CinVerificationPanel';
+import { isValidGstinClient, normalizeGstin } from '../../../../services/gstVerificationService';
+import { isValidCinClient, normalizeCin } from '../../../../services/cinVerificationService';
 
 const LoginRegister = ({ defaultTab = 'login' }) => {
   const navigate = useNavigate();
@@ -45,9 +49,15 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
   // Step 1: Company Details
   const [companyName, setCompanyName] = useState('');
   const [gstNumber, setGstNumber] = useState('');
+  const [gstProfile, setGstProfile] = useState(null);
+  const [gstVerificationId, setGstVerificationId] = useState(null);
+  const [gstLocked, setGstLocked] = useState(false);
   const [panNumber, setPanNumber] = useState('');
   const [tanNumber, setTanNumber] = useState('');
   const [cinNumber, setCinNumber] = useState('');
+  const [cinProfile, setCinProfile] = useState(null);
+  const [cinVerificationId, setCinVerificationId] = useState(null);
+  const [cinLocked, setCinLocked] = useState(false);
   const [logoUrl, setLogoUrl] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
   const [companyAddress, setCompanyAddress] = useState('');
@@ -269,6 +279,24 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
         toast.error('Please fill all required company details');
         return;
       }
+      if (!isValidGstinClient(gstNumber)) {
+        toast.error('Enter a valid GSTIN format');
+        return;
+      }
+      if (!gstProfile?.legalName && !gstVerificationId) {
+        toast.error('Please verify your GSTIN before continuing');
+        return;
+      }
+      if (cinNumber) {
+        if (!isValidCinClient(cinNumber)) {
+          toast.error('Enter a valid CIN format');
+          return;
+        }
+        if (!cinProfile?.companyName && !cinVerificationId) {
+          toast.error('Please verify your CIN with MCA before continuing');
+          return;
+        }
+      }
       if (!logoUrl) {
         toast.error('Please upload company logo');
         return;
@@ -330,7 +358,9 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
       email: authEmail,
       phone: authPhone,
       password: authPassword,
-      documents: docsPayload
+      documents: docsPayload,
+      gstVerificationId,
+      cinVerificationId
     };
 
     try {
@@ -478,15 +508,9 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-[#E6F4F2] flex items-center justify-center p-4 lg:p-8 font-sans relative overflow-hidden">
-      {/* Decorative blurred background circles */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-teal-400/20 rounded-full blur-[100px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] bg-blue-400/10 rounded-full blur-[120px] pointer-events-none"></div>
-
-      <div className="w-full max-w-[1400px] grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-10 items-stretch relative z-10">
-        
-        {/* Left Card: Welcome Back & Login / Illustration */}
-        <div className="lg:col-span-5 bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-8 lg:p-12 flex flex-col justify-between min-h-[750px] relative overflow-hidden">
+    <div className="h-screen w-screen font-sans relative flex flex-col lg:flex-row overflow-hidden bg-white">
+      {/* Left Card: Welcome Back & Login / Illustration */}
+      <div className="w-full lg:w-[45%] h-full p-8 lg:p-16 xl:p-20 flex flex-col justify-center relative bg-white overflow-y-auto z-10 shadow-[5px_0_25px_rgba(0,0,0,0.05)]">
           
           <div>
             {/* Header Brand */}
@@ -584,8 +608,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
               </div>
             ) : (
               // Standard Login
-              <div className="animate-fade-in">
-                <h2 className="text-[2.5rem] leading-tight font-black text-slate-900 tracking-tight mb-2">Welcome Back.</h2>
+              <div className="animate-fade-in flex flex-col justify-center flex-grow">
+                <h2 className="text-4xl leading-tight font-extrabold text-slate-900 tracking-tight mb-2">Welcome Back.</h2>
                 <p className="text-slate-500 text-sm font-medium">Sign in to manage your B2B operations.</p>
 
                 {/* Login Form */}
@@ -651,7 +675,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white text-base font-bold h-14 rounded-2xl shadow-[0_8px_20px_rgb(15,23,42,0.15)] flex items-center justify-center gap-2 mt-8 transition-all hover:-translate-y-0.5 active:translate-y-0"
+                    className="w-full bg-[#10AFA5] hover:bg-[#0D9488] disabled:bg-slate-300 text-white text-base font-bold h-14 rounded-2xl shadow-[0_8px_20px_rgba(16,175,165,0.25)] flex items-center justify-center gap-2 mt-8 transition-all hover:-translate-y-0.5 active:translate-y-0"
                   >
                     {loading ? (
                       <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
@@ -727,7 +751,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
         </div>
 
         {/* Right Card: Multi-step Registration Wizard */}
-        <div className="lg:col-span-7 bg-white/80 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-8 lg:p-12 min-h-[750px] flex flex-col justify-between relative overflow-hidden">
+        <div className="w-full lg:w-[55%] h-full bg-slate-50 relative flex flex-col overflow-y-auto">
           {activeTab === 'login' && !isRejectedMode ? (
             // Landing state if activeTab is login: provide quick register wizard introduction
             <>
@@ -757,7 +781,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
             </>
           ) : (
             // Active Registration Wizard
-            <div className="flex flex-col justify-between h-full flex-grow animate-fade-in">
+            <div className="flex flex-col justify-between h-full flex-grow animate-fade-in p-8 lg:p-12 bg-white">
               
               {/* Onboarding Wizard Header */}
               <div>
@@ -789,17 +813,17 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                       return (
                         <div key={step.num} className="flex items-center flex-1 last:flex-initial">
                           <div className="flex flex-col items-center gap-2 relative z-10">
-                            <div className={`h-8 w-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all ${
+                            <div className={`h-10 w-10 rounded-full border-2 flex items-center justify-center text-sm font-bold transition-all duration-300 ${
                               isCompleted 
-                                ? 'bg-[#10AFA5] border-[#10AFA5] text-white shadow-sm' 
+                                ? 'bg-[#10AFA5] border-[#10AFA5] text-white shadow-md shadow-teal-500/20' 
                                 : isCurrent 
-                                  ? 'bg-white border-[#10AFA5] text-[#10AFA5] font-black ring-4 ring-[#10AFA5]/10' 
-                                  : 'bg-white border-gray-200 text-gray-400'
+                                  ? 'bg-white border-2 border-[#10AFA5] text-[#10AFA5] font-black ring-4 ring-[#10AFA5]/15 shadow-sm' 
+                                  : 'bg-white border-slate-200 text-slate-400'
                             }`}>
-                              {isCompleted ? <FiCheck className="w-4 h-4" /> : step.num}
+                              {isCompleted ? <FiCheck className="w-5 h-5" /> : step.num}
                             </div>
-                            <span className={`text-[10px] font-bold absolute top-9 whitespace-nowrap ${
-                              isCurrent ? 'text-[#10AFA5]' : 'text-gray-500'
+                            <span className={`text-[11px] font-bold absolute top-12 whitespace-nowrap tracking-wide ${
+                              isCurrent ? 'text-[#10AFA5]' : 'text-slate-500'
                             }`}>
                               {step.label}
                             </span>
@@ -807,8 +831,8 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                           
                           {/* Join line */}
                           {step.num < 5 && (
-                            <div className="flex-1 h-0.5 mx-2 bg-gray-100 relative">
-                              <div className={`absolute inset-0 bg-[#10AFA5] transition-all duration-300 ${
+                            <div className="flex-1 h-1 mx-3 bg-slate-100 rounded-full relative overflow-hidden">
+                              <div className={`absolute inset-y-0 left-0 bg-[#10AFA5] transition-all duration-500 ease-out ${
                                 isCompleted ? 'w-full' : 'w-0'
                               }`}></div>
                             </div>
@@ -828,6 +852,34 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                       <h3 className="text-sm font-bold text-slate-800 border-l-[3px] border-[#10AFA5] pl-3 uppercase tracking-wider">Company Information</h3>
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <GstVerificationPanel
+                            value={gstNumber}
+                            onChange={(v) => {
+                              setGstNumber(normalizeGstin(v));
+                              setGstProfile(null);
+                              setGstVerificationId(null);
+                              setGstLocked(false);
+                            }}
+                            entityType="b2b"
+                            expectedPan={panNumber}
+                            profile={gstProfile}
+                            required
+                            onVerified={(fields, meta) => {
+                              setGstNumber(fields.gstin || gstNumber);
+                              setGstProfile(fields);
+                              setGstVerificationId(meta.verificationId || null);
+                              setGstLocked(Boolean(meta.locked));
+                              if (fields.legalName) setCompanyName(fields.legalName);
+                              if (fields.pan) setPanNumber(fields.pan);
+                              if (fields.businessAddress) {
+                                setCompanyAddress(fields.businessAddress);
+                                if (sameAsCompanyAddress) setBillingAddress(fields.businessAddress);
+                              }
+                            }}
+                          />
+                        </div>
+
                         <div className="space-y-1.5">
                           <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">Company Name *</label>
                           <input 
@@ -835,18 +887,9 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                             value={companyName}
                             onChange={(e) => setCompanyName(e.target.value)}
                             placeholder="Enter company name"
-                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
-                          />
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">GST Number *</label>
-                          <input 
-                            type="text" 
-                            value={gstNumber}
-                            onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
-                            placeholder="Enter GST number"
-                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            readOnly={gstLocked}
+                            disabled={gstLocked}
+                            className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl px-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400 disabled:opacity-80"
                           />
                         </div>
 
@@ -857,7 +900,9 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                             value={panNumber}
                             onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
                             placeholder="Enter PAN number"
-                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            readOnly={gstLocked && Boolean(gstProfile?.pan)}
+                            disabled={gstLocked && Boolean(gstProfile?.pan)}
+                            className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl px-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400 disabled:opacity-80"
                           />
                         </div>
 
@@ -868,18 +913,31 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                             value={tanNumber}
                             onChange={(e) => setTanNumber(e.target.value.toUpperCase())}
                             placeholder="Enter TAN number"
-                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl px-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                           />
                         </div>
 
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-bold text-slate-700 ml-1 uppercase tracking-wider">CIN Number (Optional)</label>
-                          <input 
-                            type="text" 
+                        <div className="space-y-1.5 sm:col-span-2">
+                          <CinVerificationPanel
                             value={cinNumber}
-                            onChange={(e) => setCinNumber(e.target.value.toUpperCase())}
-                            placeholder="Enter CIN number"
-                            className="w-full h-12 bg-white border border-slate-200 text-slate-800 text-sm rounded-xl px-4 shadow-sm focus:ring-4 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            onChange={(v) => {
+                              setCinNumber(normalizeCin(v));
+                              setCinProfile(null);
+                              setCinVerificationId(null);
+                              setCinLocked(false);
+                            }}
+                            entityType="b2b"
+                            required={false}
+                            label="CIN Number (recommended for companies)"
+                            profile={cinProfile}
+                            onVerified={(fields, meta) => {
+                              setCinProfile(fields);
+                              setCinVerificationId(meta.verificationId || null);
+                              setCinLocked(meta.locked !== false);
+                              if (fields.companyName) setCompanyName(fields.companyName);
+                              if (fields.registeredAddress) setCompanyAddress(fields.registeredAddress);
+                              if (fields.cin) setCinNumber(fields.cin);
+                            }}
                           />
                         </div>
 
@@ -895,7 +953,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                           />
                           <div 
                             onClick={() => fileInputRefs.logo.current.click()}
-                            className="border-2 border-dashed border-gray-200 hover:border-[#10AFA5] cursor-pointer rounded-xl h-24 flex flex-col items-center justify-center gap-1.5 transition-colors p-2 bg-gray-50 overflow-hidden"
+                            className="border-2 border-dashed border-slate-300 hover:border-[#10AFA5] hover:bg-[#10AFA5]/5 cursor-pointer rounded-2xl h-24 flex flex-col items-center justify-center gap-1.5 transition-all duration-300 p-2 bg-slate-50 overflow-hidden shadow-[0_2px_10px_rgba(0,0,0,0.02)]"
                           >
                             {logoUploading ? (
                               <span className="text-xs text-gray-500 font-bold">Uploading...</span>
@@ -926,7 +984,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                                 if (sameAsCompanyAddress) setBillingAddress(e.target.value);
                               }}
                               placeholder="Enter company headquarters address"
-                              className="w-full h-20 border border-gray-200 text-sm rounded-xl pl-10 pr-4 py-2 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all resize-none"
+                              className="w-full h-24 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 py-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 resize-none font-medium placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -951,7 +1009,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                               value={billingAddress}
                               onChange={(e) => setBillingAddress(e.target.value)}
                               placeholder="Enter invoice billing address"
-                              className="w-full h-20 border border-gray-200 text-sm rounded-xl pl-10 pr-4 py-2 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all resize-none disabled:bg-gray-50 disabled:text-gray-500"
+                              className="w-full h-24 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 py-4 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 resize-none font-medium placeholder:text-slate-400 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -975,7 +1033,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                               value={authName}
                               onChange={(e) => setAuthName(e.target.value)}
                               placeholder="Enter full name"
-                              className="w-full h-10 border border-gray-200 text-sm rounded-xl pl-10 pr-4 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                              className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -989,7 +1047,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                               value={authDesignation}
                               onChange={(e) => setAuthDesignation(e.target.value)}
                               placeholder="e.g. Operations Manager"
-                              className="w-full h-10 border border-gray-200 text-sm rounded-xl pl-10 pr-4 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                              className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -1003,7 +1061,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                               value={authEmail}
                               onChange={(e) => setAuthEmail(e.target.value)}
                               placeholder="name@company.com"
-                              className="w-full h-10 border border-gray-200 text-sm rounded-xl pl-10 pr-4 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                              className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -1017,7 +1075,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                               value={authPhone}
                               onChange={(e) => setAuthPhone(e.target.value)}
                               placeholder="10-digit mobile number"
-                              className="w-full h-10 border border-gray-200 text-sm rounded-xl pl-10 pr-4 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                              className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -1031,7 +1089,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                               value={authAltPhone}
                               onChange={(e) => setAuthAltPhone(e.target.value)}
                               placeholder="Alternate number"
-                              className="w-full h-10 border border-gray-200 text-sm rounded-xl pl-10 pr-4 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                              className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl pl-12 pr-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                             />
                           </div>
                         </div>
@@ -1047,7 +1105,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                             value={authPassword}
                             onChange={(e) => setAuthPassword(e.target.value)}
                             placeholder="Create password"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl px-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                           />
                         </div>
 
@@ -1058,7 +1116,7 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
                             value={authConfirmPassword}
                             onChange={(e) => setAuthConfirmPassword(e.target.value)}
                             placeholder="Confirm password"
-                            className="w-full h-10 border border-gray-200 text-sm rounded-xl px-3.5 focus:ring-2 focus:ring-[#10AFA5]/10 focus:border-[#10AFA5] transition-all"
+                            className="w-full h-14 bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 text-slate-900 text-sm rounded-2xl px-5 shadow-[0_2px_10px_rgba(0,0,0,0.02)] focus:shadow-[0_4px_15px_rgba(16,175,165,0.1)] focus:ring-4 focus:ring-[#10AFA5]/15 focus:border-[#10AFA5] transition-all duration-300 font-medium placeholder:text-slate-400"
                           />
                         </div>
                       </div>
@@ -1336,8 +1394,6 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
             </div>
           )}
         </div>
-
-      </div>
     </div>
   );
 };

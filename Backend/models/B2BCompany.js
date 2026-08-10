@@ -84,7 +84,62 @@ const b2bCompanySchema = new mongoose.Schema({
   rejectionReason: { type: String, default: null },
   isActive: { type: Boolean, default: true },
   walletBalance: { type: Number, default: 0 },
-  deletedAt: { type: Date, default: null }
+  deletedAt: { type: Date, default: null },
+  /** Live CGPE GST verification snapshot */
+  gstVerification: {
+    gstin: { type: String, uppercase: true, default: null },
+    verificationStatus: {
+      type: String,
+      enum: ['pending', 'verified', 'failed', 'cancelled_gst', 'suspended_gst', 'admin_approved', 'admin_rejected'],
+      default: 'pending'
+    },
+    verifiedAt: { type: Date, default: null },
+    verificationId: { type: mongoose.Schema.Types.ObjectId, ref: 'GstVerification', default: null },
+    legalName: { type: String, default: null },
+    tradeName: { type: String, default: null },
+    pan: { type: String, default: null },
+    constitutionOfBusiness: { type: String, default: null },
+    taxpayerType: { type: String, default: null },
+    registrationStatus: { type: String, default: null },
+    registrationDate: { type: String, default: null },
+    businessAddress: { type: String, default: null },
+    state: { type: String, default: null },
+    stateCode: { type: String, default: null },
+    pincode: { type: String, default: null },
+    natureOfBusiness: { type: String, default: null },
+    lastUpdated: { type: String, default: null },
+    locked: { type: Boolean, default: false }
+  },
+  /** Live CGPE MCA/CIN verification snapshot */
+  cinVerification: {
+    cin: { type: String, uppercase: true, default: null },
+    verificationStatus: {
+      type: String,
+      enum: ['pending', 'verified', 'failed', 'inactive_company', 'admin_approved', 'admin_rejected'],
+      default: 'pending'
+    },
+    verifiedAt: { type: Date, default: null },
+    verificationId: { type: mongoose.Schema.Types.ObjectId, ref: 'CinVerification', default: null },
+    companyName: { type: String, default: null },
+    companyType: { type: String, default: null },
+    companyCategory: { type: String, default: null },
+    companyClass: { type: String, default: null },
+    rocCode: { type: String, default: null },
+    registrationNumber: { type: String, default: null },
+    dateOfIncorporation: { type: String, default: null },
+    companyStatus: { type: String, default: null },
+    listedStatus: { type: String, default: null },
+    registeredAddress: { type: String, default: null },
+    state: { type: String, default: null },
+    pincode: { type: String, default: null },
+    authorisedCapital: { type: String, default: null },
+    paidUpCapital: { type: String, default: null },
+    directors: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    charges: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    transactionId: { type: String, default: null },
+    requestId: { type: String, default: null },
+    locked: { type: Boolean, default: false }
+  }
 }, {
   timestamps: true
 });

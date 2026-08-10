@@ -149,6 +149,13 @@ const VendorSignup = () => {
       if (!formData.companyName || !formData.panNumber || !formData.officeAddress || !formData.city || !formData.state || !formData.pincode) {
         return toast.error('Please fill all mandatory business details');
       }
+      if (formData.gstin && !formData.gstVerified && !formData.gstVerificationId) {
+        return toast.error('Please verify your GSTIN before continuing');
+      }
+      const needsCin = /private|public|llp/i.test(String(formData.incorporationType || '')) || formData.cinNumber;
+      if (needsCin && !formData.cinVerified && !formData.cinVerificationId) {
+        return toast.error('Please verify your CIN with MCA before continuing');
+      }
     }
     
     if (stepId === 'models' && formData.models.length === 0) {
@@ -186,7 +193,10 @@ const VendorSignup = () => {
       if (formData.incorporationType !== 'Proprietorship' && !formData.companyRegUrl) return toast.error('Company Registration is mandatory');
       if (!formData.chequeUrl) return toast.error('Cancelled Cheque is mandatory');
       if (formData.models.includes('PROJECT')) {
-        if (!formData.gstUrl) return toast.error('GST is mandatory for Project vendors');
+        if (!formData.gstin || !formData.gstVerified) {
+          return toast.error('Live GST verification is mandatory for Project vendors');
+        }
+        if (!formData.gstUrl) return toast.error('GST certificate upload is mandatory for Project vendors');
         if (!formData.pfDocumentUrl) return toast.error('PF Registration is mandatory for Project vendors');
         if (!formData.esiDocumentUrl) return toast.error('ESIC Registration is mandatory for Project vendors');
         if (!formData.workOrderUrl) return toast.error('Past PO is mandatory for Project vendors');

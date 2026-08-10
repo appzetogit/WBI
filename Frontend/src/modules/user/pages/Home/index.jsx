@@ -321,7 +321,8 @@ const Home = () => {
         slug: qs.slug,
         icon: isReactIconName(qs.image || qs.icon) ? (qs.image || qs.icon) : toAssetUrl(qs.image || qs.icon, 150),
         hasSaleBadge: false,
-        badge: null
+        badge: null,
+        isService: true
       }));
     }
 

@@ -5,63 +5,79 @@ import { BsBank } from 'react-icons/bs';
 import { toast } from 'react-hot-toast';
 import Header from '../../components/layout/Header';
 import engineerService from '../../../../services/engineerService';
+import UpiVerificationPanel from '../../../../components/verification/UpiVerificationPanel';
 
 const BankDetails = () => {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    accountHolder: '',
-    bankName: '',
-    accountNumber: '',
-    ifscCode: ''
-  });
+    const navigate = useNavigate();
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [formData, setFormData] = useState({
+      accountHolder: '',
+      bankName: '',
+      accountNumber: '',
+      ifscCode: '',
+      upiId: '',
+      phone: ''
+    });
+    const [upiProfile, setUpiProfile] = useState(null);
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const res = await engineerService.getProfile();
-        if (res.success && (res.engineer || res.worker)) {
-          const w = (res.engineer || res.worker);
-          setFormData({
-            accountHolder: w.bankDetails?.accountHolder || w.name || '',
-            bankName: w.bankDetails?.bankName || '',
-            accountNumber: w.bankDetails?.accountNumber || '',
-            ifscCode: w.bankDetails?.ifscCode || ''
-          });
+    useEffect(() => {
+      const fetchProfile = async () => {
+        try {
+          const res = await engineerService.getProfile();
+          if (res.success && (res.engineer || res.worker)) {
+            const w = (res.engineer || res.worker);
+            setFormData({
+              accountHolder: w.bankDetails?.accountHolder || w.name || '',
+              bankName: w.bankDetails?.bankName || '',
+              accountNumber: w.bankDetails?.accountNumber || '',
+              ifscCode: w.bankDetails?.ifscCode || '',
+              upiId: w.bankDetails?.upiId || '',
+              phone: w.phone || w.mobile || ''
+            });
+          }
+        } catch (err) {
+          toast.error('Failed to load bank details');
+        } finally {
+          setLoading(false);
         }
+      };
+      fetchProfile();
+    }, []);
+
+    const handleChange = (e) => {
+      setFormData({ ...formData, [e.target.name]: e.target.value });
+    };
+
+    const handleSave = async () => {
+      if (!formData.accountNumber || !formData.ifscCode) {
+        toast.error('Account Number and IFSC Code are required');
+        return;
+      }
+      if (formData.upiId && !upiProfile?.accountHolderName) {
+        toast.error('Please verify UPI ID before saving (or clear the UPI field)');
+        return;
+      }
+
+      setSaving(true);
+      try {
+        await engineerService.updateProfile({
+          bankDetails: {
+            accountHolder: formData.accountHolder,
+            bankName: formData.bankName,
+            accountNumber: formData.accountNumber,
+            ifscCode: formData.ifscCode,
+            upiId: formData.upiId
+          }
+        });
+        toast.success('Bank details updated successfully');
+        navigate(-1);
       } catch (err) {
-        toast.error('Failed to load bank details');
+        toast.error(err.response?.data?.message || 'Failed to update bank details');
       } finally {
-        setLoading(false);
+        setSaving(false);
       }
     };
-    fetchProfile();
-  }, []);
-
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  const handleSave = async () => {
-    if (!formData.accountNumber || !formData.ifscCode) {
-      toast.error('Account Number and IFSC Code are required');
-      return;
-    }
-    
-    setSaving(true);
-    try {
-      await engineerService.updateProfile({
-        bankDetails: formData
-      });
-      toast.success('Bank details updated successfully');
-      navigate(-1);
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update bank details');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -146,6 +162,29 @@ const BankDetails = () => {
                 className="w-full bg-[#F8F9FA] rounded-2xl px-4 py-3.5 text-sm font-bold text-gray-800 placeholder-gray-500 tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all uppercase border-none"
                 placeholder="SBIN0001234"
                 maxLength={11}
+              />
+            </div>
+
+            <div>
+              <UpiVerificationPanel
+                value={formData.upiId}
+                onChange={(upiId) => {
+                  setFormData((f) => ({ ...f, upiId }));
+                  setUpiProfile(null);
+                }}
+                mobile={formData.phone}
+                entityType="engineer"
+                accountHolderName={formData.accountHolder}
+                onAccountHolderChange={(name) => setFormData((f) => ({ ...f, accountHolder: name }))}
+                profile={upiProfile}
+                onVerified={(fields) => {
+                  setUpiProfile(fields);
+                  setFormData((f) => ({
+                    ...f,
+                    upiId: fields.vpa || f.upiId,
+                    accountHolder: fields.accountHolderName || fields.mobileLinkedName || f.accountHolder
+                  }));
+                }}
               />
             </div>
 

@@ -48,32 +48,31 @@ async function logVerification({
   });
 }
 
-async function verifyGstForCompany({ companyId, gstNumber, actorId }) {
+async function verifyGstForCompany({ companyId, gstNumber, actorId, ipAddress, userAgent }) {
+  const gstVerificationService = require('./gstVerification.service');
   const onboarding = await getOrCreateOnboardingForCompany(companyId);
   onboarding.kycFlags.gst = onboarding.kycFlags.gst || {};
   onboarding.kycFlags.gst.status = 'verifying';
-
-  const gst = String(gstNumber || '').trim().toUpperCase();
-  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gst)) {
-    onboarding.kycFlags.gst.status = 'failed';
-    await onboarding.save();
-    const err = new Error('Invalid GST format');
-    err.statusCode = 400;
-    throw err;
-  }
+  await onboarding.save();
 
   try {
-    const result = await cgpeService.makeRequest('/api/v1/verify/gst', { gstin: gst });
+    const { profile, verification } = await gstVerificationService.verifyGst({
+      gstNumber,
+      entityType: 'b2b',
+      entityId: companyId,
+      actorType: 'b2b',
+      actorId,
+      ipAddress,
+      userAgent
+    });
+
     onboarding.kycFlags.gst = {
       status: 'verified',
-      verifiedAt: new Date(),
+      verifiedAt: verification.verifiedAt || new Date(),
       provider: 'cgpe',
-      transactionId: result.transactionId || result.txn_id || null,
-      maskedValue: maskGst(gst),
-      raw: {
-        legalName: result.result?.legal_name || result.data?.legalName || null,
-        status: result.result?.status || result.data?.status || 'active'
-      }
+      transactionId: profile.apiReferenceId || verification.apiReferenceId || null,
+      maskedValue: maskGst(profile.gstin),
+      raw: profile
     };
     pushTimeline(onboarding, 'gst_verified', 'b2b', actorId);
     await logVerification({
@@ -81,8 +80,12 @@ async function verifyGstForCompany({ companyId, gstNumber, actorId }) {
       onboardingId: onboarding._id,
       verificationType: 'gst',
       status: 'success',
-      requestMasked: { gst: maskGst(gst) },
-      responseMasked: onboarding.kycFlags.gst.raw,
+      requestMasked: { gst: maskGst(profile.gstin) },
+      responseMasked: {
+        legalName: profile.legalName,
+        tradeName: profile.tradeName,
+        registrationStatus: profile.registrationStatus
+      },
       transactionId: onboarding.kycFlags.gst.transactionId,
       actorId,
       actorType: 'b2b'
@@ -94,7 +97,7 @@ async function verifyGstForCompany({ companyId, gstNumber, actorId }) {
       onboardingId: onboarding._id,
       verificationType: 'gst',
       status: 'failed',
-      requestMasked: { gst: maskGst(gst) },
+      requestMasked: { gst: maskGst(String(gstNumber || '')) },
       errorMessage: error.message,
       actorId,
       actorType: 'b2b'
@@ -160,21 +163,31 @@ async function verifyPanForCompany({ companyId, panNumber, actorId }) {
   return onboarding.kycFlags.pan;
 }
 
-async function verifyCinForCompany({ companyId, cinNumber, actorId }) {
+async function verifyCinForCompany({ companyId, cinNumber, actorId, ipAddress, userAgent }) {
+  const cinVerificationService = require('./cinVerification.service');
   const onboarding = await getOrCreateOnboardingForCompany(companyId);
-  const cin = String(cinNumber || '').trim().toUpperCase();
   onboarding.kycFlags.cin = onboarding.kycFlags.cin || {};
   onboarding.kycFlags.cin.status = 'verifying';
+  await onboarding.save();
 
   try {
-    const result = await cgpeService.makeRequest('/api/v1/verify/cin', { cin });
+    const { profile, verification } = await cinVerificationService.verifyCin({
+      cinNumber,
+      entityType: 'b2b',
+      entityId: companyId,
+      actorType: 'b2b',
+      actorId,
+      ipAddress,
+      userAgent
+    });
+
     onboarding.kycFlags.cin = {
       status: 'verified',
-      verifiedAt: new Date(),
+      verifiedAt: verification.verifiedAt || new Date(),
       provider: 'cgpe',
-      transactionId: result.transactionId || null,
-      maskedValue: cin,
-      raw: result.result || result.data || {}
+      transactionId: profile.transactionId || verification.transactionId || null,
+      maskedValue: profile.cin,
+      raw: profile
     };
     pushTimeline(onboarding, 'cin_verified', 'b2b', actorId);
     await logVerification({
@@ -182,8 +195,12 @@ async function verifyCinForCompany({ companyId, cinNumber, actorId }) {
       onboardingId: onboarding._id,
       verificationType: 'cin',
       status: 'success',
-      requestMasked: { cin },
-      responseMasked: onboarding.kycFlags.cin.raw,
+      requestMasked: { cin: profile.cin },
+      responseMasked: {
+        companyName: profile.companyName,
+        companyStatus: profile.companyStatus
+      },
+      transactionId: onboarding.kycFlags.cin.transactionId,
       actorId,
       actorType: 'b2b'
     });
@@ -194,7 +211,7 @@ async function verifyCinForCompany({ companyId, cinNumber, actorId }) {
       onboardingId: onboarding._id,
       verificationType: 'cin',
       status: 'failed',
-      requestMasked: { cin },
+      requestMasked: { cin: String(cinNumber || '') },
       errorMessage: error.message,
       actorId,
       actorType: 'b2b'

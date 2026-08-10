@@ -109,10 +109,28 @@ const activationStatus = async (req, res) => {
 
 const verifyGst = async (req, res) => {
   try {
-    const data = await verifyGstForCompany({ companyId: req.companyId, gstNumber: req.body.gstNumber, actorId: req.user?.id });
-    res.json({ success: true, data });
+    const data = await verifyGstForCompany({
+      companyId: req.companyId,
+      gstNumber: req.body.gstNumber,
+      actorId: req.user?.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+    res.json({
+      success: true,
+      message: 'GST verification completed',
+      data: {
+        ...data,
+        fields: data.raw || data,
+        profile: data.raw || data
+      }
+    });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || 400).json({
+      success: false,
+      code: error.code,
+      message: error.message
+    });
   }
 };
 
@@ -127,10 +145,27 @@ const verifyPan = async (req, res) => {
 
 const verifyCin = async (req, res) => {
   try {
-    const data = await verifyCinForCompany({ companyId: req.companyId, cinNumber: req.body.cinNumber, actorId: req.user?.id });
-    res.json({ success: true, data });
+    const data = await verifyCinForCompany({
+      companyId: req.companyId,
+      cinNumber: req.body.cinNumber,
+      actorId: req.user?.id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+    res.json({
+      success: true,
+      data: {
+        ...data,
+        fields: data.raw || data,
+        profile: data.raw || data
+      }
+    });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(error.statusCode || 400).json({
+      success: false,
+      code: error.code,
+      message: error.message
+    });
   }
 };
 
