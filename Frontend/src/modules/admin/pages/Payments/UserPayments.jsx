@@ -310,10 +310,16 @@ const UserPayments = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`text-sm font-bold ${getTypeColor(tx.type)}`}>
-                        {tx.type === 'credit' ? '+ ' : tx.type === 'debit' ? '- ' : ''}
-                        {formatCurrency(tx.amount)}
-                      </span>
+                      {(() => {
+                        const isPos = ['credit', 'payment', 'cash_collected', 'earnings_credit', 'commission', 'settlement'].includes(tx.type);
+                        const isNeg = ['withdrawal', 'debit', 'refund', 'tds_deduction'].includes(tx.type);
+                        const absVal = Math.abs(tx.amount || 0);
+                        return (
+                          <span className={`text-sm font-bold ${isPos ? 'text-green-600' : isNeg ? 'text-red-600' : 'text-gray-900'}`}>
+                            {isPos ? '+ ' : isNeg ? '- ' : ''}{formatCurrency(absVal)}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4">
                       <span className="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-600 border border-blue-100">

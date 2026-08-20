@@ -275,7 +275,13 @@ exports.confirmReview = async (req, res) => {
 
     // Calculate splits
     const Category = require('../../models/Category');
-    const category = await Category.findOne({ title: draft.serviceId.category });
+    const ServiceCategory = require('../../models/ServiceCategory');
+    let categoryName = draft.serviceId.category || draft.serviceId.name || 'One-Time';
+    if (draft.serviceId.categoryId) {
+      const serviceCategory = await ServiceCategory.findById(draft.serviceId.categoryId).select('name').lean();
+      if (serviceCategory?.name) categoryName = serviceCategory.name;
+    }
+    const category = await Category.findOne({ title: categoryName });
     const commissionPercent = category?.commissionPercent || 20;
     const workerCommission = pricing.packageTotal * (commissionPercent / 100);
     const workerPayout = pricing.packageTotal - workerCommission;
@@ -302,11 +308,33 @@ exports.confirmReview = async (req, res) => {
       });
     }
 
+    const rawLat = draft.address.lat ?? draft.address.latitude ?? draft.address.location?.lat;
+    const rawLng = draft.address.lng ?? draft.address.longitude ?? draft.address.location?.lng;
+    let bookingLat = parseFloat(rawLat);
+    let bookingLng = parseFloat(rawLng);
+    if (!Number.isFinite(bookingLat) || !Number.isFinite(bookingLng)) {
+      try {
+        const { geocodeAddress } = require('../../services/locationService');
+        const fullAddress = [draft.address.addressLine1, draft.address.city, draft.address.state, draft.address.pincode]
+          .filter(Boolean)
+          .join(', ');
+        if (fullAddress) {
+          const geo = await geocodeAddress(fullAddress);
+          if (geo?.lat && geo?.lng) {
+            bookingLat = geo.lat;
+            bookingLng = geo.lng;
+          }
+        }
+      } catch (geoErr) {
+        console.warn('[confirmReview] Geocode fallback failed:', geoErr.message);
+      }
+    }
+
     const booking = new Booking({
       userId: draft.userId,
       serviceId: draft.serviceId._id,
       serviceName: draft.serviceId.name || 'Service',
-      serviceCategory: draft.serviceId.category || 'Category',
+      serviceCategory: categoryName,
       brandName: draft.brandId ? 'Selected Brand' : null,
       basePrice: pricing.packageTotal,
       finalAmount: pricing.finalAmount,
@@ -317,8 +345,8 @@ exports.confirmReview = async (req, res) => {
         city: draft.address.city || 'Unknown',
         state: draft.address.state || 'Unknown',
         pincode: draft.address.pincode || '000000',
-        lat: draft.address.lat,
-        lng: draft.address.lng
+        lat: Number.isFinite(bookingLat) ? bookingLat : null,
+        lng: Number.isFinite(bookingLng) ? bookingLng : null
       },
       scheduledDate: draft.scheduledDate,
       scheduledTime: draft.scheduledTime,
@@ -377,49 +405,21 @@ exports.confirmReview = async (req, res) => {
       });
     }
 
-    // Instead of old matchingService, use the new WaveManagerService (Urban Company style)
-    const WaveManagerService = require('../../services/WaveManagerService');
-    
-    // Find nearby workers within 10km
-    let waves = [];
-    try {
-      waves = await WaveManagerService.findAndGroupWorkers(
-        booking.address.lat,
-        booking.address.lng,
-        draft.serviceId.defaultRadiusKm || 10,
-        booking.serviceId
-      );
-    } catch (waveErr) {
-      console.warn('[WaveManager] Error finding workers:', waveErr.message);
-      waves = [];
-    }
+    // Instant one-time bookings: start matching immediately so the searching
+    // screen can receive workers. Never fail the booking before search runs.
+    booking.status = 'searching_worker';
+    booking.bookingType = draft.bookingType || 'instant';
+    await booking.save();
 
-    if (waves.length === 0) {
-      // No workers found
-      booking.status = 'admin_action_required';
-      if (!booking.adminLog) booking.adminLog = [];
-      booking.adminLog.push({
-        action: 'No Workers Found',
-        reason: 'No online workers found within radius upon creation.',
-        timestamp: new Date()
-      });
-      await booking.save();
-    } else {
-      // Set potential workers and start wave 1
-      booking.potentialWorkers = waves.flat();
-      booking.status = 'searching_worker';
-      await booking.save();
-
-      // Dispatch Wave 1 asynchronously so we don't block the response
-      WaveManagerService.dispatchWave(booking._id.toString(), 0).catch(err => {
-        console.error('[WaveManagerService Error]', err);
-      });
-    }
+    const matcher = require('../../services/matchingService');
+    matcher.startMatching(booking._id).catch((err) => {
+      console.error('[MatchingService Error] Failed to start matching after confirm:', err);
+    });
 
     res.status(200).json({
       success: true,
       bookingId: booking._id,
-      message: waves.length === 0 ? 'Booking created but no workers available. Admin notified.' : 'Booking created. Searching for technicians...'
+      message: 'Booking created. Searching for technicians...'
     });
   } catch (error) {
     console.error('Error confirming review:', error);

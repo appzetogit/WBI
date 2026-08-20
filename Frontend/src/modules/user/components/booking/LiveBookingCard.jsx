@@ -48,7 +48,7 @@ const LiveBookingCard = ({ hasBottomNav }) => {
   useEffect(() => {
     fetchActiveBooking();
 
-    if (socket) {
+    if (socket && typeof socket.on === 'function') {
       socket.on('booking_updated', fetchActiveBooking);
       socket.on('notification', fetchActiveBooking);
     }
@@ -57,7 +57,7 @@ const LiveBookingCard = ({ hasBottomNav }) => {
     const interval = setInterval(fetchActiveBooking, 30000);
     return () => {
       clearInterval(interval);
-      if (socket) {
+      if (socket && typeof socket.off === 'function') {
         socket.off('booking_updated', fetchActiveBooking);
         socket.off('notification', fetchActiveBooking);
       }

@@ -24,7 +24,7 @@ const getFinanceOverview = async (req, res) => {
       dateFilter.date = { $gte: startStr, $lte: endStr };
     }
 
-    // 1. Fetch Aggregated Revenue Data INSTANTLY from the new Model
+    // 1. Fetch Aggregated Revenue Data from PlatformEarning Model
     const revenueDocs = await PlatformEarning.aggregate([
       { $match: dateFilter },
       {
@@ -42,16 +42,46 @@ const getFinanceOverview = async (req, res) => {
       }
     ]);
 
-    let revenueStats = revenueDocs[0] || {
-      totalTransactionValue: 0,
-      totalPlatformRevenue: 0,
-      totalVendorEarnings: 0,
-      totalTaxCollected: 0,
-      totalTDSCollected: 0,
-      count: 0,
-      totalSettlementReceived: 0,
-      totalAmountPaidToVendors: 0
-    };
+    let revenueStats = revenueDocs[0];
+
+    // If PlatformEarning has no records yet, dynamically aggregate directly from Booking collection
+    if (!revenueStats || revenueStats.totalTransactionValue === 0) {
+      const bookingMatch = {
+        status: { $in: [BOOKING_STATUS.COMPLETED, 'completed', 'COMPLETED', 'paid', 'PAID'] }
+      };
+      if (startDate && endDate) {
+        bookingMatch.createdAt = {
+          $gte: new Date(startDate),
+          $lte: new Date(new Date(endDate).setHours(23, 59, 59, 999))
+        };
+      }
+
+      const bookingStats = await Booking.aggregate([
+        { $match: bookingMatch },
+        {
+          $group: {
+            _id: null,
+            totalTransactionValue: { $sum: '$finalAmount' },
+            totalPlatformRevenue: { $sum: '$platformEarning' },
+            totalVendorEarnings: { $sum: '$workerPayout' },
+            totalTaxCollected: { $sum: '$tax' },
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      const bStats = bookingStats[0] || {};
+      revenueStats = {
+        totalTransactionValue: bStats.totalTransactionValue || 0,
+        totalPlatformRevenue: bStats.totalPlatformRevenue || (bStats.totalTransactionValue ? bStats.totalTransactionValue * 0.2 : 0),
+        totalVendorEarnings: bStats.totalVendorEarnings || (bStats.totalTransactionValue ? bStats.totalTransactionValue * 0.8 : 0),
+        totalTaxCollected: bStats.totalTaxCollected || 0,
+        totalTDSCollected: 0,
+        count: bStats.count || 0,
+        totalSettlementReceived: 0,
+        totalAmountPaidToVendors: 0
+      };
+    }
 
     // Grab the live "Pending" snapshot from the latest today record to avoid manual calc
     const todayStr = new Date().toISOString().split('T')[0];
@@ -81,7 +111,7 @@ const getFinanceOverview = async (req, res) => {
     const paymentMethods = await Booking.aggregate([
       {
         $match: {
-          status: BOOKING_STATUS.COMPLETED
+          status: { $in: [BOOKING_STATUS.COMPLETED, 'completed', 'COMPLETED', 'paid', 'PAID'] }
         }
       },
       {
@@ -93,7 +123,7 @@ const getFinanceOverview = async (req, res) => {
       }
     ]);
 
-    // 4. Daily Revenue Trend (last 30 days) from optimized model
+    // 4. Daily Revenue Trend (last 30 days) from optimized model or fallback
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const thirtyDaysStr = thirtyDaysAgo.toISOString().split('T')[0];
@@ -103,11 +133,31 @@ const getFinanceOverview = async (req, res) => {
       .sort({ date: 1 })
       .lean();
 
-    const formattedDaily = dailyRevenue.map(d => ({
+    let formattedDaily = dailyRevenue.map(d => ({
       _id: d.date,
       revenue: d.totalRevenue,
       commission: d.platformCommission
     }));
+
+    if (formattedDaily.length === 0) {
+      const dailyBookingStats = await Booking.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: thirtyDaysAgo },
+            status: { $in: [BOOKING_STATUS.COMPLETED, 'completed', 'COMPLETED', 'paid', 'PAID'] }
+          }
+        },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            revenue: { $sum: '$finalAmount' },
+            commission: { $sum: '$platformEarning' }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]);
+      formattedDaily = dailyBookingStats;
+    }
 
     res.status(200).json({
       success: true,
@@ -151,7 +201,7 @@ const getPaymentTransactions = async (req, res) => {
       .populate('userId', 'name phone')
       .populate('vendorId', 'businessName phone')
       .populate('serviceId', 'title')
-      .select('bookingNumber finalAmount paymentMethod paymentStatus status createdAt completedAt razorpayPaymentId vendorBillId')
+      .select('bookingNumber subTotal finalAmount platformEarning workerPayout tax visitingCharges platformFee workerCommissionRate paymentMethod paymentStatus status createdAt completedAt razorpayPaymentId vendorBillId')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
@@ -167,6 +217,10 @@ const getPaymentTransactions = async (req, res) => {
 
     const reportData = bookings.map(b => {
       const bill = billMap[b._id.toString()];
+      const platformFee = bill?.companyRevenue || b.platformEarning || (b.subTotal ? Math.round(b.subTotal * ((b.workerCommissionRate || 20) / 100) * 100) / 100 : (b.finalAmount ? Math.round(b.finalAmount * 0.2 * 100) / 100 : 0));
+      const vendorEarnings = bill?.vendorTotalEarning || b.workerPayout || (b.subTotal ? Math.round(b.subTotal * (1 - (b.workerCommissionRate || 20) / 100) * 100) / 100 : (b.finalAmount ? Math.round(b.finalAmount * 0.8 * 100) / 100 : 0));
+      const tax = bill?.totalGST || b.tax || 0;
+
       return {
         date: b.createdAt,
         bookingNumber: b.bookingNumber,
@@ -174,9 +228,9 @@ const getPaymentTransactions = async (req, res) => {
         customer: b.userId?.name || 'Guest',
         vendor: b.vendorId?.businessName || 'Unassigned',
         amount: bill?.grandTotal || b.finalAmount || 0,
-        platformFee: bill?.companyRevenue || (b.finalAmount ? b.finalAmount * 0.2 : 0),
-        vendorEarnings: bill?.vendorTotalEarning || (b.finalAmount ? b.finalAmount * 0.8 : 0),
-        tax: bill?.totalGST || 0,
+        platformFee,
+        vendorEarnings,
+        tax,
         paymentMethod: b.paymentMethod || 'N/A',
         paymentStatus: b.paymentStatus || 'N/A',
         bookingStatus: b.status,

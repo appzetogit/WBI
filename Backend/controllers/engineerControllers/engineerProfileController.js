@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Engineer = require('../../models/Engineer');
 const { validationResult } = require('express-validator');
 const cloudinaryService = require('../../services/cloudinaryService');
@@ -402,15 +403,8 @@ const updateDocuments = async (req, res) => {
  */
 const updateSkillsProfile = async (req, res) => {
   try {
-    const engineerId = req.user.id;
-    const { subServices, serviceCategories } = req.body;
-
-    if (!Array.isArray(subServices)) {
-      return res.status(400).json({
-        success: false,
-        message: 'subServices must be an array'
-      });
-    }
+    const engineerId = req.user.id || req.user._id;
+    const { subServices, serviceCategories, secondarySkills } = req.body;
 
     const engineer = await Engineer.findById(engineerId);
     if (!engineer) {
@@ -420,63 +414,86 @@ const updateSkillsProfile = async (req, res) => {
       });
     }
 
-    // Process subServices
-    const updatedSubServices = subServices.map(item => {
-      // Find matching existing subservice to preserve customSkills status
-      const existingSubService = engineer.subServices.find(
-        s => s.subServiceId.toString() === item.subServiceId.toString()
-      );
-      
-      const existingCustomSkills = existingSubService ? existingSubService.customSkills : [];
-      
-      // Process customSkills
-      const customSkillsPayload = item.customSkills || [];
-      const processedCustomSkills = customSkillsPayload.map(cs => {
-        const skillName = typeof cs === 'string' ? cs.trim() : (cs.name ? cs.name.trim() : '');
-        if (!skillName) return null;
+    // Process subServices safely
+    let updatedSubServices = [];
+    if (Array.isArray(subServices)) {
+      const existingList = Array.isArray(engineer.subServices) ? engineer.subServices : [];
 
-        const existing = existingCustomSkills.find(
-          ecs => ecs.name.toLowerCase() === skillName.toLowerCase()
-        );
+      updatedSubServices = subServices
+        .filter(item => item && item.subServiceId && mongoose.Types.ObjectId.isValid(item.subServiceId))
+        .map(item => {
+          const itemIdStr = item.subServiceId.toString();
+          
+          // Find matching existing subservice to preserve customSkills status
+          const existingSubService = existingList.find(
+            s => s && s.subServiceId && s.subServiceId.toString() === itemIdStr
+          );
+          
+          const existingCustomSkills = (existingSubService && Array.isArray(existingSubService.customSkills)) 
+            ? existingSubService.customSkills 
+            : [];
+          
+          // Process customSkills safely
+          const customSkillsPayload = Array.isArray(item.customSkills) ? item.customSkills : [];
+          const processedCustomSkills = customSkillsPayload.map(cs => {
+            const skillName = typeof cs === 'string' ? cs.trim() : (cs?.name ? cs.name.trim() : '');
+            if (!skillName) return null;
 
-        if (existing) {
+            const existing = existingCustomSkills.find(
+              ecs => ecs?.name && ecs.name.toLowerCase() === skillName.toLowerCase()
+            );
+
+            if (existing) {
+              return {
+                _id: existing._id,
+                name: existing.name,
+                status: existing.status || 'pending'
+              };
+            } else {
+              return {
+                name: skillName,
+                status: 'pending'
+              };
+            }
+          }).filter(Boolean);
+
           return {
-            _id: existing._id,
-            name: existing.name,
-            status: existing.status
+            subServiceId: new mongoose.Types.ObjectId(itemIdStr),
+            name: item.name || '',
+            skills: Array.isArray(item.skills) ? item.skills : [],
+            customSkills: processedCustomSkills,
+            tools: Array.isArray(item.tools) ? item.tools : [],
+            experienceLevel: item.experienceLevel || '',
+            yearsOfExperience: Number(item.yearsOfExperience) || 0
           };
-        } else {
-          return {
-            name: skillName,
-            status: 'pending'
-          };
-        }
-      }).filter(Boolean);
-
-      return {
-        subServiceId: item.subServiceId,
-        name: item.name,
-        skills: item.skills || [],
-        customSkills: processedCustomSkills,
-        tools: item.tools || [],
-        experienceLevel: item.experienceLevel || '',
-        yearsOfExperience: item.yearsOfExperience || 0
-      };
-    });
-
-    engineer.subServices = updatedSubServices;
-    
-    if (serviceCategories && Array.isArray(serviceCategories)) {
-      engineer.serviceCategories = serviceCategories;
+        });
     }
 
-    await engineer.save();
+    const updateFields = {
+      subServices: updatedSubServices
+    };
+
+    if (Array.isArray(serviceCategories) && serviceCategories.length > 0) {
+      updateFields.serviceCategories = serviceCategories;
+    }
+    
+    if (Array.isArray(secondarySkills)) {
+      updateFields.secondarySkills = secondarySkills;
+    }
+
+    const updatedEngineer = await Engineer.findByIdAndUpdate(
+      engineerId,
+      { $set: updateFields },
+      { new: true, runValidators: false }
+    );
 
     res.status(200).json({
       success: true,
       message: 'Skills profile updated successfully',
-      subServices: engineer.subServices,
-      serviceCategories: engineer.serviceCategories
+      engineer: updatedEngineer,
+      subServices: updatedEngineer.subServices,
+      serviceCategories: updatedEngineer.serviceCategories,
+      secondarySkills: updatedEngineer.secondarySkills
     });
   } catch (error) {
     console.error('Update engineer skills profile error:', error);

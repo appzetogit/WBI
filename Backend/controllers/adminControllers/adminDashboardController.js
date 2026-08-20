@@ -5,8 +5,26 @@ const Booking = require('../../models/Booking');
 const Withdrawal = require('../../models/Withdrawal');
 const Settlement = require('../../models/Settlement');
 const Scrap = require('../../models/Scrap');
+const Service = require('../../models/Service');
 const UserService = require('../../models/UserService');
 const { BOOKING_STATUS, PAYMENT_STATUS, VENDOR_STATUS } = require('../../utils/constants');
+
+/**
+ * Helper to build date range filter on createdAt or completedAt
+ */
+const buildDateFilter = (startDate, endDate, field = 'createdAt') => {
+  const filter = {};
+  if (startDate || endDate) {
+    filter[field] = {};
+    if (startDate) filter[field].$gte = new Date(startDate);
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      filter[field].$lte = end;
+    }
+  }
+  return filter;
+};
 
 /**
  * Get overall dashboard stats
@@ -14,62 +32,74 @@ const { BOOKING_STATUS, PAYMENT_STATUS, VENDOR_STATUS } = require('../../utils/c
 const getDashboardStats = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const dateFilter = {};
+    const dateFilter = buildDateFilter(startDate, endDate, 'createdAt');
+
+    // Revenue date filter: matching on either completedAt or createdAt in range
+    let revenueDateMatch = {};
     if (startDate || endDate) {
-      dateFilter.createdAt = {};
-      if (startDate) dateFilter.createdAt.$gte = new Date(startDate);
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        dateFilter.createdAt.$lte = end;
-      }
+      const s = startDate ? new Date(startDate) : new Date(0);
+      const e = endDate ? new Date(endDate) : new Date();
+      e.setHours(23, 59, 59, 999);
+      revenueDateMatch = {
+        $or: [
+          { completedAt: { $gte: s, $lte: e } },
+          { $and: [{ completedAt: null }, { createdAt: { $gte: s, $lte: e } }] }
+        ]
+      };
     }
 
-    // Revenue date filter (use completedAt for revenue consistency)
-    const revenueDateFilter = {};
-    if (startDate || endDate) {
-      revenueDateFilter.completedAt = {};
-      if (startDate) revenueDateFilter.completedAt.$gte = new Date(startDate);
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        revenueDateFilter.completedAt.$lte = end;
-      }
-    }
-
-    // Total counts (filtered by creation date if provided)
+    // Total counts
     const totalUsers = await User.countDocuments({ isActive: true, ...dateFilter });
     const totalVendors = await Vendor.countDocuments({ isActive: true, ...dateFilter });
     const totalWorkers = await Worker.countDocuments({ isActive: true, ...dateFilter });
     const totalBookings = await Booking.countDocuments(dateFilter);
 
-    // Booking stats
+    // Booking stats (case-insensitive enum checks)
+    const completedStatuses = [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CLOSED, 'completed', 'closed'];
+    const cancelledStatuses = [BOOKING_STATUS.CANCELLED, BOOKING_STATUS.REJECTED, 'cancelled', 'rejected'];
+
     const pendingBookings = await Booking.countDocuments({
       ...dateFilter,
-      status: { $nin: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CANCELLED] }
+      status: { $nin: [...completedStatuses, ...cancelledStatuses] }
     });
     const completedBookings = await Booking.countDocuments({
       ...dateFilter,
-      status: BOOKING_STATUS.COMPLETED
+      status: { $in: completedStatuses }
     });
     const cancelledBookings = await Booking.countDocuments({
       ...dateFilter,
-      status: BOOKING_STATUS.CANCELLED
+      status: { $in: cancelledStatuses }
     });
 
-    // Revenue stats
+    // Revenue stats: sum finalAmount or fallback to basePrice
+    const validPaymentStatuses = [
+      PAYMENT_STATUS.SUCCESS,
+      PAYMENT_STATUS.COLLECTED_BY_VENDOR,
+      'success',
+      'collected_by_vendor',
+      'collected_by_worker',
+      'paid',
+      'PAID'
+    ];
+
     const revenueResult = await Booking.aggregate([
       {
         $match: {
-          status: BOOKING_STATUS.COMPLETED,
-          paymentStatus: { $in: [PAYMENT_STATUS.SUCCESS, PAYMENT_STATUS.COLLECTED_BY_VENDOR, 'success', 'collected_by_vendor', 'collected_by_worker', 'paid'] },
-          ...revenueDateFilter
+          $or: [
+            { status: { $in: completedStatuses } },
+            { paymentStatus: { $in: validPaymentStatuses } }
+          ],
+          ...revenueDateMatch
         }
       },
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$finalAmount' },
+          totalRevenue: {
+            $sum: {
+              $ifNull: ['$finalAmount', { $ifNull: ['$basePrice', 0] }]
+            }
+          },
           totalBookings: { $sum: 1 }
         }
       }
@@ -83,24 +113,24 @@ const getDashboardStats = async (req, res) => {
     const approvedVendors = await Vendor.countDocuments({ approvalStatus: VENDOR_STATUS.APPROVED, ...dateFilter });
 
     // Withdrawal & Settlement stats
-    const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'pending', ...dateFilter });
-    const pendingSettlementsCount = await Settlement.countDocuments({ status: 'pending', ...dateFilter });
-    const pendingScraps = await Scrap.countDocuments({ status: 'pending', ...dateFilter });
+    const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'pending', ...dateFilter }).catch(() => 0);
+    const pendingSettlementsCount = await Settlement.countDocuments({ status: 'pending', ...dateFilter }).catch(() => 0);
+    const pendingScraps = await Scrap.countDocuments({ status: 'pending', ...dateFilter }).catch(() => 0);
 
     // Recent activities (filtered by period)
     const recentActivityDocs = await Booking.find(dateFilter)
       .populate('userId', 'name phone')
       .populate('vendorId', 'name businessName')
-      .populate('serviceId', 'title')
+      .populate('serviceId', 'title name')
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(50);
 
     const recentBookings = recentActivityDocs.map(b => ({
       id: b.bookingNumber || b._id,
       _id: b._id,
       status: b.status,
       user: { name: b.userId?.name || 'Customer' },
-      serviceType: b.serviceId?.title || b.serviceName,
+      serviceType: b.serviceName || b.serviceId?.title || b.serviceId?.name || b.serviceCategory || 'Service',
       price: b.finalAmount || b.basePrice || 0,
       createdAt: b.createdAt,
       acceptedAt: b.acceptedAt,
@@ -155,21 +185,38 @@ const getRevenueAnalytics = async (req, res) => {
       groupFormat = '%Y-%W';
     }
 
-    // Build date filter
-    const dateFilter = {};
+    let revenueDateMatch = {};
     if (startDate || endDate) {
-      dateFilter.completedAt = {};
-      if (startDate) dateFilter.completedAt.$gte = new Date(startDate);
-      if (endDate) dateFilter.completedAt.$lte = new Date(endDate);
+      const s = startDate ? new Date(startDate) : new Date(0);
+      const e = endDate ? new Date(endDate) : new Date();
+      e.setHours(23, 59, 59, 999);
+      revenueDateMatch = {
+        $or: [
+          { completedAt: { $gte: s, $lte: e } },
+          { $and: [{ completedAt: null }, { createdAt: { $gte: s, $lte: e } }] }
+        ]
+      };
     }
 
-    // Revenue analytics
+    const completedStatuses = [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CLOSED, 'completed', 'closed'];
+    const validPaymentStatuses = [
+      PAYMENT_STATUS.SUCCESS,
+      PAYMENT_STATUS.COLLECTED_BY_VENDOR,
+      'success',
+      'collected_by_vendor',
+      'collected_by_worker',
+      'paid',
+      'PAID'
+    ];
+
     const revenueData = await Booking.aggregate([
       {
         $match: {
-          status: BOOKING_STATUS.COMPLETED,
-          paymentStatus: { $in: [PAYMENT_STATUS.SUCCESS, PAYMENT_STATUS.COLLECTED_BY_VENDOR, 'success', 'collected_by_vendor', 'collected_by_worker', 'paid'] },
-          ...dateFilter
+          $or: [
+            { status: { $in: completedStatuses } },
+            { paymentStatus: { $in: validPaymentStatuses } }
+          ],
+          ...revenueDateMatch
         }
       },
       {
@@ -177,12 +224,23 @@ const getRevenueAnalytics = async (req, res) => {
           _id: {
             $dateToString: {
               format: groupFormat,
-              date: '$completedAt'
+              date: { $ifNull: ['$completedAt', '$createdAt'] }
             }
           },
-          revenue: { $sum: '$finalAmount' },
+          revenue: {
+            $sum: {
+              $ifNull: ['$finalAmount', { $ifNull: ['$basePrice', 0] }]
+            }
+          },
           bookings: { $sum: 1 },
-          platformCommission: { $sum: { $multiply: ['$finalAmount', 0.2] } }
+          platformCommission: {
+            $sum: {
+              $multiply: [
+                { $ifNull: ['$finalAmount', { $ifNull: ['$basePrice', 0] }] },
+                0.2
+              ]
+            }
+          }
         }
       },
       { $sort: { _id: 1 } }
@@ -209,35 +267,67 @@ const getRevenueAnalytics = async (req, res) => {
  */
 const getBookingTrends = async (req, res) => {
   try {
-    const { days = 30 } = req.query;
+    const { days = 30, startDate: qStartDate, endDate: qEndDate, period = 'daily' } = req.query;
 
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
+    let startDate, endDate;
+    if (qStartDate) {
+      startDate = new Date(qStartDate);
+    } else {
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(days));
+    }
+    if (qEndDate) {
+      endDate = new Date(qEndDate);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      endDate = new Date();
+    }
 
-    // Daily booking trends
+    let groupFormat = '%Y-%m-%d';
+    if (period === 'monthly') {
+      groupFormat = '%Y-%m';
+    }
+
+    const completedStatuses = [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CLOSED, 'completed', 'closed'];
+    const cancelledStatuses = [BOOKING_STATUS.CANCELLED, BOOKING_STATUS.REJECTED, 'cancelled', 'rejected'];
+
     const trends = await Booking.aggregate([
       {
         $match: {
-          createdAt: { $gte: startDate }
+          createdAt: { $gte: startDate, $lte: endDate }
         }
       },
       {
         $group: {
           _id: {
             $dateToString: {
-              format: '%Y-%m-%d',
+              format: groupFormat,
               date: '$createdAt'
             }
           },
           count: { $sum: 1 },
           completed: {
             $sum: {
-              $cond: [{ $eq: ['$status', BOOKING_STATUS.COMPLETED] }, 1, 0]
+              $cond: [{ $in: ['$status', completedStatuses] }, 1, 0]
             }
           },
           cancelled: {
             $sum: {
-              $cond: [{ $eq: ['$status', BOOKING_STATUS.CANCELLED] }, 1, 0]
+              $cond: [{ $in: ['$status', cancelledStatuses] }, 1, 0]
+            }
+          },
+          pending: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $not: [{ $in: ['$status', completedStatuses] }] },
+                    { $not: [{ $in: ['$status', cancelledStatuses] }] }
+                  ]
+                },
+                1,
+                0
+              ]
             }
           }
         }
@@ -248,7 +338,6 @@ const getBookingTrends = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        days: parseInt(days),
         trends
       }
     });
@@ -266,16 +355,26 @@ const getBookingTrends = async (req, res) => {
  */
 const getUserGrowthMetrics = async (req, res) => {
   try {
-    const { days = 30 } = req.query;
+    const { days = 30, startDate: qStartDate, endDate: qEndDate } = req.query;
 
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
+    let startDate, endDate;
+    if (qStartDate) {
+      startDate = new Date(qStartDate);
+    } else {
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - parseInt(days));
+    }
+    if (qEndDate) {
+      endDate = new Date(qEndDate);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      endDate = new Date();
+    }
 
-    // User growth
     const userGrowth = await User.aggregate([
       {
         $match: {
-          createdAt: { $gte: startDate }
+          createdAt: { $gte: startDate, $lte: endDate }
         }
       },
       {
@@ -292,11 +391,30 @@ const getUserGrowthMetrics = async (req, res) => {
       { $sort: { _id: 1 } }
     ]);
 
-    // Vendor growth
     const vendorGrowth = await Vendor.aggregate([
       {
         $match: {
-          createdAt: { $gte: startDate }
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$createdAt'
+            }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const workerGrowth = await Worker.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate }
         }
       },
       {
@@ -316,9 +434,9 @@ const getUserGrowthMetrics = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        days: parseInt(days),
         userGrowth,
-        vendorGrowth
+        vendorGrowth,
+        workerGrowth
       }
     });
   } catch (error) {
@@ -336,4 +454,5 @@ module.exports = {
   getBookingTrends,
   getUserGrowthMetrics
 };
+
 

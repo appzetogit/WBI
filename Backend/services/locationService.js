@@ -299,10 +299,14 @@ const findVendorsByCity = async (city, filters = {}) => {
 const _buildWorkerQuery = (filters = {}) => {
   const { WORKER_STATUS } = require('../utils/constants');
   
-  const serviceCategory = filters.service;
+  const serviceCategory = filters.service || filters.serviceCategory;
+  const subService = filters.subService || filters.subServiceName;
   
   const queryFilters = { ...filters };
   delete queryFilters.service;
+  delete queryFilters.serviceCategory;
+  delete queryFilters.subService;
+  delete queryFilters.subServiceName;
   delete queryFilters.city;
 
   const baseQuery = {
@@ -315,8 +319,30 @@ const _buildWorkerQuery = (filters = {}) => {
     baseQuery['address.city'] = { $regex: new RegExp(filters.city, 'i') };
   }
 
-  if (serviceCategory) {
-    baseQuery.serviceCategories = { $in: [serviceCategory] };
+  if (serviceCategory || subService) {
+    const searchTerms = [];
+    const escapeRegex = (s) => (s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    if (serviceCategory) {
+      searchTerms.push(new RegExp(escapeRegex(serviceCategory), 'i'));
+      if (serviceCategory.includes('/')) {
+        serviceCategory.split('/').forEach(part => {
+          const p = part.trim();
+          if (p) searchTerms.push(new RegExp(escapeRegex(p), 'i'));
+        });
+      }
+    }
+
+    if (subService) {
+      searchTerms.push(new RegExp(escapeRegex(subService), 'i'));
+    }
+
+    baseQuery.$or = [
+      { serviceCategories: { $in: searchTerms } },
+      { 'subServices.name': { $in: searchTerms } },
+      { secondarySkills: { $in: searchTerms } },
+      { skills: { $in: searchTerms } }
+    ];
   }
 
   return baseQuery;

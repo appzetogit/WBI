@@ -13,10 +13,17 @@ const getRegistrationConfig = async (req, res) => {
   try {
     const role = 'worker';
 
-    const categories = await ServiceCategory.find({ isActive: true, type: 'ONE_TIME', roles: 'worker' }).select('name icon image description').lean();
+    const categories = await ServiceCategory.find({ isActive: true })
+      .select('name icon image description')
+      .sort({ displayOrder: 1, name: 1 })
+      .lean();
 
-    const subServices = await Service.find({ status: 'active', type: 'ONE_TIME' })
-      .select('title name categoryId image requiresCertification requiredDocuments')
+    const oneTimeServices = await OneTimeService.find({ isActive: { $ne: false } })
+      .select('name categoryId image imageUrl slug startingPrice estimatedTime')
+      .lean();
+
+    const subServices = await Service.find({ status: { $ne: 'inactive' } })
+      .select('title name categoryId image requiresCertification requiredDocuments slug basePrice duration')
       .lean();
 
     const documents = await WorkerDocumentConfig.find({ isActive: true }).sort({ order: 1 }).lean();
@@ -75,6 +82,47 @@ const getRegistrationConfig = async (req, res) => {
       }
     }
 
+    const seenSubServices = new Set();
+    const combinedSubServices = [];
+
+    oneTimeServices.forEach((s) => {
+      const title = (s.name || s.title || '').trim();
+      const catId = s.categoryId ? s.categoryId.toString() : '';
+      const key = `${catId}_${title.toLowerCase()}`;
+      if (title && !seenSubServices.has(key)) {
+        seenSubServices.add(key);
+        combinedSubServices.push({
+          id: s._id.toString(),
+          _id: s._id.toString(),
+          name: title,
+          title: title,
+          categoryId: catId,
+          image: s.image || s.imageUrl || '',
+          startingPrice: s.startingPrice || 0,
+          estimatedTime: s.estimatedTime || '30-60 min'
+        });
+      }
+    });
+
+    subServices.forEach((s) => {
+      const title = (s.title || s.name || '').trim();
+      const catId = s.categoryId ? s.categoryId.toString() : '';
+      const key = `${catId}_${title.toLowerCase()}`;
+      if (title && !seenSubServices.has(key)) {
+        seenSubServices.add(key);
+        combinedSubServices.push({
+          id: s._id.toString(),
+          _id: s._id.toString(),
+          name: title,
+          title: title,
+          categoryId: catId,
+          image: s.image || '',
+          requiresCertification: s.requiresCertification || false,
+          requiredDocuments: s.requiredDocuments || []
+        });
+      }
+    });
+
     res.status(200).json({
       success: true,
       config: {
@@ -89,18 +137,7 @@ const getRegistrationConfig = async (req, res) => {
           name: c.name,
           icon: c.icon
         })),
-        subServices: subServices
-          .filter((s) => categories.some((cat) => cat._id.toString() === s.categoryId?.toString()))
-          .map((s) => ({
-            id: s._id.toString(),
-            _id: s._id.toString(),
-            name: s.title || s.name,
-            title: s.title || s.name,
-            categoryId: s.categoryId ? s.categoryId.toString() : null,
-            image: s.image || '',
-            requiresCertification: s.requiresCertification || false,
-            requiredDocuments: s.requiredDocuments || []
-          })),
+        subServices: combinedSubServices,
         documents: documents.map((d) => ({
           key: d.key,
           title: d.title,

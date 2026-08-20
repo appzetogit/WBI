@@ -75,6 +75,7 @@ const EngineerRoutes = () => {
     location.pathname === '/engineer/login' ||
     location.pathname === '/engineer/signup' ||
     location.pathname === '/engineer/forgot-password' ||
+    location.pathname.startsWith('/engineer/job') ||
     location.pathname.endsWith('/map') ||
     location.pathname.endsWith('/success') ||
     location.pathname.includes('/billing') ||

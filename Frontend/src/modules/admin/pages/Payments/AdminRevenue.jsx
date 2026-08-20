@@ -307,7 +307,7 @@ const AdminRevenue = () => {
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-sm font-bold text-green-600">
-                        +{formatCurrency(tx.amount)}
+                        +{formatCurrency(Math.abs(tx.amount || 0))}
                       </span>
                     </td>
                     <td className="px-6 py-4">

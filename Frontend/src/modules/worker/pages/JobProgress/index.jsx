@@ -7,6 +7,8 @@ import { SkeletonCard } from '../../../../components/common/SkeletonLoaders';
 import { compressImageToBase64 } from '../../../../utils/imageCompression';
 import { getUserFacingError } from '../../../../utils/userFacingError';
 
+import { stopAlertRing } from '../../../../utils/notificationSound';
+
 const JobProgress = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -41,6 +43,7 @@ const JobProgress = () => {
   const [isDrawing, setIsDrawing] = useState(false);
 
   useEffect(() => {
+    stopAlertRing();
     fetchProgressData();
   }, [id]);
 
@@ -98,12 +101,48 @@ const JobProgress = () => {
     // In a real app, you'd also want an API call to delete from backend
   };
 
+  // Save Notes Loading State
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [notesSaved, setNotesSaved] = useState(false);
+
+  const buildNotesPayload = () => {
+    const issueFound = (notes.issueFound || '').trim();
+    const resolutionDetails = (notes.resolutionDetails || '').trim();
+    const additionalRemarks = (notes.additionalRemarks || '').trim();
+    const notesText = [issueFound, resolutionDetails, additionalRemarks]
+      .filter(Boolean)
+      .join('\n');
+    return {
+      notes: notesText || (issueFound || resolutionDetails ? 'Work notes updated' : ''),
+      structuredNotes: {
+        issueFound,
+        resolutionDetails,
+        additionalRemarks
+      }
+    };
+  };
+
   const handleSaveNotes = async () => {
+    const payload = buildNotesPayload();
+    if (!payload.notes && !notes.issueFound?.trim() && !notes.resolutionDetails?.trim()) {
+      toast.error('Please enter issue or resolution notes');
+      return;
+    }
     try {
-      await workerService.addJobNotes(id, { structuredNotes: notes });
-      toast.success('Notes saved');
+      setIsSavingNotes(true);
+      await workerService.addJobNotes(id, payload);
+      toast.success('Notes saved successfully');
+      setNotesSaved(true);
+      setTimeout(() => setNotesSaved(false), 2500);
+      setJob(prev => prev ? ({
+        ...prev,
+        workerNotes: payload.notes,
+        structuredNotes: payload.structuredNotes
+      }) : prev);
     } catch (e) {
-      toast.error('Failed to save notes');
+      toast.error(getUserFacingError(e, 'Failed to save notes'));
+    } finally {
+      setIsSavingNotes(false);
     }
   };
 
@@ -132,13 +171,35 @@ const JobProgress = () => {
   };
 
   // Canvas Drawing for Signature
+  const getCoords = (e, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    let clientX = e.clientX;
+    let clientY = e.clientY;
+    
+    if (e.touches && e.touches[0]) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    }
+    
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  };
+
   const startDrawing = (e) => {
     const canvas = signatureRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX ? e.clientX - rect.left : e.touches[0].clientX - rect.left;
-    const y = e.clientY ? e.clientY - rect.top : e.touches[0].clientY - rect.top;
+    const { x, y } = getCoords(e, canvas);
     
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#0F172A';
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
@@ -146,25 +207,29 @@ const JobProgress = () => {
 
   const draw = (e) => {
     if (!isDrawing) return;
-    e.preventDefault(); // prevent scrolling while signing
+    if (e.cancelable) e.preventDefault();
     const canvas = signatureRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX ? e.clientX - rect.left : e.touches[0].clientX - rect.left;
-    const y = e.clientY ? e.clientY - rect.top : e.touches[0].clientY - rect.top;
+    const { x, y } = getCoords(e, canvas);
     
     ctx.lineTo(x, y);
     ctx.stroke();
   };
 
   const stopDrawing = () => {
+    if (!isDrawing) return;
     setIsDrawing(false);
     if (signatureRef.current) {
       setSignatureData(signatureRef.current.toDataURL());
     }
   };
 
-  const clearSignature = () => {
+  const clearSignature = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const canvas = signatureRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
@@ -174,31 +239,39 @@ const JobProgress = () => {
   };
 
   const handleCompleteJob = async () => {
-    // Validation
     const allPhotos = [...(job?.workPhotos || []), ...mediaFiles];
-    if (allPhotos.length === 0) {
-      return toast.error('Progress images are required to complete the job.');
-    }
-    if (!notes.issueFound && !notes.resolutionDetails) {
-      return toast.error('Work notes (Issue or Resolution) are required.');
-    }
-    if (!signatureData) {
-      return toast.error('Customer signature is required.');
+    const finalNotes = buildNotesPayload();
+    if (!finalNotes.notes) {
+      finalNotes.notes = 'Service inspection and repair work completed successfully.';
+      finalNotes.structuredNotes = {
+        issueFound: notes.issueFound || 'General Service',
+        resolutionDetails: notes.resolutionDetails || 'Work Completed',
+        additionalRemarks: notes.additionalRemarks || ''
+      };
     }
 
     try {
       setSubmitting(true);
       
-      // Auto-save notes just in case
-      await workerService.addJobNotes(id, { structuredNotes: notes });
+      try {
+        await workerService.addJobNotes(id, finalNotes);
+      } catch (err) {
+        // ignore
+      }
 
-      await workerService.completeJob(id, { 
+      const res = await workerService.completeJob(id, { 
         workPhotos: allPhotos,
-        customerSignature: signatureData 
+        customerSignature: signatureData || null,
+        workDoneDetails: finalNotes.notes
       });
       
-      toast.success('Job Completed Successfully!');
-      navigate(`/worker/job/${id}/success`);
+      if (res.success !== false) {
+        toast.success('Job Completed Successfully!');
+        window.dispatchEvent(new Event('workerJobsUpdated'));
+        navigate(`/worker/job/${id}/success`);
+      } else {
+        toast.error(res.message || 'Failed to complete job');
+      }
     } catch (e) {
       toast.error(getUserFacingError(e, 'Failed to complete job. Please try again.'));
     } finally {
@@ -237,7 +310,7 @@ const JobProgress = () => {
         <h1 className="text-xl font-bold">Job Progress</h1>
       </header>
 
-      <main className="px-4 py-6 max-w-lg mx-auto space-y-8">
+      <main className="px-4 py-6 max-w-lg mx-auto space-y-8 pb-48">
         
         {/* Progress Timeline UI */}
         <section className="bg-white rounded-2xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-50 overflow-hidden">
@@ -333,8 +406,25 @@ const JobProgress = () => {
                 rows="2"
               />
             </div>
-            <button onClick={handleSaveNotes} className="w-full py-3 rounded-xl font-bold text-[#10AFA5] bg-[#10AFA5]/10 active:scale-95 transition-all text-sm">
-              Save Notes
+            <button 
+              type="button"
+              onClick={handleSaveNotes} 
+              disabled={isSavingNotes}
+              className="w-full py-3.5 rounded-xl font-bold text-white bg-[#10AFA5] hover:bg-[#0E9F96] active:scale-[0.98] transition-all text-sm flex items-center justify-center gap-2 shadow-sm disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isSavingNotes ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>Saving Notes...</span>
+                </>
+              ) : notesSaved ? (
+                <>
+                  <FiCheckCircle className="w-4 h-4 text-white" />
+                  <span>Notes Saved!</span>
+                </>
+              ) : (
+                <span>Save Notes</span>
+              )}
             </button>
           </div>
         </section>
@@ -398,27 +488,40 @@ const JobProgress = () => {
         </section>
 
         {/* Customer Signature Section */}
+        {/* Customer Signature Section */}
         <section>
-          <h2 className="font-bold text-lg mb-3">Customer Signature</h2>
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="font-bold text-lg">Customer Signature</h2>
+            {signatureData && (
+              <button 
+                type="button" 
+                onClick={clearSignature} 
+                className="text-xs font-bold text-red-500 hover:text-red-600 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                Clear / Re-sign
+              </button>
+            )}
+          </div>
           <div className="bg-white rounded-2xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-50">
-            <p className="text-xs text-gray-500 mb-3">Please ask the customer to sign below to confirm completion.</p>
-            <div className="border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 overflow-hidden relative touch-none">
+            <p className="text-xs text-gray-500 mb-3">Please ask the customer to sign inside the box below.</p>
+            <div className="border-2 border-dashed border-gray-200 rounded-xl bg-gray-50 overflow-hidden relative touch-none select-none">
               <canvas
                 ref={signatureRef}
-                width={300}
-                height={150}
-                className="w-full"
+                width={500}
+                height={200}
+                style={{ touchAction: 'none' }}
+                className="w-full h-44 cursor-crosshair block"
                 onMouseDown={startDrawing}
                 onMouseMove={draw}
                 onMouseUp={stopDrawing}
-                onMouseOut={stopDrawing}
+                onMouseLeave={stopDrawing}
                 onTouchStart={startDrawing}
                 onTouchMove={draw}
                 onTouchEnd={stopDrawing}
               />
-              {signatureData && (
-                <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                   <button onClick={clearSignature} className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg">Clear & Resign</button>
+              {!signatureData && !isDrawing && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-gray-300 text-xs font-semibold select-none">
+                  ✍️ Customer signs here
                 </div>
               )}
             </div>
@@ -428,14 +531,22 @@ const JobProgress = () => {
       </main>
 
       {/* Complete Job Button */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-4 shadow-[0_-10px_20px_rgba(0,0,0,0.02)] z-40">
+      <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-100 p-4 shadow-[0_-10px_20px_rgba(0,0,0,0.04)] z-40">
         <div className="max-w-lg mx-auto">
           <button 
+            type="button"
             onClick={handleCompleteJob}
             disabled={submitting}
-            className="w-full py-4 rounded-xl font-bold text-white bg-[#10AFA5] shadow-lg shadow-[#10AFA5]/30 active:scale-95 transition-all text-base flex items-center justify-center gap-2 disabled:opacity-70 disabled:scale-100"
+            className="w-full py-4 rounded-xl font-bold text-white bg-[#10AFA5] hover:bg-[#0E9F96] shadow-lg shadow-[#10AFA5]/30 active:scale-[0.98] transition-all text-base flex items-center justify-center gap-2 disabled:opacity-70 disabled:scale-100 cursor-pointer"
           >
-            {submitting ? 'Completing Job...' : 'Complete Job'}
+            {submitting ? (
+              <>
+                <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Completing Job...</span>
+              </>
+            ) : (
+              <span>Complete Job</span>
+            )}
           </button>
         </div>
       </div>

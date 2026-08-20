@@ -3,7 +3,14 @@ import { io } from 'socket.io-client';
 import { toast } from 'react-hot-toast';
 import { playNotificationSound, isSoundEnabled } from '../utils/notificationSound';
 
-const SOCKET_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com';
+const isLocal =
+  typeof window !== 'undefined' &&
+  (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
+    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(window.location.hostname));
+
+const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  (isLocal ? window.location.origin : (import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com'));
 
 /**
  * Custom hook for vendor real-time notifications

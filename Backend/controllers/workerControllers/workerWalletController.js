@@ -28,10 +28,12 @@ const getWallet = async (req, res) => {
     const completedTransactions = await Transaction.find({
       workerId: workerId,
       status: 'completed',
-      type: { $in: ['worker_payment', 'commission', 'cash_collected', 'earnings_credit'] }
+      type: { $in: ['worker_payment', 'commission', 'cash_collected', 'earnings_credit', 'credit'] }
     });
     
-    const totalEarnings = completedTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    const earningsTx = completedTransactions.filter(t => t.type === 'earnings_credit' || t.type === 'worker_payment' || t.type === 'credit' || (t.type === 'commission' && t.amount > 0));
+    const calculatedTotalEarnings = earningsTx.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    const totalEarnings = calculatedTotalEarnings > 0 ? calculatedTotalEarnings : (worker.wallet?.totalEarnings || 0);
 
     const approvedWithdrawals = await Withdrawal.find({ workerId, status: 'approved' });
     const withdrawnAmount = approvedWithdrawals.reduce((sum, w) => sum + w.amount, 0);
@@ -178,13 +180,17 @@ const getWalletSummary = async (req, res) => {
     // Pending bookings sum
     const pendingBookings = await Booking.find({
       workerId: workerId,
-      status: 'completed',
-      workerPaymentStatus: 'PENDING'
+      status: { $in: ['completed', 'work_done'] },
+      $or: [
+        { workerPaymentStatus: 'PENDING' },
+        { isWorkerPaid: false }
+      ]
     });
 
-    // In a real system, you'd calculate exact worker commission from VendorBill.
-    // Here we use finalAmount as a proxy if no explicit commission is set.
-    const pendingPayouts = pendingBookings.reduce((sum, b) => sum + (b.finalAmount || 0), 0);
+    const pendingPayouts = pendingBookings.reduce((sum, b) => {
+      const payout = b.workerPayout || (b.subTotal ? (b.subTotal * (1 - (b.workerCommissionRate || 20) / 100)) : (b.finalAmount ? b.finalAmount * 0.8 : 0));
+      return sum + (Number(payout) || 0);
+    }, 0);
 
     // Total Monthly Earnings
     const startOfMonth = new Date();
@@ -194,18 +200,22 @@ const getWalletSummary = async (req, res) => {
     const monthlyTransactions = await Transaction.find({
       workerId: workerId,
       status: 'completed',
-      type: { $in: ['worker_payment', 'cash_collected', 'credit', 'commission'] },
+      type: { $in: ['earnings_credit', 'worker_payment', 'credit', 'commission'] },
+      amount: { $gt: 0 },
       createdAt: { $gte: startOfMonth }
     });
 
-    const totalMonthlyEarnings = monthlyTransactions.reduce((sum, t) => sum + t.amount, 0);
+    let totalMonthlyEarnings = monthlyTransactions.reduce((sum, t) => sum + t.amount, 0);
+    if (totalMonthlyEarnings === 0 && worker.wallet?.totalEarnings) {
+      totalMonthlyEarnings = worker.wallet.totalEarnings;
+    }
 
     res.status(200).json({
       success: true,
       data: {
         walletBalance: worker.wallet?.balance || 0,
-        pendingPayouts: pendingPayouts,
-        totalMonthlyEarnings: totalMonthlyEarnings,
+        pendingPayouts: Math.round(pendingPayouts * 100) / 100,
+        totalMonthlyEarnings: Math.round(totalMonthlyEarnings * 100) / 100,
       }
     });
 

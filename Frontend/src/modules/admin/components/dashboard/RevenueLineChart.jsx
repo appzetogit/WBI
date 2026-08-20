@@ -9,29 +9,29 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { filterByDateRange, getDateRange, formatDate, formatCurrency } from '../../utils/adminHelpers';
+import { formatCurrency } from '../../utils/adminHelpers';
 
-const RevenueLineChart = ({ data, period = 'month' }) => {
-  const filteredData = useMemo(() => {
-    const range = getDateRange(period);
-    const filtered = filterByDateRange(data, range.start, range.end);
-    return filtered.map((item) => ({
+const RevenueLineChart = ({ data = [] }) => {
+  const chartData = useMemo(() => {
+    return (data || []).map((item) => ({
       ...item,
-      dateLabel: formatDate(item.date, { month: 'short', day: 'numeric' }),
+      dateLabel: item.dateLabel || item.date || '',
+      revenue: Number(item.revenue || 0)
     }));
-  }, [data, period]);
+  }, [data]);
+
+  const maxRevenue = useMemo(() => {
+    return Math.max(0, ...chartData.map(d => d.revenue));
+  }, [chartData]);
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-white p-3 rounded-lg shadow-lg border border-gray-200">
-          <p className="text-sm font-semibold text-gray-800 mb-2">{label}</p>
-          {payload.map((entry, index) => (
-            <p key={index} className="text-sm" style={{ color: entry.color }}>
-              <span className="font-medium">{entry.name}:</span>{' '}
-              {formatCurrency(entry.value)}
-            </p>
-          ))}
+          <p className="text-sm font-semibold text-gray-800 mb-1">{label}</p>
+          <p className="text-sm text-blue-600 font-bold">
+            Revenue: {formatCurrency(payload[0]?.value || 0)}
+          </p>
         </div>
       );
     }
@@ -50,47 +50,50 @@ const RevenueLineChart = ({ data, period = 'month' }) => {
           <p className="text-xs sm:text-sm text-gray-500 mt-1">Track revenue over time</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-500 to-purple-500" />
-          <span className="text-xs text-gray-600">Revenue</span>
+          <div className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-500 to-indigo-600" />
+          <span className="text-xs font-semibold text-gray-600">Revenue</span>
         </div>
       </div>
 
       <div className="w-full overflow-x-auto scrollbar-admin">
-        <ResponsiveContainer width="100%" height={250} minHeight={200}>
-          <AreaChart data={filteredData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height={260} minHeight={200}>
+          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <defs>
               <linearGradient id="colorRevenueAdmin" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
+                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis
               dataKey="dateLabel"
-              stroke="#6b7280"
-              fontSize={10}
+              stroke="#94a3b8"
+              fontSize={11}
               tickLine={false}
               axisLine={false}
               angle={-45}
               textAnchor="end"
-              height={60}
+              height={55}
             />
             <YAxis
-              stroke="#6b7280"
-              fontSize={10}
+              stroke="#94a3b8"
+              fontSize={11}
               tickLine={false}
               axisLine={false}
-              tickFormatter={(v) => `₹${Math.round(v / 1000)}k`}
-              width={50}
+              tickFormatter={(v) => (v >= 1000 ? `₹${Math.round(v / 1000)}k` : `₹${v}`)}
+              domain={[0, maxRevenue > 0 ? 'auto' : 1000]}
+              width={55}
             />
             <Tooltip content={<CustomTooltip />} />
             <Area
               type="monotone"
               dataKey="revenue"
               stroke="#3b82f6"
-              strokeWidth={2}
+              strokeWidth={2.5}
               fill="url(#colorRevenueAdmin)"
               name="Revenue"
+              dot={chartData.length <= 15 ? { r: 3, fill: '#3b82f6' } : false}
+              activeDot={{ r: 6, fill: '#2563eb' }}
             />
           </AreaChart>
         </ResponsiveContainer>
@@ -100,5 +103,6 @@ const RevenueLineChart = ({ data, period = 'month' }) => {
 };
 
 export default RevenueLineChart;
+
 
 

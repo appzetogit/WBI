@@ -155,7 +155,6 @@ const workerSchema = new mongoose.Schema({
   }],
   availability: {
     type: String,
-    enum: ['Full Time', 'Part Time', 'Weekends', 'Emergency Support'],
     default: 'Full Time'
   },
   workingDays: [{
@@ -185,7 +184,9 @@ const workerSchema = new mongoose.Schema({
     state: String,
     pincode: String,
     landmark: String,
-    fullAddress: String
+    fullAddress: String,
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null }
   },
   rating: {
     type: Number,

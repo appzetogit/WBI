@@ -58,10 +58,9 @@ const TrustBadges = () => (
 const MyBookings = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { socket } = useSocket();
+  const socketObj = useSocket();
+  const socket = socketObj?.socket || socketObj;
   const [filter, setFilter] = useState('all');
-
-  // React Query for Infinite Loading Bookings
   const {
     data,
     fetchNextPage,

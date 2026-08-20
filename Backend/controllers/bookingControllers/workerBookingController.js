@@ -500,11 +500,18 @@ const verifyVisit = async (req, res) => {
  */
 const completeJob = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
     const { workPhotos, workDoneDetails, customerSignature, completionReport } = req.body;
 
-    const booking = await Booking.findOne({ _id: id, workerId });
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    });
 
     if (!booking) {
       return res.status(404).json({
@@ -513,15 +520,15 @@ const completeJob = async (req, res) => {
       });
     }
 
-    if (booking.status !== BOOKING_STATUS.VISITED && booking.status !== BOOKING_STATUS.IN_PROGRESS) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot complete job with status: ${booking.status}`
-      });
-    }
+    const isPrepaid = booking.paymentStatus === 'paid' || booking.paymentStatus === 'success' || booking.paymentMethod === 'online' || booking.paymentMethod === 'razorpay';
 
-    // Update booking
-    booking.status = BOOKING_STATUS.WORK_DONE;
+    // Update booking status
+    if (isPrepaid) {
+      booking.status = BOOKING_STATUS.COMPLETED;
+    } else {
+      booking.status = BOOKING_STATUS.WORK_DONE;
+    }
+    booking.completedAt = booking.completedAt || new Date();
 
     // Reuse existing Payment OTP or generate new one
     const defaultOtp = (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true')
@@ -543,14 +550,79 @@ const completeJob = async (req, res) => {
       booking.completionReport = completionReport;
     }
 
-    // Validation Check (required before complete)
-    if (!booking.workPhotos || booking.workPhotos.length === 0) {
-      return res.status(400).json({ success: false, message: 'Progress images are required to complete the job.' });
+    // If Prepaid / Online Paid, credit worker/vendor wallet immediately if not yet credited
+    if (isPrepaid && !booking.isWorkerPaid) {
+      const VendorBill = require('../../models/VendorBill');
+      const vendorBill = await VendorBill.findOne({ bookingId: booking._id });
+
+      let workerPayout = 0;
+      if (vendorBill && (vendorBill.vendorTotalEarning || vendorBill.workerEarning)) {
+        workerPayout = Number(vendorBill.vendorTotalEarning || vendorBill.workerEarning) || 0;
+      } else if (booking.workerPayout && booking.workerPayout > 0) {
+        workerPayout = Number(booking.workerPayout);
+      } else if (booking.subTotal && booking.subTotal > 0) {
+        const commissionRate = booking.workerCommissionRate || 20;
+        workerPayout = Math.round((booking.subTotal * (1 - commissionRate / 100)) * 100) / 100;
+      } else if (booking.finalAmount && booking.finalAmount > 0) {
+        workerPayout = Math.round((booking.finalAmount * 0.8) * 100) / 100;
+      }
+
+      booking.workerPayout = workerPayout;
+
+      if (booking.vendorId) {
+        const Vendor = require('../../models/Vendor');
+        await Vendor.findByIdAndUpdate(booking.vendorId, {
+          $inc: { 'wallet.earnings': workerPayout }
+        });
+      }
+
+      const WorkerModel = require('../../models/Worker');
+      const targetWorkerId = booking.workerId || workerId;
+      const workerDoc = await WorkerModel.findById(targetWorkerId);
+      if (workerDoc) {
+        if (!workerDoc.wallet) {
+          workerDoc.wallet = { balance: 0, totalEarnings: 0, pendingBalance: 0, withdrawnAmount: 0 };
+        }
+        workerDoc.wallet.balance = (workerDoc.wallet.balance || 0) + workerPayout;
+        workerDoc.wallet.totalEarnings = (workerDoc.wallet.totalEarnings || 0) + workerPayout;
+        workerDoc.completedJobs = (workerDoc.completedJobs || 0) + 1;
+        await workerDoc.save();
+
+        const Transaction = require('../../models/Transaction');
+        await Transaction.create({
+          workerId: targetWorkerId,
+          bookingId: booking._id,
+          type: 'earnings_credit',
+          amount: workerPayout,
+          status: 'completed',
+          paymentMethod: 'wallet',
+          description: `Earning ₹${workerPayout} credited for booking #${booking.bookingNumber} (Online Payment)`,
+          metadata: {
+            type: 'earnings_increase',
+            workerPayout,
+            finalAmount: booking.finalAmount
+          }
+        });
+      }
+
+      booking.isWorkerPaid = true;
+      booking.workerPaymentStatus = 'SUCCESS';
+
+      // Record platform daily earning for Admin reports & dashboards
+      try {
+        const { recordBookingEarning } = require('../../services/earningTrackerService');
+        await recordBookingEarning({
+          date: booking.completedAt || new Date(),
+          totalRevenue: booking.finalAmount || 0,
+          platformCommission: booking.platformEarning || ((booking.finalAmount || 0) - workerPayout),
+          vendorEarnings: workerPayout,
+          totalGST: booking.tax || 0,
+          totalTDS: 0
+        });
+      } catch (earnErr) {
+        console.warn('[EarningTracker] Non-blocking tracking error:', earnErr.message);
+      }
     }
-    if (!booking.structuredNotes || (!booking.structuredNotes.issueFound && !booking.structuredNotes.resolutionDetails && !booking.workerNotes)) {
-      return res.status(400).json({ success: false, message: 'Work notes are required to complete the job.' });
-    }
-    // We assume customerSignature or OTP verified. We won't block strictly on materials because some jobs might not need materials.
 
     await booking.save();
 
@@ -562,7 +634,7 @@ const completeJob = async (req, res) => {
       userId: booking.userId,
       type: 'work_completed',
       title: 'Work Completed',
-      message: `Work finished!  Please wait for the bill expert is preparing !`,
+      message: `Work finished! Please check job summary.`,
       relatedId: booking._id,
       relatedType: 'booking',
       priority: 'high',
@@ -573,52 +645,54 @@ const completeJob = async (req, res) => {
       }
     });
 
-    // 2. Notify user with Final Bill and OTP
-    await createNotification({
-      userId: booking.userId,
-      type: 'work_done',
-      title: 'Billing Ready',
-      message: `Bill Generated: ₹${booking.finalAmount}. Your verification OTP is ${payOtp}. Please verify and share OTP to complete.`,
-      relatedId: booking._id,
-      relatedType: 'booking',
-      priority: 'high',
-      pushData: {
+    if (!isPrepaid) {
+      // 2. Notify user with Final Bill and OTP for COD
+      await createNotification({
+        userId: booking.userId,
         type: 'work_done',
-        bookingId: booking._id.toString(),
-        paymentOtp: payOtp,
-        link: `/user/booking/${booking._id}`
-      }
-    });
+        title: 'Billing Ready',
+        message: `Bill Generated: ₹${booking.finalAmount}. Your verification OTP is ${payOtp}. Please verify and share OTP to complete.`,
+        relatedId: booking._id,
+        relatedType: 'booking',
+        priority: 'high',
+        pushData: {
+          type: 'work_done',
+          bookingId: booking._id.toString(),
+          paymentOtp: payOtp,
+          link: `/user/booking/${booking._id}`
+        }
+      });
+    }
 
     // Notify vendor
-    await createNotification({
-      vendorId: booking.vendorId,
-      type: 'worker_completed',
-      title: 'Work Done',
-      message: `Your worker has marked work as done for booking ${booking.bookingNumber}.`,
-      relatedId: booking._id,
-      relatedType: 'booking',
-      pushData: {
+    if (booking.vendorId) {
+      await createNotification({
+        vendorId: booking.vendorId,
         type: 'worker_completed',
-        bookingId: booking._id.toString(),
-        link: `/vendor/bookings/${booking._id}`
-      }
-    });
+        title: 'Work Done',
+        message: `Your worker has marked work as done for booking ${booking.bookingNumber}.`,
+        relatedId: booking._id,
+        relatedType: 'booking',
+        pushData: {
+          type: 'worker_completed',
+          bookingId: booking._id.toString(),
+          link: `/vendor/bookings/${booking._id}`
+        }
+      });
+    }
 
     // Explicitly emit socket event to ensure user gets real-time update
     const io = req.app.get('io');
     if (io) {
       io.to(`user_${booking.userId}`).emit('booking_updated', {
         bookingId: booking._id,
-        status: BOOKING_STATUS.WORK_DONE
+        status: booking.status
       });
-
-      // Socket notification removed - createNotification already handles this
     }
 
     res.status(200).json({
       success: true,
-      message: 'Work done marked, OTP sent to user',
+      message: isPrepaid ? 'Job completed and payment settled successfully' : 'Work done marked, OTP sent to user',
       data: booking
     });
   } catch (error) {
@@ -654,18 +728,31 @@ const collectCash = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
 
-    // Fetch VendorBill (single source of truth)
+    // Fetch VendorBill (if any) or fallback to booking details
     const VendorBill = require('../../models/VendorBill');
     const bill = await VendorBill.findOne({ bookingId: booking._id });
-    if (!bill) {
-      return res.status(500).json({ success: false, message: 'Bill not found — cannot process payment' });
+
+    const grandTotal = bill ? (Number(bill.grandTotal) || 0) : (Number(booking.finalAmount) || 0);
+
+    let vendorEarning = 0;
+    if (bill && (bill.vendorTotalEarning || bill.workerEarning)) {
+      vendorEarning = Number(bill.vendorTotalEarning || bill.workerEarning) || 0;
+    } else if (booking.workerPayout && booking.workerPayout > 0) {
+      vendorEarning = Number(booking.workerPayout);
+    } else if (booking.subTotal && booking.subTotal > 0) {
+      const commissionRate = booking.workerCommissionRate || 20;
+      vendorEarning = Math.round((booking.subTotal * (1 - commissionRate / 100)) * 100) / 100;
+    } else {
+      vendorEarning = Math.round((grandTotal * 0.8) * 100) / 100;
     }
 
-    const grandTotal = Number(bill.grandTotal) || 0;
-    const vendorEarning = Number(bill.vendorTotalEarning) || 0;
+    const companyRevenue = bill ? (Number(bill.companyRevenue) || (grandTotal - vendorEarning)) : (grandTotal - vendorEarning);
 
     // Update Booking Status
     booking.status = BOOKING_STATUS.COMPLETED;
+    booking.workerPayout = vendorEarning;
+    booking.isWorkerPaid = true;
+    booking.workerPaymentStatus = 'SUCCESS';
     
     if (booking.paymentStatus === 'escrowed') {
       booking.paymentMethod = 'escrow_wallet';
@@ -684,10 +771,12 @@ const collectCash = async (req, res) => {
     booking.paymentOtp = undefined;
     await booking.save();
 
-    // Mark bill as paid
-    bill.status = 'paid';
-    bill.paidAt = new Date();
-    await bill.save();
+    // Mark bill as paid if exists
+    if (bill) {
+      bill.status = 'paid';
+      bill.paidAt = new Date();
+      await bill.save();
+    }
 
     // Update Vendor Wallet
     const Vendor = require('../../models/Vendor');
@@ -760,10 +849,10 @@ const collectCash = async (req, res) => {
           metadata: {
             type: 'dues_increase',
             collectedBy: 'worker',
-            billId: bill._id.toString(),
+            billId: bill ? bill._id.toString() : null,
             grandTotal,
             vendorEarning,
-            companyRevenue: bill.companyRevenue
+            companyRevenue
           }
         });
 
@@ -776,30 +865,30 @@ const collectCash = async (req, res) => {
             amount: vendorEarning,
             status: 'completed',
             paymentMethod: 'wallet',
-            description: `Earnings ₹${vendorEarning} credited for booking #${booking.bookingNumber} (70% service + 10% parts)`,
+            description: `Earnings ₹${vendorEarning} credited for booking #${booking.bookingNumber}`,
             metadata: {
               type: 'earnings_increase',
-              billId: bill._id.toString(),
-              serviceEarning: bill.vendorServiceEarning,
-              partsEarning: bill.vendorPartsEarning
+              billId: bill ? bill._id.toString() : null,
+              serviceEarning: bill ? bill.vendorServiceEarning : vendorEarning,
+              partsEarning: bill ? bill.vendorPartsEarning : 0
             }
           });
         }
       }
-    } else if (booking.workerId) {
+    } else if (booking.workerId || workerId) {
       // Independent worker wallet update
       const WorkerModel = require('../../models/Worker');
-      const workerDoc = await WorkerModel.findById(workerId);
+      const targetWorkerId = booking.workerId || workerId;
+      const workerDoc = await WorkerModel.findById(targetWorkerId);
       if (workerDoc) {
         if (!workerDoc.wallet) {
-          workerDoc.wallet = { balance: 0, totalEarnings: 0 };
+          workerDoc.wallet = { balance: 0, totalEarnings: 0, pendingBalance: 0, withdrawnAmount: 0 };
         }
-        
-        const companyRevenue = Number(bill.companyRevenue) || 0;
         
         // Net wallet balance deduction is companyRevenue (math: +vendorEarning - grandTotal = -companyRevenue)
         workerDoc.wallet.balance = (workerDoc.wallet.balance || 0) - companyRevenue;
         workerDoc.wallet.totalEarnings = (workerDoc.wallet.totalEarnings || 0) + vendorEarning;
+        workerDoc.completedJobs = (workerDoc.completedJobs || 0) + 1;
         await workerDoc.save();
 
         // Create Transactions
@@ -807,7 +896,7 @@ const collectCash = async (req, res) => {
 
         // 1. Cash Collected
         await Transaction.create({
-          workerId: booking.workerId,
+          workerId: targetWorkerId,
           bookingId: booking._id,
           type: 'cash_collected',
           amount: grandTotal,
@@ -817,7 +906,7 @@ const collectCash = async (req, res) => {
           metadata: {
             type: 'dues_increase',
             collectedBy: 'worker',
-            billId: bill._id.toString(),
+            billId: bill ? bill._id.toString() : null,
             grandTotal,
             vendorEarning,
             companyRevenue
@@ -827,7 +916,7 @@ const collectCash = async (req, res) => {
         // 2. Earnings Credit
         if (vendorEarning > 0) {
           await Transaction.create({
-            workerId: booking.workerId,
+            workerId: targetWorkerId,
             bookingId: booking._id,
             type: 'earnings_credit',
             amount: vendorEarning,
@@ -836,26 +925,29 @@ const collectCash = async (req, res) => {
             description: `Earnings ₹${vendorEarning} credited for booking #${booking.bookingNumber}`,
             metadata: {
               type: 'earnings_increase',
-              billId: bill._id.toString(),
-              serviceEarning: bill.vendorServiceEarning,
-              partsEarning: bill.vendorPartsEarning
+              billId: bill ? bill._id.toString() : null,
+              vendorEarning,
+              companyRevenue
             }
           });
         }
       }
     }
 
-    // Notify User
-    const { createNotification } = require('../notificationControllers/notificationController');
-    await createNotification({
-      userId: booking.userId,
-      type: 'payment_received',
-      title: 'Payment Received (Cash)',
-      message: `Payment of ₹${grandTotal} received in cash for booking ${booking.bookingNumber}. Job Completed. Thanks!`,
-      relatedId: booking._id,
-      relatedType: 'booking',
-      priority: 'high'
-    });
+    // Record platform daily earning for Admin reports & dashboards
+    try {
+      const { recordBookingEarning } = require('../../services/earningTrackerService');
+      await recordBookingEarning({
+        date: booking.completedAt || new Date(),
+        totalRevenue: grandTotal,
+        platformCommission: companyRevenue,
+        vendorEarnings: vendorEarning,
+        totalGST: bill ? (bill.totalGST || 0) : (booking.tax || 0),
+        totalTDS: 0
+      });
+    } catch (earnErr) {
+      console.warn('[EarningTracker] Non-blocking tracking error:', earnErr.message);
+    }
 
     res.status(200).json({
       success: true,
@@ -878,16 +970,23 @@ const addWorkerNotes = async (req, res) => {
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
+        message: errors.array()[0]?.msg || 'Validation failed',
         errors: errors.array()
       });
     }
 
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
     const { notes, structuredNotes } = req.body;
 
-    const booking = await Booking.findOne({ _id: id, workerId });
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    });
 
     if (!booking) {
       return res.status(404).json({
@@ -896,13 +995,20 @@ const addWorkerNotes = async (req, res) => {
       });
     }
 
-    // Update booking
+    // Update booking notes
     if (notes) booking.workerNotes = notes;
-    if (structuredNotes) {
+    if (structuredNotes && typeof structuredNotes === 'object') {
       booking.structuredNotes = {
         ...(booking.structuredNotes || {}),
         ...structuredNotes
       };
+      if (!booking.workerNotes) {
+        booking.workerNotes = [
+          booking.structuredNotes.issueFound,
+          booking.structuredNotes.resolutionDetails,
+          booking.structuredNotes.additionalRemarks
+        ].filter(Boolean).join('\n');
+      }
     }
 
     await booking.save();
@@ -916,7 +1022,7 @@ const addWorkerNotes = async (req, res) => {
     console.error('Add worker notes error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to add notes. Please try again.'
+      message: error.message || 'Failed to add notes. Please try again.'
     });
   }
 };
@@ -952,11 +1058,18 @@ const respondToJob = async (req, res) => {
  */
 const uploadJobMedia = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
     const { workPhotos, progressVideos } = req.body;
 
-    const booking = await Booking.findOne({ _id: id, workerId });
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    });
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Job not found' });
     }
@@ -986,7 +1099,7 @@ const uploadJobMedia = async (req, res) => {
  */
 const addJobMaterials = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
     const { materials } = req.body;
 
@@ -994,7 +1107,14 @@ const addJobMaterials = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Materials array is required' });
     }
 
-    const booking = await Booking.findOne({ _id: id, workerId });
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    });
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Job not found' });
     }
@@ -1018,10 +1138,17 @@ const addJobMaterials = async (req, res) => {
  */
 const getJobTimeline = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
 
-    const booking = await Booking.findOne({ _id: id, workerId })
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    })
       .select('assignedAt workerAcceptedAt journeyStartedAt visitedAt startedAt completedAt cancelledAt status');
 
     if (!booking) {
@@ -1055,10 +1182,17 @@ const getJobTimeline = async (req, res) => {
  */
 const getJobProgress = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
 
-    const booking = await Booking.findOne({ _id: id, workerId })
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    })
       .populate('userId', 'name phone email')
       .populate('serviceId', 'title')
       .populate('categoryId', 'title');
@@ -1071,7 +1205,7 @@ const getJobProgress = async (req, res) => {
     const timeline = [];
     if (booking.assignedAt) timeline.push({ status: 'Assigned', timestamp: booking.assignedAt });
     if (booking.workerAcceptedAt) timeline.push({ status: 'Accepted', timestamp: booking.workerAcceptedAt });
-    if (booking.journeyStartedAt) timeline.push({ status: 'Arrived', timestamp: booking.journeyStartedAt }); // or visitedAt
+    if (booking.journeyStartedAt) timeline.push({ status: 'Arrived', timestamp: booking.journeyStartedAt });
     if (booking.startedAt) timeline.push({ status: 'In Progress', timestamp: booking.startedAt });
     if (booking.completedAt) timeline.push({ status: 'Completed', timestamp: booking.completedAt });
 
@@ -1095,7 +1229,7 @@ const getJobProgress = async (req, res) => {
  */
 const addJobExpenses = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
     const { expenses } = req.body;
 
@@ -1103,7 +1237,14 @@ const addJobExpenses = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Expenses array is required' });
     }
 
-    const booking = await Booking.findOne({ _id: id, workerId });
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    });
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Job not found' });
     }
@@ -1127,10 +1268,17 @@ const addJobExpenses = async (req, res) => {
  */
 const getJobReport = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
 
-    const booking = await Booking.findOne({ _id: id, workerId })
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    })
       .populate('userId', 'name phone email')
       .populate('workerId', 'name phone')
       .populate('serviceId', 'title');
@@ -1154,10 +1302,17 @@ const getJobReport = async (req, res) => {
  */
 const getJobCompletionDetails = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
 
-    const booking = await Booking.findOne({ _id: id, workerId })
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    })
       .populate('userId', 'name phone email address')
       .populate('serviceId', 'title')
       .populate('categoryId', 'title');
@@ -1169,8 +1324,17 @@ const getJobCompletionDetails = async (req, res) => {
     const VendorBill = require('../../models/VendorBill');
     const vendorBill = await VendorBill.findOne({ bookingId: id });
 
-    // Assuming worker's explicit earning isn't stored, we fallback to bill grandTotal or booking finalAmount
-    const earnedAmount = vendorBill ? vendorBill.grandTotal : (booking.finalAmount || 0);
+    let earnedAmount = 0;
+    if (vendorBill && (vendorBill.vendorTotalEarning || vendorBill.workerEarning)) {
+      earnedAmount = Number(vendorBill.vendorTotalEarning || vendorBill.workerEarning) || 0;
+    } else if (booking.workerPayout && booking.workerPayout > 0) {
+      earnedAmount = Number(booking.workerPayout);
+    } else if (booking.subTotal && booking.subTotal > 0) {
+      const commissionRate = booking.workerCommissionRate || 20;
+      earnedAmount = Math.round((booking.subTotal * (1 - commissionRate / 100)) * 100) / 100;
+    } else if (booking.finalAmount && booking.finalAmount > 0) {
+      earnedAmount = Math.round((booking.finalAmount * 0.8) * 100) / 100;
+    }
 
     // Calculate duration
     let duration = 'N/A';
@@ -1202,10 +1366,17 @@ const getJobCompletionDetails = async (req, res) => {
  */
 const shareJobReport = async (req, res) => {
   try {
-    const workerId = req.user.id;
+    const workerId = req.user?.id || req.user?._id;
     const { id } = req.params;
 
-    const booking = await Booking.findOne({ _id: id, workerId }).populate('serviceId', 'title');
+    const booking = await Booking.findOne({
+      _id: id,
+      $or: [
+        { workerId },
+        { notifiedWorkers: workerId },
+        { engineerId: workerId }
+      ]
+    }).populate('serviceId', 'title');
 
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Job not found' });

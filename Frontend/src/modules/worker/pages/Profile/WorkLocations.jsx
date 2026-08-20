@@ -18,7 +18,9 @@ const WorkLocations = () => {
     state: '',
     pincode: '',
     fullAddress: '',
-    serviceRadius: 10
+    serviceRadius: 10,
+    lat: null,
+    lng: null
   });
 
   useEffect(() => {
@@ -33,7 +35,9 @@ const WorkLocations = () => {
             state: w.address?.state || '',
             pincode: w.address?.pincode || '',
             fullAddress: w.address?.fullAddress || '',
-            serviceRadius: w.workLocations?.serviceRadius || 10
+            serviceRadius: w.workLocations?.serviceRadius || 10,
+            lat: w.address?.lat || w.location?.coordinates?.[1] || null,
+            lng: w.address?.lng || w.location?.coordinates?.[0] || null
           });
         }
       } catch (err) {
@@ -64,7 +68,9 @@ const WorkLocations = () => {
       city: city || prev.city,
       state: state || prev.state,
       pincode: pincode || prev.pincode,
-      fullAddress: location.address
+      fullAddress: location.address,
+      lat: location.lat ?? prev.lat,
+      lng: location.lng ?? prev.lng
     }));
     setIsAddressModalOpen(false);
   };
@@ -83,7 +89,9 @@ const WorkLocations = () => {
           city: formData.city,
           state: formData.state,
           pincode: formData.pincode,
-          fullAddress: formData.fullAddress
+          fullAddress: formData.fullAddress,
+          lat: formData.lat,
+          lng: formData.lng
         },
         workLocations: {
           serviceRadius: formData.serviceRadius

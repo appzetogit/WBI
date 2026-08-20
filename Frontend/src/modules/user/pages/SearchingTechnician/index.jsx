@@ -50,7 +50,7 @@ const SearchingTechnician = () => {
   const [requestsSent, setRequestsSent] = useState(0);
   
   const [mapCenter, setMapCenter] = useState([28.7041, 77.1025]);
-  const [searchRadius, setSearchRadius] = useState(5);
+  const [searchRadius, setSearchRadius] = useState(100);
   const [workersList, setWorkersList] = useState([]);
   
   const [bottomSheetExpanded, setBottomSheetExpanded] = useState(false);
@@ -88,17 +88,32 @@ const SearchingTechnician = () => {
   useEffect(() => {
     window.scrollTo(0, 0);
 
-    const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-    const socketBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com';
+    const token =
+      sessionStorage.getItem('accessToken') ||
+      localStorage.getItem('accessToken') ||
+      sessionStorage.getItem('token') ||
+      localStorage.getItem('token');
+
+    const isLocal =
+      typeof window !== 'undefined' &&
+      (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
+        /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(window.location.hostname));
+
+    const socketBaseUrl = isLocal
+      ? window.location.origin
+      : (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com');
+
     const socket = io(socketBaseUrl, {
       auth: { token },
       path: '/socket.io/',
-      transports: ['websocket']
+      transports: ['polling', 'websocket'],
+      withCredentials: true
     });
     socketRef.current = socket;
 
     socket.on('connect', () => {
       socket.emit('join_tracking', bookingId);
+      socket.emit('join_booking_search', bookingId);
     });
 
     socket.on('booking:searchStarted', (data) => {
@@ -146,38 +161,46 @@ const SearchingTechnician = () => {
       }, 3000);
     });
 
-    // Fallback polling in case socket disconnects or fails
-    const pollInterval = setInterval(async () => {
-      if (!socketRef.current || !socketRef.current.connected) {
-        try {
-          const response = await fetch(`${socketBaseUrl}/api/users/bookings/${bookingId}`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-          const result = await response.json();
-          if (result.success && result.data) {
-            const booking = result.data;
-            if (booking.status === 'worker_assigned' || booking.status === 'assigned') {
-              setStatus('assigned');
-              setStep(4);
-              setBottomSheetExpanded(true);
-              clearInterval(pollInterval);
-              setTimeout(() => {
-                navigate(`/user/booking/technician-found/${bookingId}`);
-              }, 3000);
-            } else if (booking.status === 'cancelled' || booking.status === 'failed' || booking.status === 'no_worker_found' || booking.status === 'admin_action_required') {
-              setStatus('failed');
-              setMessage('No technician available nearby');
-              setSubMessage('Please try again or schedule for later.');
-              clearInterval(pollInterval);
-            }
+    // Live State Synchronization (Immediate on mount + 3s Interval)
+    const syncBookingState = async () => {
+      try {
+        const response = await fetch(`${socketBaseUrl}/api/users/bookings/${bookingId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
           }
-        } catch (err) {
-          console.error('Polling error:', err);
+        });
+        const result = await response.json();
+        if (result.success && result.data) {
+          const booking = result.data;
+          const notifCount = booking.notifiedWorkers?.length || (booking.workerId ? 1 : 0);
+          if (notifCount > 0) {
+            setWorkersFound(prev => Math.max(prev, notifCount));
+            setWorkersAvailable(prev => Math.max(prev, notifCount));
+            setRequestsSent(prev => Math.max(prev, notifCount));
+            setStep(prev => Math.max(prev, 3));
+          }
+          if (booking.status === 'worker_assigned' || booking.status === 'assigned') {
+            setStatus('assigned');
+            setStep(4);
+            setBottomSheetExpanded(true);
+            clearInterval(pollInterval);
+            setTimeout(() => {
+              navigate(`/user/booking/technician-found/${bookingId}`);
+            }, 2000);
+          } else if (booking.status === 'cancelled' || booking.status === 'failed' || booking.status === 'no_worker_found') {
+            setStatus('failed');
+            setMessage('No technician available nearby');
+            setSubMessage('Please try again or schedule for later.');
+            clearInterval(pollInterval);
+          }
         }
+      } catch (err) {
+        console.error('Sync error:', err);
       }
-    }, 5000);
+    };
+
+    syncBookingState(); // Immediate check on mount!
+    const pollInterval = setInterval(syncBookingState, 3000);
 
     // Fallback UI Timeout (90 seconds)
     const uiTimeout = setTimeout(() => {

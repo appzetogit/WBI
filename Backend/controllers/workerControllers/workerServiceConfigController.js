@@ -35,15 +35,60 @@ exports.getWorkerSubServices = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Category ID is required' });
     }
 
-    // Fetch OneTimeServices for the category
-    const subServices = await OneTimeService.find({ categoryId, isActive: true })
-      .select('name slug subtitle iconUrl imageUrl startingPrice estimatedTime requiresBrand requiresProblem requiresPackage')
-      .sort({ sortOrder: 1, name: 1 });
+    // Fetch from BOTH OneTimeService AND Service collections
+    const [otsList, svcList] = await Promise.all([
+      OneTimeService.find({ categoryId, isActive: { $ne: false } }).lean(),
+      Service.find({ categoryId, status: { $ne: 'inactive' } }).lean()
+    ]);
+
+    const combined = [];
+    const seenTitles = new Set();
+
+    otsList.forEach((ots) => {
+      const name = (ots.name || ots.title || '').trim();
+      if (name && !seenTitles.has(name.toLowerCase())) {
+        seenTitles.add(name.toLowerCase());
+        combined.push({
+          _id: ots._id,
+          id: ots._id,
+          name: name,
+          title: name,
+          categoryId: ots.categoryId,
+          startingPrice: ots.startingPrice || 0,
+          estimatedTime: ots.estimatedTime || '30-60 min',
+          iconUrl: ots.iconUrl || ots.imageUrl || ots.image || '',
+          imageUrl: ots.imageUrl || ots.iconUrl || ots.image || '',
+          requiresBrand: ots.requiresBrand || false,
+          requiresProblem: ots.requiresProblem || false,
+          requiresPackage: ots.requiresPackage || false
+        });
+      }
+    });
+
+    svcList.forEach((svc) => {
+      const name = (svc.title || svc.name || '').trim();
+      if (name && !seenTitles.has(name.toLowerCase())) {
+        seenTitles.add(name.toLowerCase());
+        combined.push({
+          _id: svc._id,
+          id: svc._id,
+          name: name,
+          title: name,
+          categoryId: svc.categoryId,
+          startingPrice: svc.basePrice || svc.price || 0,
+          estimatedTime: svc.duration || '30-60 min',
+          iconUrl: svc.icon || svc.image || '',
+          imageUrl: svc.image || svc.icon || '',
+          requiresCertification: svc.requiresCertification || false,
+          requiredDocuments: svc.requiredDocuments || []
+        });
+      }
+    });
 
     res.status(200).json({
       success: true,
-      count: subServices.length,
-      data: subServices
+      count: combined.length,
+      data: combined
     });
   } catch (error) {
     console.error('getWorkerSubServices Error:', error);

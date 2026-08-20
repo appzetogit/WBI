@@ -291,18 +291,62 @@ const register = async (req, res) => {
       }
     }
 
+    const mappedOneTimeIds = new Set((approvedOneTimeServices || []).map((id) => id.toString()));
+    try {
+      const OneTimeService = require('../../models/OneTimeService');
+      const Service = require('../../models/Service');
+      const selectedServiceIds = formattedWorkerServices.map((ws) => ws.serviceId).filter(Boolean);
+      if (selectedServiceIds.length > 0) {
+        const directOts = await OneTimeService.find({ _id: { $in: selectedServiceIds } }).select('_id');
+        directOts.forEach((s) => mappedOneTimeIds.add(s._id.toString()));
+
+        const catalogServices = await Service.find({ _id: { $in: selectedServiceIds } }).select('title slug categoryId');
+        if (catalogServices.length > 0) {
+          const orFilters = [];
+          catalogServices.forEach((svc) => {
+            if (svc.categoryId) orFilters.push({ categoryId: svc.categoryId });
+            if (svc.title) orFilters.push({ name: new RegExp(`^${svc.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+            if (svc.slug) orFilters.push({ slug: svc.slug });
+          });
+          if (orFilters.length > 0) {
+            const mapped = await OneTimeService.find({ $or: orFilters, isActive: true }).select('_id');
+            mapped.forEach((s) => mappedOneTimeIds.add(s._id.toString()));
+          }
+        }
+      }
+    } catch (mapErr) {
+      console.warn('[WorkerRegister] Could not map one-time services:', mapErr.message);
+    }
+
+    const radiusKm = Number(customFields.serviceRadius) || 20;
+    const registerAddress = customFields.address || {};
+    const registerLat = parseFloat(registerAddress.lat ?? registerAddress.latitude);
+    const registerLng = parseFloat(registerAddress.lng ?? registerAddress.longitude);
+
     const worker = await Worker.create({
       name, email: email && email.trim() !== '' ? email : undefined, phone, password,
       workerServices: formattedWorkerServices,
       serviceCategories: serviceCategories || [],
-      serviceCategoryRefs: serviceCategoryRefs || [],
-      approvedOneTimeServices: approvedOneTimeServices || [],
+      serviceCategoryRefs: serviceCategoryRefs || (Array.isArray(serviceCategories) ? serviceCategories : []),
+      approvedOneTimeServices: [...mappedOneTimeIds],
       subServices: formattedSubServices,
       skills: skills || [],
       secondarySkills: secondarySkills || [],
       uploadedDocuments: processedDocuments,
       roleType: 'Worker',
       customFields: customFields || {},
+      address: {
+        city: registerAddress.city || '',
+        pincode: registerAddress.pincode || '',
+        lat: Number.isFinite(registerLat) ? registerLat : null,
+        lng: Number.isFinite(registerLng) ? registerLng : null
+      },
+      workLocations: {
+        serviceRadius: radiusKm
+      },
+      ...(Number.isFinite(registerLat) && Number.isFinite(registerLng) && !(registerLat === 0 && registerLng === 0)
+        ? { location: { type: 'Point', coordinates: [registerLng, registerLat], updatedAt: new Date() } }
+        : {}),
       documents: {
         aadhaar: aadhaarDoc?.url || null,
         pan: panDoc?.url || null,

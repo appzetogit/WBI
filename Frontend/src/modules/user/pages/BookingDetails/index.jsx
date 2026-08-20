@@ -1556,35 +1556,61 @@ const BookingDetails = () => {
             </section>
           )}
 
-          {/* Action Card for Awaiting Payment */}
-          {booking.status === 'awaiting_payment' && (
-            <div className="bg-white rounded-3xl shadow-[0_4px_20px_rgb(0,0,0,0.03)] border border-gray-100 p-6 space-y-4">
-              <div className="text-center mb-4">
-                <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <FiDollarSign className="w-8 h-8 text-orange-600" />
+          {/* Action Card for Payment (When work is done or payment is pending) */}
+          {(['awaiting_payment', 'work_done', 'completed_pending_payment'].includes(booking.status?.toLowerCase()) || 
+            (booking.paymentStatus === 'pending' && !['cancelled', 'failed'].includes(booking.status?.toLowerCase()))) && (
+            <div className="bg-white rounded-3xl shadow-[0_4px_20px_rgb(0,0,0,0.04)] border border-gray-100 p-6 space-y-4">
+              <div className="text-center mb-2">
+                <div className="w-14 h-14 bg-teal-50 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-teal-100">
+                  <FiDollarSign className="w-7 h-7 text-[#10AFA5]" />
                 </div>
-                <h3 className="text-lg font-bold text-black">Payment Required</h3>
-                <p className="text-sm text-gray-500">The professional has completed the work. Please choose a payment method to verify and close your booking.</p>
+                <h3 className="text-lg font-bold text-gray-900">Pay for Service</h3>
+                <p className="text-xs text-gray-500 mt-1 max-w-xs mx-auto">
+                  {booking.status === 'work_done' || booking.status === 'completed'
+                    ? 'Work has been completed by your technician. Please pay to finalize your booking.'
+                    : 'Choose your payment method to complete the booking.'}
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-3">
+              {/* Amount Breakdown Highlight */}
+              <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between border border-gray-100">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500">Total Amount</p>
+                  <p className="text-xl font-black text-gray-900">₹{(booking.finalAmount || booking.totalAmount || 0).toLocaleString('en-IN')}</p>
+                </div>
+                <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full">
+                  Payment Pending
+                </span>
+              </div>
+
+              {/* Payment Action Buttons */}
+              <div className="grid grid-cols-1 gap-3 pt-1">
                 <button
                   onClick={handleOnlinePayment}
-                  className="w-full py-4 rounded-xl font-bold text-white flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform"
-                  style={{ background: themeColors.button }}
+                  disabled={paying}
+                  className="w-full py-4 rounded-xl font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-[#10AFA5]/25 active:scale-95 transition-all text-sm cursor-pointer bg-[#10AFA5] hover:bg-[#0E9F96]"
                 >
-                  <FiDollarSign className="w-5 h-5" />
-                  Pay Online (Razorpay/UPI)
+                  <FiDollarSign className="w-4 h-4" />
+                  {paying ? 'Opening Gateway...' : `Pay Online ₹${(booking.finalAmount || booking.totalAmount || 0).toLocaleString('en-IN')} (UPI / Cards)`}
                 </button>
 
                 <button
                   onClick={handlePayAtHome}
-                  className="w-full py-4 rounded-xl font-bold text-gray-700 bg-gray-100 flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                  className="w-full py-3.5 rounded-xl font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 flex items-center justify-center gap-2 active:scale-95 transition-all text-sm cursor-pointer border border-gray-200"
                 >
-                  <FiHome className="w-5 h-5" />
-                  Pay at Home (After Service)
+                  <FiHome className="w-4 h-4 text-gray-500" />
+                  Pay by Cash to Technician
                 </button>
               </div>
+
+              {/* Payment OTP Banner if COD / Verification active */}
+              {booking.paymentOtp && (
+                <div className="mt-3 p-3 bg-teal-50 border border-teal-200 rounded-xl text-center">
+                  <p className="text-[11px] font-bold text-teal-800 uppercase tracking-wide">Cash Verification OTP</p>
+                  <p className="text-2xl font-black text-[#10AFA5] tracking-widest my-1">{booking.paymentOtp}</p>
+                  <p className="text-[10px] text-teal-600">Share this code with technician after handing over cash</p>
+                </div>
+              )}
             </div>
           )}
 

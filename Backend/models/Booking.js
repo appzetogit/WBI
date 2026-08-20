@@ -33,6 +33,12 @@ const bookingSchema = new mongoose.Schema({
     default: null,
     index: true
   },
+  engineerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Engineer',
+    default: null,
+    index: true
+  },
   notifiedVendors: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Vendor'
@@ -96,8 +102,14 @@ const bookingSchema = new mongoose.Schema({
   // ==========================================
   serviceId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'UserService',
+    ref: 'Service',
     required: [true, 'Service is required'],
+    index: true
+  },
+  subServiceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'SubService',
+    default: null,
     index: true
   },
   categoryId: {

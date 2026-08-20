@@ -1,8 +1,8 @@
-const Worker = require('../models/Worker');
 const Booking = require('../models/Booking');
 const BookingDispatchLog = require('../models/BookingDispatchLog');
 const { getIO } = require('../sockets');
 const { bookingAssignmentQueue } = require('./queueService');
+const workerEligibility = require('./workerEligibility');
 
 class WaveManagerService {
   constructor() {
@@ -50,129 +50,19 @@ class WaveManagerService {
       }
 
       const radiusKm = this.WAVE_RADII[waveIndex];
-      const radiusMeters = radiusKm * 1000;
-      
-      const { lat, lng } = booking.address;
-      if (!lat || !lng) {
+      const center = workerEligibility.getBookingCoords(booking);
+      if (!center) {
         console.error(`[WaveManager] Booking ${bookingId} lacks valid coordinates for dispatch.`);
         return;
       }
 
-      // 1. Eligibility Filter & Geospatial Search
-      // We do a broader query first to log exactly WHY workers were rejected
       console.log(`[WaveManager] [MATCHING_STARTED] Searching radius ${radiusKm}km`);
-      
-      const workers = await Worker.aggregate([
-        {
-          $geoNear: {
-            near: {
-              type: "Point",
-              coordinates: [parseFloat(lng), parseFloat(lat)]
-            },
-            distanceField: "calculatedDistance",
-            maxDistance: radiusMeters,
-            spherical: true,
-            query: { isActive: true } // Only pull active accounts
-          }
-        }
-      ]);
 
-      let onlineCount = 0;
-      let approvedCount = 0;
-      let serviceMatchCount = 0;
-      const eligibleWorkers = [];
+      const eligibleWorkers = await workerEligibility.findEligibleWorkers(booking, radiusKm);
 
-      const bookingServiceIdStr = booking.serviceId ? booking.serviceId.toString() : null;
-      const bookingServiceName = booking.serviceName ? booking.serviceName.toLowerCase() : '';
+      console.log(`[WaveManager] [WORKERS_FOUND:${eligibleWorkers.length}] Radius ${radiusKm}km`);
 
-      workers.forEach(w => {
-        // Log Offline/Busy
-        if (w.status !== 'ONLINE') {
-           console.log(`[WaveManager] Rejected ${w._id}: Offline or Busy (Status: ${w.status})`);
-           return;
-        }
-        onlineCount++;
-        let isEligible = true;
-        let rejectReason = '';
-
-        if (!w.isActive) {
-          isEligible = false;
-          rejectReason = 'inactive';
-        } else if (w.approvalStatus !== 'approved') {
-          isEligible = false;
-          rejectReason = 'unverified';
-          approvedCount--;
-        } else if (w.status !== 'ONLINE') {
-          isEligible = false;
-          rejectReason = 'offline';
-          onlineCount--;
-        }
-
-        if (!isEligible) {
-           console.log(`[WaveManager] Rejected ${w._id}: ${rejectReason}`);
-           return;
-        }
-
-        // Log Service Matching
-        let hasService = false;
-        if (bookingServiceIdStr) {
-          const hasCat = w.serviceCategoryRefs?.some(id => id.toString() === bookingServiceIdStr);
-          const hasOneTime = w.approvedOneTimeServices?.some(id => id.toString() === bookingServiceIdStr);
-          const hasSub = w.subServices?.some(s => s.subServiceId && s.subServiceId.toString() === bookingServiceIdStr);
-          
-          if (hasCat || hasOneTime || hasSub) {
-            hasService = true;
-          }
-        } 
-
-        // Flexible Keyword Matching
-        if (!hasService && bookingServiceName) {
-           const workerServiceNames = [
-             ...(w.subServices?.map(s => s.name?.toLowerCase()) || []),
-             ...(w.customSkills?.map(s => s.name?.toLowerCase()) || []),
-             ...(w.serviceCategories?.map(s => typeof s === 'string' ? s.toLowerCase() : '') || []),
-             ...(w.skills || []).map(s => typeof s === 'string' ? s.toLowerCase() : '')
-           ];
-           
-           for (const wService of workerServiceNames) {
-              if (!wService) continue;
-              if (wService.includes(bookingServiceName) || bookingServiceName.includes(wService)) { hasService = true; break; }
-              if (bookingServiceName.includes('ac ') && wService.includes('ac ')) { hasService = true; break; }
-              if (bookingServiceName.includes('washing machine') && wService.includes('washing machine')) { hasService = true; break; }
-              if (bookingServiceName.includes('geyser') && wService.includes('geyser')) { hasService = true; break; }
-              if (bookingServiceName.includes('plumb') && wService.includes('plumb')) { hasService = true; break; }
-              if (bookingServiceName.includes('electric') && wService.includes('electric')) { hasService = true; break; }
-              if (bookingServiceName.includes('clean') && wService.includes('clean')) { hasService = true; break; }
-              if (bookingServiceName.includes('cctv') && wService.includes('cctv')) { hasService = true; break; }
-              if (bookingServiceName.includes('ro ') && wService.includes('ro ')) { hasService = true; break; }
-              if (bookingServiceName.includes('fridge') && (wService.includes('fridge') || wService.includes('refrigerator'))) { hasService = true; break; }
-              if (bookingServiceName.includes('purifier') && (wService.includes('purifier') || wService.includes('ro '))) { hasService = true; break; }
-           }
-        }
-
-        // If still no match, fallback to true if config allows it, but for now we reject
-        // We will default to true if the booking has no serviceId
-        if (!bookingServiceIdStr && !bookingServiceName) {
-          hasService = true;
-        }
-
-        if (!hasService) {
-           console.log(`[WaveManager] Rejected ${w._id}: Wrong service (Lacks ${bookingServiceIdStr} / ${bookingServiceName})`);
-           return;
-        }
-        serviceMatchCount++;
-
-        // Calculate Priority Score
-        const rating = w.rating || 0;
-        const jobs = w.completedJobs || 0;
-        w.priorityScore = (rating * 10) + jobs - (w.calculatedDistance / 1000);
-
-        eligibleWorkers.push(w);
-      });
-
-      console.log(`[WaveManager] [WORKERS_FOUND:${eligibleWorkers.length}] Radius ${radiusKm}km Stats: Found ${workers.length} active -> ${onlineCount} online -> ${approvedCount} approved -> ${serviceMatchCount} service matched.`);
-
-      eligibleWorkers.sort((a, b) => b.priorityScore - a.priorityScore);
+      eligibleWorkers.sort((a, b) => (a.distance || 0) - (b.distance || 0));
 
       // Filter out workers who have already been notified in previous waves
       const previouslyNotifiedIds = (booking.notifiedWorkers || []).map(id => id.toString());
@@ -196,7 +86,16 @@ class WaveManagerService {
         });
         io.to(`booking_${bookingId}`).emit('booking:workersFound', {
           count: newEligibleWorkers.length,
-          waveNumber: waveIndex + 1
+          waveNumber: waveIndex + 1,
+          workers: newEligibleWorkers.map((w) => ({
+            id: w._id,
+            name: w.name,
+            photo: w.profilePhoto,
+            rating: w.rating || 4.5,
+            lat: w.location?.coordinates?.[1] || w.address?.lat || null,
+            lng: w.location?.coordinates?.[0] || w.address?.lng || null,
+            distance: w.distance
+          }))
         });
       }
 
@@ -218,31 +117,36 @@ class WaveManagerService {
         await BookingDispatchLog.create({
           bookingId: booking._id,
           workerId: workerObj._id,
-          distance: workerObj.calculatedDistance,
+          distance: workerObj.distance || 0,
           dispatchWave: waveIndex + 1,
           status: 'NOTIFIED'
         });
 
+        const distanceKm = Number(workerObj.distance || 0).toFixed(1);
+
         // Socket.io Real-time Push
         if (io) {
-          io.to(`worker:${workerIdStr}`).emit('worker:newBookingRequest', {
+          const payload = {
             bookingId: booking._id,
             serviceName: booking.serviceName,
             address: booking.address,
             scheduledDate: booking.scheduledDate,
             scheduledTime: booking.scheduledTime,
             price: booking.basePrice,
-            distance: (workerObj.calculatedDistance / 1000).toFixed(1),
+            distance: distanceKm,
+            distanceKm,
             waveNumber: waveIndex + 1,
             timeoutSec: this.WAVE_TIMEOUT_MS / 1000
-          });
+          };
+          io.to(`worker:${workerIdStr}`).emit('worker:newBookingRequest', payload);
+          io.to(`worker_${workerIdStr}`).emit('worker:newBookingRequest', payload);
         }
 
         // Firebase Push Notification for offline/background fallback
         try {
           await sendNotificationToWorker(workerIdStr, {
             title: 'New Service Request! 🛠️',
-            body: `You have a new booking request for ${booking.serviceName} at ₹${booking.basePrice}. (${(workerObj.calculatedDistance / 1000).toFixed(1)} km away)`,
+            body: `You have a new booking request for ${booking.serviceName} at ₹${booking.basePrice}. (${distanceKm} km away)`,
             data: { bookingId: booking._id.toString(), type: 'new_booking_request' }
           });
         } catch (err) {
@@ -273,31 +177,11 @@ class WaveManagerService {
    */
   async findAndGroupWorkers(lat, lng, radius = 10, serviceId = null) {
     try {
-      let query = {
-        status: 'ONLINE',
-        isActive: true,
-        approvalStatus: 'approved'
+      const bookingLike = {
+        serviceId,
+        address: { lat, lng }
       };
-
-      if (lat && lng) {
-        query.location = {
-          $nearSphere: {
-            $geometry: {
-              type: 'Point',
-              coordinates: [parseFloat(lng), parseFloat(lat)]
-            },
-            $maxDistance: radius * 1000 * 10 // 10x radius fallback for dev
-          }
-        };
-      }
-
-      let workers = await Worker.find(query).select('_id name location status').lean();
-
-      if (workers.length === 0) {
-        // Fallback: any online worker
-        workers = await Worker.find({ status: 'ONLINE', isActive: true, approvalStatus: 'approved' }).select('_id name location status').lean();
-      }
-
+      const workers = await workerEligibility.findEligibleWorkers(bookingLike, radius * 5);
       console.log(`[WaveManager] findAndGroupWorkers found ${workers.length} potential workers.`);
 
       const waves = [];
@@ -305,7 +189,7 @@ class WaveManagerService {
       for (let i = 0; i < workers.length; i += WAVE_SIZE) {
         const waveWorkers = workers.slice(i, i + WAVE_SIZE).map(w => ({
           workerId: w._id,
-          distance: 0
+          distance: w.distance || 0
         }));
         waves.push(waveWorkers);
       }

@@ -337,9 +337,16 @@ const VendorPayments = () => {
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      <span className={`text-sm font-semibold ${['earnings_credit', 'settlement'].includes(tx.type) ? 'text-green-600' : 'text-gray-800'}`}>
-                        {['earnings_credit', 'settlement'].includes(tx.type) ? '+' : '-'}{formatCurrency(tx.amount)}
-                      </span>
+                      {(() => {
+                        const isPos = ['earnings_credit', 'settlement', 'credit', 'payment', 'commission', 'cash_collected'].includes(tx.type);
+                        const isNeg = ['withdrawal', 'debit', 'refund', 'tds_deduction'].includes(tx.type);
+                        const absVal = Math.abs(tx.amount || 0);
+                        return (
+                          <span className={`text-sm font-semibold ${isPos ? 'text-green-600' : isNeg ? 'text-red-600' : 'text-gray-800'}`}>
+                            {isPos ? '+' : '-'}{formatCurrency(absVal)}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-3 px-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(tx.status)}`}>

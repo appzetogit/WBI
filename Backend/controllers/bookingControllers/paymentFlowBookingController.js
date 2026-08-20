@@ -499,33 +499,54 @@ exports.initiatePayment = async (req, res) => {
     if (booking.userId.toString() !== userId) {
       return res.status(403).json({ success: false, message: 'Unauthorized' });
     }
-    if (booking.status !== 'completed_pending_payment' && booking.status !== 'payment_initiated') {
-      return res.status(400).json({ success: false, message: 'Booking is not ready for payment.' });
+    
+    if (booking.paymentStatus === 'success' || booking.paymentStatus === 'paid') {
+      return res.status(400).json({ success: false, message: 'Payment already completed for this booking.' });
+    }
+
+    if (booking.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Cannot pay for cancelled booking.' });
+    }
+
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keyId || !keySecret) {
+      return res.status(503).json({ success: false, message: 'Razorpay gateway credentials not configured.' });
     }
 
     // Dynamic regeneration of Razorpay order to align with current active keys in .env
-    console.log(`[Razorpay] Creating order for booking ${bookingId} using active key ${process.env.RAZORPAY_KEY_ID}`);
     const instance = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET
+      key_id: keyId,
+      key_secret: keySecret
     });
 
+    const amountInPaise = Math.max(100, Math.round((booking.finalAmount || booking.totalAmount || 100) * 100));
+
     const razorpayOrder = await instance.orders.create({
-      amount: Math.round(booking.finalAmount * 100), // in paise
+      amount: amountInPaise,
       currency: 'INR',
-      receipt: `rcpt_${booking._id.toString().slice(-8)}`
+      receipt: `rcpt_${booking._id.toString().slice(-8)}`,
+      notes: {
+        bookingId: booking._id.toString(),
+        bookingNumber: booking.bookingNumber
+      }
     });
 
     booking.razorpayOrderId = razorpayOrder.id;
-    booking.status = 'payment_initiated';
+    if (booking.status !== 'completed' && booking.status !== 'work_done') {
+      booking.status = 'payment_initiated';
+    }
     await booking.save();
 
-    await logBookingEvent(bookingId, 'completed_pending_payment', 'payment_initiated', 'user', userId, 'User opened Razorpay checkout.', { razorpayOrderId: razorpayOrder.id });
+    await logBookingEvent(bookingId, booking.status, 'payment_initiated', 'user', userId, 'User opened Razorpay checkout.', { razorpayOrderId: razorpayOrder.id });
 
     res.status(200).json({
       success: true,
       razorpayOrderId: razorpayOrder.id,
-      key: process.env.RAZORPAY_KEY_ID
+      key: keyId,
+      amount: amountInPaise,
+      currency: 'INR'
     });
   } catch (error) {
     console.error('[Razorpay Order Creation Error]', error);
@@ -609,13 +630,44 @@ exports.verifyPayment = async (req, res) => {
       }
     }
 
-    // 4. Update Booking Document
+    // 4. Update Booking Document & Credit Worker Wallet
     booking.status = 'paid';
     booking.paymentStatus = 'success';
     booking.paidAt = new Date();
     booking.paymentMethod = 'online';
     booking.razorpayPaymentId = razorpayPaymentId;
     
+    // Credit Worker Wallet if not yet credited
+    if (!booking.isWorkerPaid && booking.workerId) {
+      try {
+        const workerPayout = Number(booking.workerPayout) || Math.round((booking.finalAmount || 0) * 0.8);
+        const workerDoc = await Worker.findById(booking.workerId);
+        if (workerDoc) {
+          if (!workerDoc.wallet) {
+            workerDoc.wallet = { balance: 0, totalEarnings: 0, pendingBalance: 0, withdrawnAmount: 0 };
+          }
+          workerDoc.wallet.balance = (workerDoc.wallet.balance || 0) + workerPayout;
+          workerDoc.wallet.totalEarnings = (workerDoc.wallet.totalEarnings || 0) + workerPayout;
+          await workerDoc.save();
+
+          const Transaction = require('../../models/Transaction');
+          await Transaction.create({
+            workerId: booking.workerId,
+            bookingId: booking._id,
+            type: 'earnings_credit',
+            amount: workerPayout,
+            status: 'completed',
+            paymentMethod: 'razorpay',
+            description: `Earning ₹${workerPayout} credited for booking #${booking.bookingNumber} (Online Payment)`
+          });
+        }
+        booking.isWorkerPaid = true;
+        booking.workerPaymentStatus = 'SUCCESS';
+      } catch (walletErr) {
+        console.error('[Wallet Credit Error]', walletErr);
+      }
+    }
+
     // Generate OTP 2 (4-digit code)
     const otp2 = crypto.randomInt(1000, 9999).toString();
     booking.paymentOtp = otp2;

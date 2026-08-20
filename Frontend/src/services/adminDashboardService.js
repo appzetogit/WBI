@@ -18,20 +18,23 @@ export const getRevenueAnalytics = async (params) => {
   }
 };
 
-export const getBookingTrends = async (days = 30) => {
+export const getBookingTrends = async (params = 30) => {
   try {
-    const response = await api.get('/admin/dashboard/bookings/trends', { params: { days } });
+    const p = typeof params === 'object' ? params : { days: params };
+    const response = await api.get('/admin/dashboard/bookings/trends', { params: p });
     return response.data;
   } catch (error) {
     throw error;
   }
 };
 
-export const getUserGrowthMetrics = async (days = 30) => {
+export const getUserGrowthMetrics = async (params = 30) => {
   try {
-    const response = await api.get('/admin/dashboard/users/growth', { params: { days } });
+    const p = typeof params === 'object' ? params : { days: params };
+    const response = await api.get('/admin/dashboard/users/growth', { params: p });
     return response.data;
   } catch (error) {
     throw error;
   }
 };
+

@@ -132,14 +132,59 @@ const PaymentOverview = () => {
     }
   };
 
+  const getEntityInfo = (tx) => {
+    if (tx.userId?.name) {
+      return { name: tx.userId.name, email: tx.userId.email || tx.userId.phone || '', role: 'User', roleColor: 'bg-blue-100 text-blue-800' };
+    }
+    if (tx.bookingId?.userId?.name) {
+      return { name: tx.bookingId.userId.name, email: tx.bookingId.userId.email || tx.bookingId.userId.phone || '', role: 'User', roleColor: 'bg-blue-100 text-blue-800' };
+    }
+    if (tx.vendorId?.businessName || tx.vendorId?.name) {
+      return { name: tx.vendorId.businessName || tx.vendorId.name, email: tx.vendorId.email || tx.vendorId.phone || '', role: 'Vendor', roleColor: 'bg-purple-100 text-purple-800' };
+    }
+    if (tx.bookingId?.vendorId?.businessName || tx.bookingId?.vendorId?.name) {
+      return { name: tx.bookingId.vendorId.businessName || tx.bookingId.vendorId.name, email: tx.bookingId.vendorId.email || tx.bookingId.vendorId.phone || '', role: 'Vendor', roleColor: 'bg-purple-100 text-purple-800' };
+    }
+    if (tx.workerId?.name) {
+      return { name: tx.workerId.name, email: tx.workerId.email || tx.workerId.phone || '', role: 'Worker', roleColor: 'bg-orange-100 text-orange-800' };
+    }
+    if (tx.bookingId?.workerId?.name) {
+      return { name: tx.bookingId.workerId.name, email: tx.bookingId.workerId.email || tx.bookingId.workerId.phone || '', role: 'Worker', roleColor: 'bg-orange-100 text-orange-800' };
+    }
+    if (tx.engineerId?.name) {
+      return { name: tx.engineerId.name, email: tx.engineerId.email || tx.engineerId.phone || '', role: 'Engineer', roleColor: 'bg-teal-100 text-teal-800' };
+    }
+    if (tx.bookingId?.engineerId?.name) {
+      return { name: tx.bookingId.engineerId.name, email: tx.bookingId.engineerId.email || tx.bookingId.engineerId.phone || '', role: 'Engineer', roleColor: 'bg-teal-100 text-teal-800' };
+    }
+    if (tx.type === 'commission' || tx.type === 'convenience_fee' || tx.type === 'gst') {
+      return { name: 'Platform Admin', email: 'admin@appzeto.com', role: 'Admin', roleColor: 'bg-indigo-100 text-indigo-800' };
+    }
+    return { name: 'Direct Customer', email: tx.description || '', role: 'System', roleColor: 'bg-gray-100 text-gray-800' };
+  };
+
   const getTypeColor = (type) => {
     switch (type) {
-      case 'credit': return 'text-green-600 bg-green-50 border-green-100';
-      case 'payment': return 'text-blue-600 bg-blue-50 border-blue-100'; // Online Payment
-      case 'cash_collected': return 'text-amber-600 bg-amber-50 border-amber-100'; // Cash
-      case 'debit': return 'text-orange-600 bg-orange-50 border-orange-100';
-      case 'refund': return 'text-purple-600 bg-purple-50 border-purple-100';
-      default: return 'text-gray-600 bg-gray-50 border-gray-100';
+      case 'credit':
+      case 'earnings_credit':
+      case 'commission':
+        return 'text-green-600 bg-green-50 border-green-200';
+      case 'payment':
+        return 'text-blue-600 bg-blue-50 border-blue-200';
+      case 'cash_collected':
+        return 'text-amber-600 bg-amber-50 border-amber-200';
+      case 'withdrawal':
+      case 'debit':
+        return 'text-red-600 bg-red-50 border-red-200';
+      case 'refund':
+        return 'text-purple-600 bg-purple-50 border-purple-200';
+      case 'gst':
+        return 'text-indigo-600 bg-indigo-50 border-indigo-200';
+      case 'convenience_fee':
+      case 'platform_fee':
+        return 'text-teal-600 bg-teal-50 border-teal-200';
+      default:
+        return 'text-gray-600 bg-gray-50 border-gray-200';
     }
   };
 
@@ -236,7 +281,9 @@ const PaymentOverview = () => {
           >
             <option value="all">All Types</option>
             <option value="credit">Credit (Platform)</option>
+            <option value="earnings_credit">Earning Credit</option>
             <option value="debit">Debit (Wallet)</option>
+            <option value="withdrawal">Withdrawal</option>
             <option value="payment">Online Payment</option>
             <option value="cash_collected">Cash Collected</option>
             <option value="refund">Refund</option>
@@ -284,52 +331,61 @@ const PaymentOverview = () => {
                   </td>
                 </tr>
               ) : (
-                transactions.map((tx) => (
-                  <tr key={tx._id} className="hover:bg-gray-50 transition-colors">
-                    <td className="py-3 px-4">
-                      <span className="text-xs font-mono text-gray-500">#{tx._id.slice(-6).toUpperCase()}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-800">
-                            {tx.userId?.name || tx.vendorId?.businessName || tx.vendorId?.name || tx.workerId?.name || 'Unknown'}
-                          </span>
-                          {tx.userId && <span className="text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-medium">User</span>}
-                          {tx.vendorId && <span className="text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-medium">Vendor</span>}
-                          {tx.workerId && <span className="text-[10px] bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-medium">Worker</span>}
+                transactions.map((tx) => {
+                  const entity = getEntityInfo(tx);
+                  const isPos = ['credit', 'payment', 'cash_collected', 'earnings_credit', 'commission', 'settlement', 'convenience_fee', 'gst'].includes(tx.type);
+                  const isNeg = ['withdrawal', 'debit', 'refund', 'tds_deduction'].includes(tx.type);
+                  const absVal = Math.abs(tx.amount || 0);
+
+                  return (
+                    <tr key={tx._id} className="hover:bg-gray-50 transition-colors">
+                      <td className="py-3 px-4">
+                        <span className="text-xs font-mono text-gray-500">#{tx._id ? tx._id.slice(-6).toUpperCase() : '-'}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-800">
+                              {entity.name}
+                            </span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${entity.roleColor}`}>
+                              {entity.role}
+                            </span>
+                          </div>
+                          {entity.email && (
+                            <span className="text-xs text-gray-400 truncate max-w-[200px]">
+                              {entity.email}
+                            </span>
+                          )}
                         </div>
-                        <span className="text-xs text-gray-400">
-                          {tx.userId?.email || tx.vendorId?.email || tx.workerId?.email || ''}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getTypeColor(tx.type)}`}>
+                          {tx.type ? tx.type.replace('_', ' ') : 'N/A'}
                         </span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getTypeColor(tx.type)}`}>
-                        {tx.type}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`text-sm font-semibold ${['credit', 'payment', 'cash_collected'].includes(tx.type) ? 'text-green-600' : 'text-gray-800'}`}>
-                        {['credit', 'payment', 'cash_collected'].includes(tx.type) ? '+' : '-'}{formatCurrency(tx.amount)}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(tx.status)}`}>
-                        {getStatusIcon(tx.status)}
-                        <span className="capitalize">{tx.status}</span>
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="text-sm text-gray-500">{formatDate(tx.createdAt)}</span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="text-xs text-gray-400 font-mono" title={tx.razorpayOrderId || tx.referenceId}>
-                        {(tx.razorpayOrderId || tx.referenceId || '-').slice(0, 10)}...
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`text-sm font-semibold ${isPos ? 'text-green-600' : isNeg ? 'text-red-600' : 'text-gray-800'}`}>
+                          {isPos ? '+' : '-'}{formatCurrency(absVal)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(tx.status)}`}>
+                          {getStatusIcon(tx.status)}
+                          <span className="capitalize">{tx.status}</span>
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-sm text-gray-500">{formatDate(tx.createdAt)}</span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs text-gray-400 font-mono" title={tx.razorpayOrderId || tx.referenceId || (tx.bookingId?.bookingNumber ? `BK-${tx.bookingId.bookingNumber}` : '-')}>
+                          {(tx.razorpayOrderId || tx.referenceId || (tx.bookingId?.bookingNumber ? `BK-${tx.bookingId.bookingNumber}` : '-') || '-').slice(0, 12)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -41,7 +41,26 @@ const respondValidation = [
 ];
 
 const addNotesValidation = [
-  body('notes').trim().notEmpty().withMessage('Notes are required')
+  body().custom((value, { req }) => {
+    const { notes, structuredNotes } = req.body || {};
+    const hasNotes = typeof notes === 'string' && notes.trim().length > 0;
+    const hasStructured = !!(
+      structuredNotes &&
+      typeof structuredNotes === 'object' &&
+      Object.values(structuredNotes).some(v => typeof v === 'string' && v.trim().length > 0)
+    );
+    if (hasNotes || hasStructured) {
+      if (!hasNotes && hasStructured) {
+        req.body.notes = [
+          structuredNotes.issueFound,
+          structuredNotes.resolutionDetails,
+          structuredNotes.additionalRemarks
+        ].filter(v => typeof v === 'string' && v.trim().length > 0).join('\n') || 'Work notes updated';
+      }
+      return true;
+    }
+    throw new Error('Notes are required');
+  })
 ];
 
 const { verifyAadhaarPanForJob } = require('../../middleware/verificationMiddleware');

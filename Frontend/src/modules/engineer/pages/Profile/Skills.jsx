@@ -138,54 +138,6 @@ export default function EngineerSkills() {
     }));
   };
 
-  const toggleTool = (subServiceId, toolName) => {
-    setSelectedSubServices(prev => prev.map(s => {
-      if (s.subServiceId === subServiceId) {
-        const tools = s.tools.includes(toolName)
-          ? s.tools.filter(name => name !== toolName)
-          : [...s.tools, toolName];
-        return { ...s, tools };
-      }
-      return s;
-    }));
-  };
-
-  const handleAddCustomSkill = (subServiceId) => {
-    const rawVal = customInputMap[subServiceId] || '';
-    const cleanSkill = rawVal.trim();
-    if (!cleanSkill) return;
-
-    setSelectedSubServices(prev => prev.map(s => {
-      if (s.subServiceId === subServiceId) {
-        const exists = s.customSkills.some(cs => cs.name.toLowerCase() === cleanSkill.toLowerCase());
-        if (exists) {
-          toast.error('Skill already exists!');
-          return s;
-        }
-        toast.success(`Custom skill "${cleanSkill}" added as pending approval.`);
-        return {
-          ...s,
-          customSkills: [...s.customSkills, { name: cleanSkill, status: 'pending' }]
-        };
-      }
-      return s;
-    }));
-
-    setCustomInputMap(prev => ({ ...prev, [subServiceId]: '' }));
-  };
-
-  const removeCustomSkill = (subServiceId, skillName) => {
-    setSelectedSubServices(prev => prev.map(s => {
-      if (s.subServiceId === subServiceId) {
-        return {
-          ...s,
-          customSkills: s.customSkills.filter(cs => cs.name.toLowerCase() !== skillName.toLowerCase())
-        };
-      }
-      return s;
-    }));
-  };
-
   const handleSave = async () => {
     if (!selectedCategory) {
       toast.error('Please select a domain category.');
@@ -194,14 +146,6 @@ export default function EngineerSkills() {
     if (selectedSubServices.length === 0) {
       toast.error('Please select at least one specialization subservice.');
       return;
-    }
-
-    // Validation check for years of experience
-    for (const ss of selectedSubServices) {
-      if (ss.yearsOfExperience !== '' && (isNaN(ss.yearsOfExperience) || parseInt(ss.yearsOfExperience, 10) < 0)) {
-        toast.error(`Please enter valid years of experience for ${ss.name}`);
-        return;
-      }
     }
 
     try {
@@ -221,11 +165,11 @@ export default function EngineerSkills() {
         serviceCategories: [catName],
         subServices: selectedSubServices.map(s => ({
           subServiceId: s.subServiceId,
-          name: s.name,
-          skills: s.skills,
-          customSkills: s.customSkills.map(cs => ({ name: cs.name, status: cs.status })),
-          tools: s.tools,
-          experienceLevel: s.experienceLevel,
+          name: s.name || '',
+          skills: s.skills || [],
+          customSkills: (s.customSkills || []).map(cs => typeof cs === 'string' ? { name: cs, status: 'pending' } : { name: cs.name || '', status: cs.status || 'pending' }),
+          tools: s.tools || [],
+          experienceLevel: s.experienceLevel || '',
           yearsOfExperience: parseInt(s.yearsOfExperience, 10) || 0
         }))
       };
@@ -238,8 +182,8 @@ export default function EngineerSkills() {
         toast.error(res.message || 'Failed to update skills');
       }
     } catch (err) {
-      console.error(err);
-      toast.error('Error updating skills');
+      console.error('Update engineer skills error:', err);
+      toast.error(err.response?.data?.message || err.message || 'Error updating skills');
     } finally {
       setIsSaving(false);
     }
@@ -351,179 +295,24 @@ export default function EngineerSkills() {
           </section>
         )}
 
-        {/* Configurations for selected SubServices */}
-        {selectedSubServices.length > 0 && (
-          <div className="space-y-6">
-            <h3 className="font-extrabold text-sm text-gray-400 uppercase tracking-wider ml-1">Configure specializations</h3>
-            
-            {selectedSubServices.map(subService => {
-              const subConfig = allSubServices.find(s => s._id === subService.subServiceId);
-              const availableSkills = subConfig?.requiredSkills || [];
-              const availableTools = subConfig?.suggestedTools || [];
-
-              return (
-                <section key={subService.subServiceId} className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 space-y-6 animate-fadeIn">
-                  <div className="flex items-center justify-between border-b pb-4 border-gray-100">
-                    <h4 className="font-extrabold text-gray-800 text-base flex items-center gap-2">
-                      <FiSettings className="text-[#4F46E5] w-5 h-5" />
-                      {subService.name}
-                    </h4>
-                    <button 
-                      onClick={() => setSelectedSubServices(prev => prev.filter(s => s.subServiceId !== subService.subServiceId))}
-                      className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
-                      title="Remove Specialization"
-                    >
-                      <FiX className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Experience Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 mb-1.5 ml-0.5">Experience Level</label>
-                      <select
-                        value={subService.experienceLevel}
-                        onChange={(e) => updateSubServiceField(subService.subServiceId, 'experienceLevel', e.target.value)}
-                        className="block w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/15 focus:border-[#4F46E5] transition-all bg-white"
-                      >
-                        <option value="">Select Level</option>
-                        <option value="Fresher (0–1 year)">Fresher (0–1 year)</option>
-                        <option value="Junior (1–3 years)">Junior (1–3 years)</option>
-                        <option value="Mid-level (3–6 years)">Mid-level (3–6 years)</option>
-                        <option value="Senior (6–10 years)">Senior (6–10 years)</option>
-                        <option value="Expert (10+ years)">Expert (10+ years)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-gray-600 mb-1.5 ml-0.5">Years of Experience</label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={subService.yearsOfExperience || ''}
-                        onChange={(e) => updateSubServiceField(subService.subServiceId, 'yearsOfExperience', e.target.value)}
-                        placeholder="e.g. 3"
-                        className="block w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/15 focus:border-[#4F46E5] transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Skills Grid */}
-                  {availableSkills.length > 0 && (
-                    <div className="space-y-2">
-                      <label className="block text-xs font-bold text-gray-600 ml-0.5">Suggested Skills</label>
-                      <div className="flex flex-wrap gap-2">
-                        {availableSkills.map(skill => {
-                          const isChecked = subService.skills.includes(skill);
-                          return (
-                            <button
-                              key={skill}
-                              onClick={() => toggleSkill(subService.subServiceId, skill)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1 ${
-                                isChecked 
-                                  ? 'bg-[#4F46E5]/10 text-[#4F46E5] border-[#4F46E5]/30' 
-                                  : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                              }`}
-                            >
-                              {isChecked && <FiCheck className="w-3.5 h-3.5" />}
-                              {skill}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Suggested Tools Grid */}
-                  {availableTools.length > 0 && (
-                    <div className="space-y-2">
-                      <label className="block text-xs font-bold text-gray-600 ml-0.5 flex items-center gap-1">
-                        <FiTool className="w-3.5 h-3.5" /> Suggested Tools & Software
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {availableTools.map(tool => {
-                          const isChecked = subService.tools.includes(tool);
-                          return (
-                            <button
-                              key={tool}
-                              onClick={() => toggleTool(subService.subServiceId, tool)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1 ${
-                                isChecked 
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                                  : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                              }`}
-                            >
-                              {isChecked && <FiCheck className="w-3.5 h-3.5" />}
-                              {tool}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Custom Skills Tag Input */}
-                  <div className="space-y-3 pt-2">
-                    <label className="block text-xs font-bold text-gray-600 ml-0.5">Custom Key Skills</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Add custom key skill..."
-                        value={customInputMap[subService.subServiceId] || ''}
-                        onChange={(e) => setCustomInputMap(prev => ({ ...prev, [subService.subServiceId]: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddCustomSkill(subService.subServiceId))}
-                        className="flex-1 px-3.5 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/15 focus:border-[#4F46E5] transition-all"
-                      />
-                      <button
-                        onClick={() => handleAddCustomSkill(subService.subServiceId)}
-                        className="px-4 py-2 bg-[#4F46E5] text-white text-xs font-semibold rounded-xl hover:bg-[#4338CA] transition-colors"
-                      >
-                        Add
-                      </button>
-                    </div>
-
-                    {/* Custom Skill Chips */}
-                    {subService.customSkills.length > 0 && (
-                      <div className="flex flex-wrap gap-2 bg-gray-50/50 p-2.5 rounded-xl border border-gray-100">
-                        {subService.customSkills.map(cs => {
-                          const status = cs.status || 'pending';
-                          let badgeBg = 'bg-amber-50 text-amber-700 border-amber-200';
-                          let labelText = 'Pending Approval';
-                          if (status === 'approved') {
-                            badgeBg = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                            labelText = 'Approved';
-                          } else if (status === 'rejected') {
-                            badgeBg = 'bg-red-50 text-red-700 border-red-200';
-                            labelText = 'Rejected';
-                          }
-
-                          return (
-                            <span
-                              key={cs.name}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 bg-white text-xs font-semibold border border-gray-150 rounded-lg animate-fadeIn shadow-2xs"
-                            >
-                              <span>{cs.name}</span>
-                              <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md border ${badgeBg}`}>
-                                {labelText}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => removeCustomSkill(subService.subServiceId, cs.name)}
-                                className="p-0.5 rounded-full hover:bg-gray-100 text-gray-400 hover:text-red-500 transition-colors ml-0.5"
-                              >
-                                <FiX className="w-3.5 h-3.5" />
-                              </button>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        )}
+        {/* Bottom Save Changes Bar */}
+        <div className="pt-4 pb-8">
+          <button 
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving}
+            className="w-full py-3.5 bg-[#4F46E5] text-white text-sm font-bold rounded-2xl hover:bg-[#4338CA] active:scale-[0.99] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {isSaving ? (
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <>
+                <FiCheck className="w-4 h-4" />
+                <span>Save All Changes</span>
+              </>
+            )}
+          </button>
+        </div>
       </main>
     </div>
   );

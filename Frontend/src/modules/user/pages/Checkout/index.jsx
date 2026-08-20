@@ -406,7 +406,15 @@ const Checkout = () => {
   useEffect(() => {
     if (currentStep !== 'waiting' || !bookingRequest) return;
 
-    const socketUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com';
+    const isLocal =
+      typeof window !== 'undefined' &&
+      (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
+        /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(window.location.hostname));
+
+    const socketUrl =
+      import.meta.env.VITE_SOCKET_URL ||
+      (isLocal ? window.location.origin : (import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com'));
+
     const socket = io(socketUrl, {
       auth: { token: localStorage.getItem('accessToken') },
       transports: ['websocket', 'polling']

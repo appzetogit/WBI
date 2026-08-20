@@ -1,5 +1,10 @@
 const Booking = require('../models/Booking');
 const Worker = require('../models/Worker');
+const User = require('../models/User');
+const Service = require('../models/Service');
+const SubService = require('../models/SubService');
+const OneTimeService = require('../models/OneTimeService');
+const Category = require('../models/Category');
 const WorkerAssignmentAttempt = require('../models/WorkerAssignmentAttempt');
 const BookingTimeline = require('../models/BookingTimeline');
 const BookingAssignmentConfig = require('../models/BookingAssignmentConfig');
@@ -8,6 +13,8 @@ const ActiveWorkerSession = require('../models/ActiveWorkerSession');
 const { getIO } = require('../sockets');
 const Cart = require('../models/Cart');
 const { createNotification } = require('../controllers/notificationControllers/notificationController');
+const workerEligibility = require('./workerEligibility');
+const { sendNotificationToWorker } = require('./firebaseAdmin');
 
 class MatchingService {
   /**
@@ -15,7 +22,10 @@ class MatchingService {
    */
   async startMatching(bookingId) {
     try {
-      const booking = await Booking.findById(bookingId).populate('serviceId subServiceId');
+      const booking = await Booking.findById(bookingId)
+        .populate({ path: 'serviceId', strictPopulate: false })
+        .populate({ path: 'subServiceId', strictPopulate: false })
+        .populate({ path: 'userId', select: 'name phone', strictPopulate: false });
       if (!booking) throw new Error('Booking not found');
 
       // Check if there is a specific config for this service
@@ -27,6 +37,15 @@ class MatchingService {
             config = await BookingAssignmentConfig.create({ serviceId: null });
          }
       }
+
+      // Ensure search radius is at least 100 KM across all services
+      config.initialRadiusKm = Math.max(config.initialRadiusKm || 100, 100);
+      config.maxRadiusKm = Math.max(config.maxRadiusKm || 150, 150);
+      config.radiusStepKm = Math.max(config.radiusStepKm || 50, 50);
+      config.assignmentMode = 'broadcast';
+      config.totalSearchTimeoutSec = Math.max(config.totalSearchTimeoutSec || 90, 120);
+      config.workerResponseTimeoutSec = Math.max(config.workerResponseTimeoutSec || 30, 60);
+      config.maxWorkersPerRound = Math.max(config.maxWorkersPerRound || 10, 20);
 
       const initialRadius = config.initialRadiusKm;
 
@@ -82,11 +101,10 @@ class MatchingService {
         }
       }, totalTimeoutSec * 1000);
 
-      // Start the async matching logic in the background with a slight delay
-      // This gives the frontend time to navigate to the searching screen and join the socket room
+      // Start the matching round immediately without artificial delay
       setTimeout(() => {
         this.executeMatchingRound(booking, config, initialRadius, 1);
-      }, 2000);
+      }, 50);
     } catch (error) {
       console.error('[MatchingService] Error starting match:', error);
     }
@@ -110,11 +128,12 @@ class MatchingService {
       return this.handleNoWorkersFound(booking);
     }
 
-    const { lat, lng } = booking.address;
-    if (!lat || !lng) {
+    const center = workerEligibility.getBookingCoords(booking);
+    if (!center) {
       console.error(`[MatchingService] Booking ${booking._id} lacks coordinates.`);
       return this.handleNoWorkersFound(booking);
     }
+    const { lat, lng } = center;
 
     // Find workers within radius
     const workers = await this.findEligibleWorkers(booking, lat, lng, radiusKm);
@@ -150,9 +169,9 @@ class MatchingService {
       photo: w.profilePhoto,
       rating: w.rating || 4.5,
       completedJobs: w.completedJobs || 0,
-      lat: w.location?.coordinates?.[1] || null,
-      lng: w.location?.coordinates?.[0] || null,
-      distance: radiusKm
+      lat: w.location?.coordinates?.[1] || w.address?.lat || null,
+      lng: w.location?.coordinates?.[0] || w.address?.lng || null,
+      distance: w.distance || radiusKm
     }));
 
     io.to(`booking_${booking._id}`).emit('booking:workersFound', {
@@ -174,134 +193,13 @@ class MatchingService {
   }
 
   async findEligibleWorkers(booking, lat, lng, radiusKm) {
-    console.log(`[WORKERS_QUERY_STARTED] Booking: ${booking._id}, Radius: ${radiusKm}km`);
-    
-    // Find all workers within the search radius using 2dsphere index
-    const workers = await Worker.find({
-      location: {
-        $nearSphere: {
-          $geometry: {
-            type: "Point",
-            coordinates: [lng, lat]
-          },
-          $maxDistance: radiusKm * 1000 // meters
-        }
-      }
-    });
+    console.log(`[WORKERS_QUERY_STARTED] Booking: ${booking._id}, Radius: ${radiusKm}km, Center: ${lat},${lng}`);
 
-    console.log(`[WORKERS_FOUND_RAW] Total found by location: ${workers.length}`);
-
-    // Check for online workers who might be missing locations for debug purposes
-    const onlineWorkersNoLocation = await Worker.find({
-      status: 'ONLINE',
-      $or: [
-        { location: { $exists: false } },
-        { 'location.coordinates': [0, 0] }
-      ]
-    });
-    for (const w of onlineWorkersNoLocation) {
-      console.log(`[WORKER_REJECTED_REASON] Worker: ${w._id}, Reason: location missing`);
-      await BookingAssignmentLog.create({
-        bookingId: booking._id,
-        workerId: w._id,
-        action: 'Worker Filtered',
-        status: 'FAILED',
-        reason: 'location missing'
-      });
-    }
-
-    const eligibleWorkers = [];
-    for (const worker of workers) {
-      let isEligible = true;
-      let rejectReason = '';
-
-      if (!worker.isActive) {
-        isEligible = false;
-        rejectReason = 'inactive';
-      } else if (worker.approvalStatus !== 'approved') {
-        isEligible = false;
-        rejectReason = 'unverified';
-      } else {
-        // Enforce dynamic verification check based on VerificationConfig
-        const VerificationConfig = require('../models/VerificationConfig');
-        const VerificationDocument = require('../models/VerificationDocument');
-        const config = await VerificationConfig.findOne({ roleType: 'worker' });
-        const requiredDocs = config?.requiredDocuments || ['aadhaar', 'pan'];
-        
-        if (requiredDocs.length > 0) {
-          const verifiedDocsCount = await VerificationDocument.countDocuments({
-            ownerId: worker._id,
-            documentType: { $in: requiredDocs },
-            status: 'verified'
-          });
-          
-          if (verifiedDocsCount < requiredDocs.length) {
-            isEligible = false;
-            rejectReason = 'documents unverified';
-          }
-        }
-      }
-      if (isEligible && worker.status === 'BUSY') {
-        isEligible = false;
-        rejectReason = 'busy';
-      } else if (worker.status !== 'ONLINE') {
-        isEligible = false;
-        rejectReason = 'offline';
-      } else {
-        // Profile completeness check
-        const isProfileIncomplete = (!worker.serviceCategories || worker.serviceCategories.length === 0) ||
-          (!worker.address || !worker.address.city);
-        if (isProfileIncomplete) {
-          isEligible = false;
-          rejectReason = 'profile incomplete';
-        }
-      }
-
-      // Check Service Category & Service matching for One-Time Jobs
-      if (isEligible && booking.serviceId) {
-        const matchesWorkerService = worker.workerServices?.some(ws => 
-          ws.serviceId?.toString() === booking.serviceId?._id?.toString() || 
-          ws.serviceId?.toString() === booking.serviceId?.toString()
-        );
-
-        // Fallback checks for older structure
-        const matchesSubService = worker.subServices?.some(s => s.subServiceId?.toString() === booking.subServiceId?._id?.toString() || s.subServiceId?.toString() === booking.subServiceId?.toString());
-        
-        const serviceTitle = booking.serviceId?.title || booking.serviceName || '';
-        const matchesCategory = worker.serviceCategories?.some(cat => 
-          cat.toLowerCase().trim() === serviceTitle.toLowerCase().trim() ||
-          cat.toLowerCase().trim() === booking.serviceCategory?.toLowerCase().trim()
-        );
-        
-        if (!matchesWorkerService && !matchesSubService && !matchesCategory) {
-          isEligible = false;
-          rejectReason = 'service mismatch';
-        }
-      }
-
-      if (isEligible && booking.vendorId && worker.vendorId?.toString() !== booking.vendorId.toString()) {
-        isEligible = false;
-        rejectReason = 'vendor mismatch';
-      }
-
-      if (!isEligible) {
-        console.log(`[WORKER_REJECTED_REASON] Worker: ${worker._id}, Reason: ${rejectReason}`);
-        console.log(`[WORKER_FILTER_REJECTED_REASON] Worker: ${worker._id}, Reason: ${rejectReason}`);
-        await BookingAssignmentLog.create({
-          bookingId: booking._id,
-          workerId: worker._id,
-          action: 'Worker Filtered',
-          status: 'FAILED',
-          reason: rejectReason
-        });
-      } else {
-        eligibleWorkers.push(worker);
-      }
-    }
+    const eligibleWorkers = await workerEligibility.findEligibleWorkers(booking, radiusKm);
 
     console.log(`[WORKERS_ELIGIBLE] Eligible workers: ${eligibleWorkers.length}`);
     console.log(`[ELIGIBLE_WORKERS_FOUND] Eligible workers count: ${eligibleWorkers.length}, IDs: ${eligibleWorkers.map(w => w._id.toString()).join(', ')}`);
-    return eligibleWorkers.slice(0, 15);
+    return eligibleWorkers;
   }
 
   async handleBroadcastMode(booking, workers, config, radiusKm, roundNumber) {
@@ -370,11 +268,38 @@ class MatchingService {
         acceptExpiresAt: expiresAt.toISOString()
       };
 
-      // Emit to worker specific room
+      // Emit to worker specific room variations
       io.to(`worker:${worker._id}`).emit('worker:newBookingRequest', payload);
+      io.to(`worker_${worker._id}`).emit('worker:newBookingRequest', payload);
+      io.to(`worker:${worker._id.toString()}`).emit('worker:newBookingRequest', payload);
+      io.to(`worker_${worker._id.toString()}`).emit('worker:newBookingRequest', payload);
+      io.to(worker._id.toString()).emit('worker:newBookingRequest', payload);
+
+      // Emit to user searching room
+      io.to(`booking_${booking._id}`).emit('booking:requestSentToWorker', {
+        workerId: worker._id,
+        workerName: worker.name,
+        distance: worker.distance || radiusKm
+      });
+
       console.log(`[REQUEST_SENT_TO_WORKER] Booking: ${booking._id}, Worker: ${worker._id}`);
       console.log(`[BROADCAST_REQUEST_SENT] Broadcast request sent to worker: ${worker._id}`);
       console.log(`[WORKER_RECEIVED_REQUEST] Worker received request: ${worker._id}`);
+
+      try {
+        await sendNotificationToWorker(worker._id.toString(), {
+          title: 'New Service Request',
+          body: `New ${payload.serviceName || 'service'} request near you. Tap to accept.`,
+          data: {
+            bookingId: booking._id.toString(),
+            orderId: (booking.bookingNumber || booking._id).toString(),
+            serviceName: payload.serviceName || '',
+            totalAmount: (booking.finalAmount || 0).toString()
+          }
+        });
+      } catch (fcmErr) {
+        console.warn(`[MatchingService] FCM failed for worker ${worker._id}:`, fcmErr.message);
+      }
       
       io.to('admin:wbi').emit('admin:workerRequestSent', { bookingId: booking._id, workerId: worker._id });
     }
@@ -473,6 +398,7 @@ class MatchingService {
 
     // Emit to worker
     io.to(`worker:${worker._id}`).emit('worker:newBookingRequest', payload);
+    io.to(`worker_${worker._id}`).emit('worker:newBookingRequest', payload);
     console.log(`[REQUEST_SENT_TO_WORKER] Booking: ${booking._id}, Worker: ${worker._id}`);
     
     io.to(`booking_${booking._id}`).emit('booking:requestSentToWorker', {
@@ -615,7 +541,9 @@ class MatchingService {
    */
   async continueMatching(bookingId) {
     try {
-      const booking = await Booking.findById(bookingId).populate('serviceId subServiceId');
+      const booking = await Booking.findById(bookingId)
+        .populate('serviceId subServiceId')
+        .populate('userId', 'name phone');
       if (!booking || booking.status !== 'searching_worker') {
         return;
       }

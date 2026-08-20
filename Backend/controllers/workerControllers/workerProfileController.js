@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Worker = require('../../models/Worker');
 const { validationResult } = require('express-validator');
 const cloudinaryService = require('../../services/cloudinaryService');
@@ -32,9 +33,11 @@ const getProfile = async (req, res) => {
         serviceCategoryRefs: worker.serviceCategoryRefs || [],
         approvedOneTimeServices: worker.approvedOneTimeServices || [],
         serviceCategory: worker.serviceCategories?.[0] || '', // Legacy support
+        subServices: worker.subServices || [],
         skills: worker.skills || [],
         secondarySkills: worker.secondarySkills || [],
         address: worker.address || null,
+        location: worker.location || null,
         rating: worker.rating || 0,
         totalJobs: worker.totalJobs || 0,
         completedJobs: worker.completedJobs || 0,
@@ -115,6 +118,8 @@ const updateProfile = async (req, res) => {
     if (skills && Array.isArray(skills)) worker.skills = skills;
     if (secondarySkills && Array.isArray(secondarySkills)) worker.secondarySkills = secondarySkills;
     if (address) {
+      const lat = address.lat != null ? Number(address.lat) : (worker.address?.lat ?? null);
+      const lng = address.lng != null ? Number(address.lng) : (worker.address?.lng ?? null);
       worker.address = {
         addressLine1: address.addressLine1 || worker.address?.addressLine1 || '',
         addressLine2: address.addressLine2 || worker.address?.addressLine2 || '',
@@ -122,8 +127,18 @@ const updateProfile = async (req, res) => {
         state: address.state || worker.address?.state || '',
         pincode: address.pincode || worker.address?.pincode || '',
         landmark: address.landmark || worker.address?.landmark || '',
-        fullAddress: address.fullAddress || worker.address?.fullAddress || ''
+        fullAddress: address.fullAddress || worker.address?.fullAddress || '',
+        lat: Number.isFinite(lat) ? lat : null,
+        lng: Number.isFinite(lng) ? lng : null
       };
+
+      if (Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0)) {
+        worker.location = {
+          type: 'Point',
+          coordinates: [lng, lat],
+          updatedAt: new Date()
+        };
+      }
     }
     if (status) worker.status = status;
     if (profilePhoto !== undefined) {
@@ -195,6 +210,7 @@ const updateProfile = async (req, res) => {
         skills: worker.skills,
         secondarySkills: worker.secondarySkills || [],
         address: worker.address,
+        location: worker.location,
         rating: worker.rating,
         totalJobs: worker.totalJobs,
         completedJobs: worker.completedJobs,
@@ -383,15 +399,8 @@ const updateDocuments = async (req, res) => {
  */
 const updateSkillsProfile = async (req, res) => {
   try {
-    const workerId = req.user.id;
-    const { subServices, serviceCategories } = req.body;
-
-    if (!Array.isArray(subServices)) {
-      return res.status(400).json({
-        success: false,
-        message: 'subServices must be an array'
-      });
-    }
+    const workerId = req.user.id || req.user._id;
+    const { subServices, serviceCategories, secondarySkills } = req.body;
 
     const worker = await Worker.findById(workerId);
     if (!worker) {
@@ -401,67 +410,87 @@ const updateSkillsProfile = async (req, res) => {
       });
     }
 
-    // Process subServices
-    const updatedSubServices = subServices.map(item => {
-      // Find matching existing subservice to preserve customSkills status
-      const existingSubService = worker.subServices.find(
-        s => s.subServiceId.toString() === item.subServiceId.toString()
-      );
-      
-      const existingCustomSkills = existingSubService ? existingSubService.customSkills : [];
-      
-      // Process customSkills
-      const customSkillsPayload = item.customSkills || [];
-      const processedCustomSkills = customSkillsPayload.map(cs => {
-        const skillName = typeof cs === 'string' ? cs.trim() : (cs.name ? cs.name.trim() : '');
-        if (!skillName) return null;
+    // Process subServices safely
+    let updatedSubServices = [];
+    if (Array.isArray(subServices)) {
+      const existingList = Array.isArray(worker.subServices) ? worker.subServices : [];
 
-        const existing = existingCustomSkills.find(
-          ecs => ecs.name.toLowerCase() === skillName.toLowerCase()
-        );
+      updatedSubServices = subServices
+        .filter(item => item && item.subServiceId && mongoose.Types.ObjectId.isValid(item.subServiceId))
+        .map(item => {
+          const itemIdStr = item.subServiceId.toString();
+          
+          // Find matching existing subservice to preserve customSkills status
+          const existingSubService = existingList.find(
+            s => s && s.subServiceId && s.subServiceId.toString() === itemIdStr
+          );
+          
+          const existingCustomSkills = (existingSubService && Array.isArray(existingSubService.customSkills)) 
+            ? existingSubService.customSkills 
+            : [];
+          
+          // Process customSkills safely
+          const customSkillsPayload = Array.isArray(item.customSkills) ? item.customSkills : [];
+          const processedCustomSkills = customSkillsPayload.map(cs => {
+            const skillName = typeof cs === 'string' ? cs.trim() : (cs?.name ? cs.name.trim() : '');
+            if (!skillName) return null;
 
-        if (existing) {
+            const existing = existingCustomSkills.find(
+              ecs => ecs?.name && ecs.name.toLowerCase() === skillName.toLowerCase()
+            );
+
+            if (existing) {
+              return {
+                _id: existing._id,
+                name: existing.name,
+                status: existing.status || 'pending'
+              };
+            } else {
+              return {
+                name: skillName,
+                status: 'pending'
+              };
+            }
+          }).filter(Boolean);
+
           return {
-            _id: existing._id,
-            name: existing.name,
-            status: existing.status
+            subServiceId: new mongoose.Types.ObjectId(itemIdStr),
+            name: item.name || '',
+            skills: Array.isArray(item.skills) ? item.skills : [],
+            customSkills: processedCustomSkills,
+            tools: Array.isArray(item.tools) ? item.tools : [],
+            brandsHandled: Array.isArray(item.brandsHandled) ? item.brandsHandled : [],
+            experienceLevel: item.experienceLevel || '',
+            yearsOfExperience: Number(item.yearsOfExperience) || 0
           };
-        } else {
-          return {
-            name: skillName,
-            status: 'pending'
-          };
-        }
-      }).filter(Boolean);
+        });
+    }
 
-      return {
-        subServiceId: item.subServiceId,
-        name: item.name,
-        skills: item.skills || [],
-        customSkills: processedCustomSkills,
-        tools: item.tools || [],
-        experienceLevel: item.experienceLevel || '',
-        yearsOfExperience: item.yearsOfExperience || 0
-      };
-    });
+    const updateFields = {
+      subServices: updatedSubServices
+    };
 
-    worker.subServices = updatedSubServices;
-    
-    if (serviceCategories && Array.isArray(serviceCategories)) {
-      worker.serviceCategories = serviceCategories;
+    if (Array.isArray(serviceCategories) && serviceCategories.length > 0) {
+      updateFields.serviceCategories = serviceCategories;
     }
     
-    if (req.body.secondarySkills && Array.isArray(req.body.secondarySkills)) {
-      worker.secondarySkills = req.body.secondarySkills;
+    if (Array.isArray(secondarySkills)) {
+      updateFields.secondarySkills = secondarySkills;
     }
 
-    await worker.save();
+    const updatedWorker = await Worker.findByIdAndUpdate(
+      workerId,
+      { $set: updateFields },
+      { new: true, runValidators: false }
+    );
 
     res.status(200).json({
       success: true,
       message: 'Skills profile updated successfully',
-      subServices: worker.subServices,
-      serviceCategories: worker.serviceCategories
+      worker: updatedWorker,
+      subServices: updatedWorker.subServices,
+      serviceCategories: updatedWorker.serviceCategories,
+      secondarySkills: updatedWorker.secondarySkills
     });
   } catch (error) {
     console.error('Update worker skills profile error:', error);

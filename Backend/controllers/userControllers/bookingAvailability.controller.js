@@ -22,7 +22,7 @@ exports.checkAvailability = async (req, res) => {
     // Currently online and available
     const availableWorkers = await Worker.countDocuments({
         ...baseQuery,
-        status: 'online'
+        status: { $in: ['ONLINE', 'online', 'active'] }
     });
 
     let status = 'Available';

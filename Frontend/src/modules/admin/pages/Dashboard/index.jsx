@@ -12,7 +12,65 @@ import { formatCurrency } from '../../utils/adminHelpers';
 import CustomerGrowthAreaChart from '../../components/dashboard/CustomerGrowthAreaChart';
 import TopServices from '../../components/dashboard/TopServices';
 import RecentBookings from '../../components/dashboard/RecentBookings';
-import { getDashboardStats, getRevenueAnalytics } from '../../../../services/adminDashboardService';
+import {
+  getDashboardStats,
+  getRevenueAnalytics,
+  getBookingTrends
+} from '../../../../services/adminDashboardService';
+
+/**
+ * Generate a continuous array of dates/months in the range with initial 0 metrics
+ */
+const generateTimelineBuckets = (startDate, endDate, period) => {
+  const buckets = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (period === 'year') {
+    const current = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+    while (current <= endMonth) {
+      const yyyy = current.getFullYear();
+      const mm = String(current.getMonth() + 1).padStart(2, '0');
+      const key = `${yyyy}-${mm}`;
+      const label = current.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+      buckets.push({
+        date: key,
+        dateLabel: label,
+        revenue: 0,
+        orders: 0,
+        bookings: 0,
+        completed: 0,
+        cancelled: 0
+      });
+      current.setMonth(current.getMonth() + 1);
+    }
+  } else {
+    const current = new Date(start);
+    current.setHours(0, 0, 0, 0);
+    const endDay = new Date(end);
+    endDay.setHours(23, 59, 59, 999);
+
+    while (current <= endDay) {
+      const yyyy = current.getFullYear();
+      const mm = String(current.getMonth() + 1).padStart(2, '0');
+      const dd = String(current.getDate()).padStart(2, '0');
+      const key = `${yyyy}-${mm}-${dd}`;
+      const label = current.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+      buckets.push({
+        date: key,
+        dateLabel: label,
+        revenue: 0,
+        orders: 0,
+        bookings: 0,
+        completed: 0,
+        cancelled: 0
+      });
+      current.setDate(current.getDate() + 1);
+    }
+  }
+  return buckets;
+};
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -21,7 +79,7 @@ const AdminDashboard = () => {
     start: new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
-  const [revenueData, setRevenueData] = useState([]);
+  const [timelineData, setTimelineData] = useState([]);
   const [recentBookingsList, setRecentBookingsList] = useState([]);
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -30,92 +88,135 @@ const AdminDashboard = () => {
     activeBookings: 0,
     completedBookings: 0,
     totalRevenue: 0,
+    platformCommission: 0,
     todayRevenue: 0,
   });
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchData = async () => {
       try {
-        // 1. Calculate Period Dates
-        let apiPeriod = 'monthly';
+        // 1. Calculate Start & End Dates
+        let apiPeriod = 'daily';
         let startDate = new Date();
-        let endDate = new Date().toISOString();
+        let endDate = new Date();
 
         if (period === 'year') {
           apiPeriod = 'monthly';
-          startDate.setFullYear(startDate.getFullYear() - 1);
+          startDate = new Date(startDate.getFullYear() - 1, startDate.getMonth(), 1);
         } else if (period === 'week') {
           apiPeriod = 'daily';
           startDate.setDate(startDate.getDate() - 7);
+          startDate.setHours(0, 0, 0, 0);
         } else if (period === 'month') {
           apiPeriod = 'daily';
           startDate.setDate(startDate.getDate() - 30);
+          startDate.setHours(0, 0, 0, 0);
         } else if (period === 'custom') {
           apiPeriod = 'daily';
           startDate = new Date(customDates.start);
-          const customEndDate = new Date(customDates.end);
-          customEndDate.setHours(23, 59, 59, 999);
-          endDate = customEndDate.toISOString();
+          startDate.setHours(0, 0, 0, 0);
+          endDate = new Date(customDates.end);
+          endDate.setHours(23, 59, 59, 999);
         } else {
+          // today
           apiPeriod = 'daily';
-          startDate.setDate(startDate.getDate() - 1);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setHours(23, 59, 59, 999);
         }
 
         const startIso = startDate.toISOString();
+        const endIso = endDate.toISOString();
 
-        // 2. Fetch Stats & Recent Bookings (Filtered)
-        const statsRes = await getDashboardStats({
-          startDate: startIso,
-          endDate
-        });
-        
-        if (statsRes.success) {
+        // 2. Concurrently fetch stats, revenue analytics, and booking trends
+        const [statsRes, revRes, trendsRes] = await Promise.all([
+          getDashboardStats({ startDate: startIso, endDate: endIso }).catch(err => {
+            console.error('Stats fetch error:', err);
+            return { success: false };
+          }),
+          getRevenueAnalytics({ period: apiPeriod, startDate: startIso, endDate: endIso }).catch(err => {
+            console.error('Revenue fetch error:', err);
+            return { success: false };
+          }),
+          getBookingTrends({ period: apiPeriod, startDate: startIso, endDate: endIso }).catch(err => {
+            console.error('Trends fetch error:', err);
+            return { success: false };
+          })
+        ]);
+
+        if (!isMounted) return;
+
+        // 3. Process Stats & Recent Bookings
+        if (statsRes?.success && statsRes.data?.stats) {
           const s = statsRes.data.stats;
           setStats({
-            totalUsers: s.totalUsers,
-            totalVendors: s.totalVendors,
-            totalWorkers: s.totalWorkers,
-            activeBookings: s.pendingBookings,
-            completedBookings: s.completedBookings,
-            totalRevenue: s.totalRevenue,
+            totalUsers: s.totalUsers || 0,
+            totalVendors: s.totalVendors || 0,
+            totalWorkers: s.totalWorkers || 0,
+            activeBookings: s.pendingBookings || 0,
+            completedBookings: s.completedBookings || 0,
+            totalRevenue: s.totalRevenue || 0,
+            platformCommission: s.platformCommission || 0,
             todayRevenue: 0,
           });
           setRecentBookingsList(statsRes.data.recentBookings || []);
         }
 
-        // 3. Fetch Revenue Analytics based on Period
-        const revRes = await getRevenueAnalytics({
-          period: apiPeriod,
-          startDate: startIso,
-          endDate
-        });
+        // 4. Generate continuous timeline and overlay revenue & booking trends
+        const buckets = generateTimelineBuckets(startDate, endDate, period);
+        const bucketMap = new Map();
+        buckets.forEach(b => bucketMap.set(b.date, { ...b }));
 
-        if (revRes.success) {
-          const mapped = revRes.data.revenueData.map(item => ({
-            date: item._id,
-            revenue: item.revenue,
-            orders: item.bookings
-          }));
-          mapped.sort((a, b) => new Date(a.date) - new Date(b.date));
-          setRevenueData(mapped);
+        // Overlay Revenue
+        if (revRes?.success && Array.isArray(revRes.data?.revenueData)) {
+          revRes.data.revenueData.forEach(item => {
+            if (bucketMap.has(item._id)) {
+              const b = bucketMap.get(item._id);
+              b.revenue = Number(item.revenue || 0);
+            }
+          });
         }
+
+        // Overlay Booking Trends
+        if (trendsRes?.success && Array.isArray(trendsRes.data?.trends)) {
+          trendsRes.data.trends.forEach(item => {
+            if (bucketMap.has(item._id)) {
+              const b = bucketMap.get(item._id);
+              b.orders = Number(item.count || 0);
+              b.bookings = Number(item.count || 0);
+              b.completed = Number(item.completed || 0);
+              b.cancelled = Number(item.cancelled || 0);
+            }
+          });
+        }
+
+        const mergedTimeline = Array.from(bucketMap.values());
+        setTimelineData(mergedTimeline);
+
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
       }
     };
 
     fetchData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [period, customDates.start, customDates.end]);
 
   const handleExportCsv = () => {
     try {
-      const rows = revenueData.map((r) => ({
+      const rows = timelineData.map((r) => ({
         date: r.date,
-        bookings: r.orders,
-        revenue: r.revenue,
+        bookings: r.orders || 0,
+        completed: r.completed || 0,
+        cancelled: r.cancelled || 0,
+        revenue: r.revenue || 0,
       }));
 
-      const headers = ['date', 'bookings', 'revenue'];
+      const headers = ['date', 'bookings', 'completed', 'cancelled', 'revenue'];
       const csv = [
         headers.join(','),
         ...rows.map((row) => headers.map((h) => JSON.stringify(row[h] ?? '')).join(',')),
@@ -268,8 +369,8 @@ const AdminDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <RevenueLineChart data={revenueData} period={period} />
-        <BookingsBarChart data={revenueData} period={period} />
+        <RevenueLineChart data={timelineData} />
+        <BookingsBarChart data={timelineData} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -278,11 +379,11 @@ const AdminDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        <RevenueVsBookingsChart data={revenueData} period={period} />
+        <RevenueVsBookingsChart data={timelineData} />
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        <CustomerGrowthAreaChart timelineData={revenueData} bookings={recentBookingsList} period={period} />
+        <CustomerGrowthAreaChart timelineData={timelineData} bookings={recentBookingsList} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -297,4 +398,5 @@ const AdminDashboard = () => {
 };
 
 export default AdminDashboard;
+
 

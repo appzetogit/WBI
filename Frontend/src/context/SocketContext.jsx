@@ -65,7 +65,14 @@ const SwipeableNotification = ({ t, data, onClick }) => {
 
 const SocketContext = createContext(null);
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com';
+const isLocalHost =
+  typeof window !== 'undefined' &&
+  (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
+    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(window.location.hostname));
+
+const SOCKET_URL = isLocalHost
+  ? window.location.origin
+  : (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com');
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
@@ -125,7 +132,16 @@ export const SocketProvider = ({ children }) => {
         break;
     }
 
-    const token = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey);
+    const token =
+      sessionStorage.getItem(tokenKey) ||
+      localStorage.getItem(tokenKey) ||
+      sessionStorage.getItem('workerAccessToken') ||
+      localStorage.getItem('workerAccessToken') ||
+      sessionStorage.getItem('accessToken') ||
+      localStorage.getItem('accessToken') ||
+      sessionStorage.getItem('token') ||
+      localStorage.getItem('token');
+
     // If no token, we don't connect
     if (!token) {
       if (activeSocketRef.current) {
@@ -156,13 +172,13 @@ export const SocketProvider = ({ children }) => {
       auth: {
         token: token
       },
-      transports: ['websocket'], // Use WebSocket directly to prevent CORS/polling errors
+      transports: ['polling', 'websocket'],
       withCredentials: true,
       secure: SOCKET_URL.startsWith('https'),
       // Never disable TLS verification in production
       ...(import.meta.env.DEV ? { rejectUnauthorized: false } : {}),
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000,
@@ -623,9 +639,9 @@ export const SocketProvider = ({ children }) => {
     }
 
     return () => {
-      newSocket.disconnect();
+      // Only disconnect if userType or token changed
     };
-  }, [userType, location.pathname, navigate]); // Re-evaluate on path transitions to check for token/auth changes (excluding socket to prevent loop)
+  }, [userType]); // Only re-evaluate when userType changes, maintaining continuous socket session across pages
 
   return (
     <SocketContext.Provider value={socket}>
@@ -634,4 +650,11 @@ export const SocketProvider = ({ children }) => {
   );
 };
 
-export const useSocket = () => useContext(SocketContext);
+export const useSocket = () => {
+  const socket = useContext(SocketContext);
+  if (socket && typeof socket === 'object') {
+    socket.socket = socket;
+    return socket;
+  }
+  return null;
+};

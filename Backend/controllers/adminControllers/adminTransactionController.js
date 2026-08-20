@@ -4,6 +4,7 @@ const VendorBill = require('../../models/VendorBill');
 const User = require('../../models/User');
 const Vendor = require('../../models/Vendor');
 const Worker = require('../../models/Worker');
+const Engineer = require('../../models/Engineer');
 const PlatformEarning = require('../../models/PlatformEarning');
 
 /**
@@ -68,8 +69,12 @@ const getAllTransactions = async (req, res) => {
       bookings.forEach(booking => {
         const bill = billMap[booking._id.toString()];
 
-        // 1. Company Revenue (from VendorBill)
-        if (shouldInclude('commission') && bill && bill.companyRevenue > 0) {
+        const companyRevenue = bill ? bill.companyRevenue : (booking.platformEarning || (booking.subTotal ? Math.round(booking.subTotal * ((booking.workerCommissionRate || 20) / 100) * 100) / 100 : (booking.finalAmount ? Math.round(booking.finalAmount * 0.2 * 100) / 100 : 0)));
+        const totalGST = bill ? bill.totalGST : (booking.tax || 0);
+        const convenienceFee = booking.visitingCharges || booking.platformFee || 0;
+
+        // 1. Company Revenue
+        if (shouldInclude('commission') && companyRevenue > 0) {
           virtualTransactions.push({
             _id: `${booking._id}_comm`,
             referenceId: `REV-${booking.bookingNumber}`,
@@ -77,39 +82,39 @@ const getAllTransactions = async (req, res) => {
             userId: booking.userId,
             vendorId: booking.vendorId,
             type: 'commission',
-            amount: bill.companyRevenue,
+            amount: companyRevenue,
             status: 'completed',
-            paymentMethod: 'system',
-            createdAt: bill.paidAt || booking.completedAt || booking.updatedAt || booking.createdAt,
+            paymentMethod: booking.paymentMethod || 'system',
+            createdAt: bill?.paidAt || booking.completedAt || booking.updatedAt || booking.createdAt,
             description: `Company revenue for booking ${booking.bookingNumber}`
           });
         }
 
-        // 2. GST (from VendorBill)
-        if (shouldInclude('gst') && bill && bill.totalGST > 0) {
+        // 2. GST
+        if (shouldInclude('gst') && totalGST > 0) {
           virtualTransactions.push({
             _id: `${booking._id}_gst`,
             referenceId: `GST-${booking.bookingNumber}`,
             bookingId: booking,
             type: 'gst',
-            amount: bill.totalGST,
+            amount: totalGST,
             status: 'completed',
-            paymentMethod: 'system',
-            createdAt: bill.paidAt || booking.completedAt || booking.updatedAt || booking.createdAt,
+            paymentMethod: booking.paymentMethod || 'system',
+            createdAt: bill?.paidAt || booking.completedAt || booking.updatedAt || booking.createdAt,
             description: `GST for booking ${booking.bookingNumber}`
           });
         }
 
         // 3. Convenience Fee (Visiting Charges)
-        if (shouldInclude('convenience_fee') && booking.visitingCharges > 0) {
+        if (shouldInclude('convenience_fee') && convenienceFee > 0) {
           virtualTransactions.push({
             _id: `${booking._id}_conv`,
             referenceId: `FEE-${booking.bookingNumber}`,
             bookingId: booking,
             type: 'convenience_fee',
-            amount: booking.visitingCharges,
+            amount: convenienceFee,
             status: 'completed',
-            paymentMethod: 'system',
+            paymentMethod: booking.paymentMethod || 'system',
             createdAt: booking.completedAt || booking.updatedAt || booking.createdAt,
             description: `Convenience Fee for booking ${booking.bookingNumber}`
           });
@@ -194,16 +199,20 @@ const getAllTransactions = async (req, res) => {
     }
 
     const transactions = await Transaction.find(query)
-      .populate('userId', 'name email phone')
-      .populate('vendorId', 'name email phone')
-      .populate('workerId', 'name email phone')
+      .populate({ path: 'userId', select: 'name email phone', strictPopulate: false })
+      .populate({ path: 'vendorId', select: 'name businessName email phone', strictPopulate: false })
+      .populate({ path: 'workerId', select: 'name email phone', strictPopulate: false })
+      .populate({ path: 'engineerId', select: 'name email phone', strictPopulate: false })
       .populate({
         path: 'bookingId',
-        select: 'bookingNumber userId',
-        populate: {
-          path: 'userId',
-          select: 'name email phone'
-        }
+        select: 'bookingNumber userId vendorId workerId engineerId serviceName finalAmount',
+        strictPopulate: false,
+        populate: [
+          { path: 'userId', select: 'name email phone', strictPopulate: false },
+          { path: 'vendorId', select: 'name businessName email phone', strictPopulate: false },
+          { path: 'workerId', select: 'name email phone', strictPopulate: false },
+          { path: 'engineerId', select: 'name email phone', strictPopulate: false }
+        ]
       })
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -251,7 +260,30 @@ const getTransactionStats = async (req, res) => {
         }
       ]);
 
-      const data = stats[0] || { totalRevenue: 0, totalCommission: 0, totalGST: 0, totalVendorEarnings: 0 };
+      let data = stats[0];
+      if (!data || data.totalRevenue === 0) {
+        const bookingStats = await Booking.aggregate([
+          {
+            $match: { status: { $in: ['COMPLETED', 'completed', 'paid', 'PAID'] } }
+          },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: '$finalAmount' },
+              totalCommission: { $sum: '$platformEarning' },
+              totalGST: { $sum: '$tax' },
+              totalVendorEarnings: { $sum: '$workerPayout' }
+            }
+          }
+        ]);
+        const b = bookingStats[0] || {};
+        data = {
+          totalRevenue: b.totalRevenue || 0,
+          totalCommission: b.totalCommission || (b.totalRevenue ? Math.round(b.totalRevenue * 0.2 * 100) / 100 : 0),
+          totalGST: b.totalGST || 0,
+          totalVendorEarnings: b.totalVendorEarnings || (b.totalRevenue ? Math.round(b.totalRevenue * 0.8 * 100) / 100 : 0)
+        };
+      }
 
       return res.status(200).json({
         success: true,

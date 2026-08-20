@@ -127,8 +127,33 @@ const workerService = {
   },
 
   addJobNotes: async (id, data) => {
-    // data can be a string (legacy) or an object { notes, structuredNotes }
-    const payload = typeof data === 'string' ? { notes: data } : data;
+    let payload;
+    if (typeof data === 'string') {
+      const trimmed = data.trim();
+      payload = { notes: trimmed || 'Work notes updated' };
+    } else if (data && typeof data === 'object') {
+      const structured = data.structuredNotes || (data.issueFound || data.resolutionDetails || data.additionalRemarks ? data : null);
+      const textParts = [
+        data.notes,
+        structured?.issueFound,
+        structured?.resolutionDetails,
+        structured?.additionalRemarks
+      ].filter(v => typeof v === 'string' && v.trim().length > 0);
+
+      const notesText = textParts.join('\n').trim() || 'Work notes updated';
+
+      payload = {
+        ...data,
+        notes: (typeof data.notes === 'string' && data.notes.trim()) || notesText,
+        structuredNotes: structured ? {
+          issueFound: structured.issueFound || '',
+          resolutionDetails: structured.resolutionDetails || '',
+          additionalRemarks: structured.additionalRemarks || ''
+        } : undefined
+      };
+    } else {
+      payload = { notes: 'Work notes updated' };
+    }
     const response = await api.post(`/workers/jobs/${id}/notes`, payload);
     return response.data;
   },

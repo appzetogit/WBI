@@ -14,6 +14,7 @@ import { useAppNotifications } from '../../../../hooks/useAppNotifications';
 import { useLocationTracking } from '../../../../hooks/useLocationTracking';
 import { compressImageToBase64 } from '../../../../utils/imageCompression';
 import { getUserFacingError } from '../../../../utils/userFacingError';
+import { stopAlertRing } from '../../../../utils/notificationSound';
 import styles from './JobDetails.module.css';
 
 const JobDetails = () => {
@@ -93,6 +94,7 @@ const JobDetails = () => {
   };
 
   useEffect(() => {
+    stopAlertRing();
     fetchJobDetails();
   }, [id]);
 
@@ -322,6 +324,14 @@ const JobDetails = () => {
       } else if (actionType === 'START_WORK') {
         setIsVisitModalOpen(true);
       } else if (actionType === 'COMPLETE_WORK') {
+        stopAlertRing();
+        if (progressNotes && progressNotes.trim()) {
+          try {
+            await workerService.addJobNotes(id, { notes: progressNotes.trim() });
+          } catch (e) {
+            // ignore
+          }
+        }
         navigate(`/worker/job/${id}/progress`);
         return;
       }
@@ -730,15 +740,33 @@ const JobDetails = () => {
             </button>
           )}
 
-          {/* Case 4: In Progress */}
-          {job.status === 'in_progress' && (
+          {/* Case 4: In Progress / Visited */}
+          {['in_progress', 'visited'].includes(job.status?.toLowerCase()) && (
             <button 
               onClick={() => handleAction('COMPLETE_WORK')}
               disabled={actionLoading}
-              className="w-full py-4 rounded-xl font-bold text-white bg-[#10AFA5] shadow-lg shadow-[#10AFA5]/30 active:scale-95 transition-all text-sm flex items-center justify-center gap-2"
+              className="w-full py-4 rounded-xl font-bold text-white bg-[#10AFA5] shadow-lg shadow-[#10AFA5]/30 active:scale-95 transition-all text-sm flex items-center justify-center gap-2 cursor-pointer"
             >
-              Complete Work <FiCheckCircle />
+              Job Progress / Complete Work <FiCheckCircle />
             </button>
+          )}
+
+          {/* Case 4.1: Work Done */}
+          {job.status === 'work_done' && (
+            <div className="flex gap-3">
+              <button 
+                onClick={() => navigate(`/worker/job/${id}/progress`)}
+                className="flex-1 py-4 rounded-xl font-bold text-gray-700 bg-gray-100 active:scale-95 transition-all text-sm flex items-center justify-center gap-2"
+              >
+                <FiFileText /> View Progress
+              </button>
+              <button 
+                onClick={() => navigate(`/worker/job/${id}/success`)}
+                className="flex-1 py-4 rounded-xl font-bold text-white bg-[#10AFA5] shadow-lg shadow-[#10AFA5]/30 active:scale-95 transition-all text-sm flex items-center justify-center gap-2"
+              >
+                <FiCheckCircle /> Summary
+              </button>
+            </div>
           )}
 
           {/* Case 4.5: Completed work, awaiting customer payment */}

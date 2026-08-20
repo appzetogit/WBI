@@ -48,39 +48,46 @@ const BookingStatusPieChart = ({ bookings = [] }) => {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200"
+      className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-gray-200 flex flex-col justify-between"
     >
-      <div className="mb-4">
+      <div className="mb-2">
         <h3 className="text-base sm:text-lg font-extrabold text-gray-800">Booking Status</h3>
         <p className="text-xs sm:text-sm text-gray-500 mt-1">Status distribution</p>
       </div>
 
-      <div className="w-full h-[260px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius={55}
-              outerRadius={90}
-              paddingAngle={2}
-            >
-              {data.map((entry) => (
-                <Cell key={entry.name} fill={COLORS[entry.name] || COLORS.OTHER} />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-            <Legend verticalAlign="bottom" height={36} />
-          </PieChart>
-        </ResponsiveContainer>
+      <div className="w-full h-[260px] flex items-center justify-center">
+        {data.length === 0 ? (
+          <div className="text-center text-gray-400 text-sm">
+            <p>No booking activity in this period</p>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={data}
+                dataKey="value"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius={55}
+                outerRadius={90}
+                paddingAngle={2}
+              >
+                {data.map((entry) => (
+                  <Cell key={entry.name} fill={COLORS[entry.name] || COLORS.OTHER} />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+              <Legend verticalAlign="bottom" height={36} />
+            </PieChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </motion.div>
   );
 };
 
 export default BookingStatusPieChart;
+
 
 

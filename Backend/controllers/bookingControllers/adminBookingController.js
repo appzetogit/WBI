@@ -565,25 +565,54 @@ const getBookingLogs = async (req, res) => {
 const getBookingPayment = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const booking = await Booking.findById(bookingId);
+    const booking = await Booking.findById(bookingId)
+      .populate('userId', 'name phone email')
+      .populate('vendorId', 'name businessName phone')
+      .populate('workerId', 'name phone');
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
+
+    const VendorBill = require('../../models/VendorBill');
+    const Transaction = require('../../models/Transaction');
+    
+    const [vendorBill, transactions] = await Promise.all([
+      VendorBill.findOne({ bookingId: booking._id }),
+      Transaction.find({ bookingId: booking._id }).sort({ createdAt: -1 })
+    ]);
+
+    const workerCommissionRate = booking.workerCommissionRate || 20;
+    const subTotal = booking.subTotal || booking.basePrice || 0;
+    const workerPayout = vendorBill?.vendorTotalEarning || booking.workerPayout || (subTotal ? Math.round(subTotal * (1 - workerCommissionRate / 100) * 100) / 100 : Math.round((booking.finalAmount || 0) * 0.8 * 100) / 100);
+    const platformEarning = vendorBill?.companyRevenue || booking.platformEarning || (subTotal ? Math.round(subTotal * (workerCommissionRate / 100) * 100) / 100 : Math.round((booking.finalAmount || 0) * 0.2 * 100) / 100);
+
     res.status(200).json({
       success: true,
       data: {
         paymentStatus: booking.paymentStatus,
         paymentMethod: booking.paymentMethod,
         paymentId: booking.paymentId || booking.razorpayPaymentId,
-        finalAmount: booking.finalAmount,
-        basePrice: booking.basePrice,
-        tax: booking.tax,
-        visitingCharges: booking.visitingCharges,
-        penalty: booking.penalty,
+        razorpayOrderId: booking.razorpayOrderId,
+        razorpayPaymentId: booking.razorpayPaymentId,
+        finalAmount: vendorBill?.grandTotal || booking.finalAmount,
+        subTotal,
+        basePrice: booking.basePrice || subTotal,
+        tax: vendorBill?.totalGST || booking.tax || 0,
+        visitingCharges: booking.visitingCharges || 0,
+        platformFee: booking.platformFee || 29,
+        penalty: booking.penalty || 0,
         discount: booking.discount || 0,
-        extraCharges: booking.extraCharges,
-        platformEarning: booking.platformEarning || 0,
-        workerPayout: booking.workerPayout || 0
+        extraCharges: booking.extraCharges || [],
+        platformEarning,
+        workerPayout,
+        workerCommissionRate,
+        vendorBill,
+        transactions,
+        user: booking.userId,
+        vendor: booking.vendorId,
+        worker: booking.workerId,
+        isWorkerPaid: booking.isWorkerPaid || false,
+        workerPaymentStatus: booking.workerPaymentStatus || 'PENDING'
       }
     });
   } catch (error) {
