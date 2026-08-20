@@ -27,13 +27,7 @@ Redis provides high-performance caching for:
    # Should return: PONG
    ```
 
-### Option 2: Docker (Recommended for Dev)
-
-```bash
-docker run -d --name redis-appzeto -p 6379:6379 redis:alpine
-```
-
-### Option 3: Cloud Redis (Production)
+### Option 2: Cloud Redis (Production)
 
 **Redis Cloud (Free Tier)**
 1. Go to: https://redis.com/try-free/

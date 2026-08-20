@@ -80,8 +80,6 @@ Clients (Web/PWA) → CDN → ALB/Nginx → API (stateless, PM2/K8s)
 
 | Artifact | Path |
 |----------|------|
-| Docker API image | `Backend/Dockerfile` |
-| Local stack | `docker-compose.yml` |
 | PM2 cluster | `Backend/ecosystem.config.js` |
 
 ### Environment (production)
