@@ -530,6 +530,21 @@ class MatchingService {
         
         // Notify admin panel
         io.to('admin:wbi').emit('admin:assignmentFailed', { bookingId: booking._id });
+
+        // Notify workers so it gets removed from their panel
+        if (booking.notifiedWorkers && booking.notifiedWorkers.length > 0) {
+          booking.notifiedWorkers.forEach(workerId => {
+            const wid = workerId.toString();
+            io.to(`worker:${wid}`).emit('worker:bookingExpired', { 
+              bookingId: booking._id,
+              message: 'Search timeout: Request is no longer available.'
+            });
+            io.to(`worker_${wid}`).emit('worker:bookingExpired', { 
+              bookingId: booking._id,
+              message: 'Search timeout: Request is no longer available.'
+            });
+          });
+        }
       }
     } catch (error) {
       console.error('[MatchingService] Error in cancelAndRestoreToCart:', error);

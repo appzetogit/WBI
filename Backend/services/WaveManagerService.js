@@ -37,6 +37,20 @@ class WaveManagerService {
         const io = getIO();
         if (io) {
           io.to(`booking_${bookingId}`).emit('booking:noWorkerAvailable');
+          
+          if (booking.notifiedWorkers && booking.notifiedWorkers.length > 0) {
+            booking.notifiedWorkers.forEach(workerId => {
+              const wid = workerId.toString();
+              io.to(`worker:${wid}`).emit('worker:bookingExpired', { 
+                bookingId: booking._id,
+                message: 'Search timeout: Request is no longer available.'
+              });
+              io.to(`worker_${wid}`).emit('worker:bookingExpired', { 
+                bookingId: booking._id,
+                message: 'Search timeout: Request is no longer available.'
+              });
+            });
+          }
         }
         // Could automatically transition booking status to admin_action_required here
         booking.status = 'admin_action_required';

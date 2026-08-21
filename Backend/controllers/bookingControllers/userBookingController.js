@@ -794,6 +794,23 @@ const cancelBooking = async (req, res) => {
         }
       });
       // Manual FCM push removed
+    } else if (booking.notifiedWorkers && booking.notifiedWorkers.length > 0) {
+      // Remove booking from all unassigned workers' screens if cancelled during search
+      const { getIO } = require('../../sockets');
+      const io = getIO();
+      if (io) {
+        booking.notifiedWorkers.forEach(workerId => {
+          const wid = workerId.toString();
+          io.to(`worker:${wid}`).emit('worker:bookingExpired', { 
+            bookingId: booking._id,
+            message: 'Request cancelled by customer.'
+          });
+          io.to(`worker_${wid}`).emit('worker:bookingExpired', { 
+            bookingId: booking._id,
+            message: 'Request cancelled by customer.'
+          });
+        });
+      }
     }
 
     res.status(200).json({
