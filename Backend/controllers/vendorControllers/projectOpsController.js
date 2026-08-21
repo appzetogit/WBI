@@ -610,6 +610,13 @@ const assignEngineerToProject = async (req, res) => {
     }).lean();
     if (awardedOpp) opportunity = awardedOpp;
 
+    // A project needing a team of N engineers must split its budget N ways —
+    // otherwise each engineer's VendorOpsJob carries the FULL project budget and
+    // creditEngineerForOpsJob() would pay every one of them their share of the
+    // whole project, not their share of the work.
+    const requiredEngineers = Math.max(1, Number(opportunity?.assignment?.requiredEngineers) || 1);
+    const engineerJobBudget = Math.round((Number(project.budget) || 0) / requiredEngineers);
+
     const job = await VendorOpsJob.create({
       vendorId: project.vendorId,
       projectId: project._id,
@@ -623,7 +630,7 @@ const assignEngineerToProject = async (req, res) => {
       address: opportunity?.requirements?.description || '',
       serviceCategoryCode: project.serviceCategoryCode,
       serviceCategoryName: project.serviceCategoryName,
-      budget: project.budget || 0,
+      budget: engineerJobBudget,
       priority: project.priority || 'normal',
       notes,
       scheduledAt: scheduledAt ? new Date(scheduledAt) : project.startDate || null,

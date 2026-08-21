@@ -7,6 +7,7 @@ const ServiceConfig = require('../models/ServiceConfig');
 const Settings = require('../models/Settings');
 const Transaction = require('../models/Transaction');
 const Vendor = require('../models/Vendor');
+const Engineer = require('../models/Engineer');
 const VendorOpsProject = require('../models/VendorOpsProject');
 const VendorOpsMilestone = require('../models/VendorOpsMilestone');
 const VendorOpsJob = require('../models/VendorOpsJob');
@@ -21,9 +22,20 @@ const DEFAULT_PAYMENT_RULES = {
   vendorSharePercent: 60
 };
 
-async function resolvePaymentRules(categoryCode, configSnapshot = null) {
+const hasOwnGstPercent = (rules) => !!rules && Object.prototype.hasOwnProperty.call(rules, 'gstPercent');
+
+/**
+ * @param {number|null} fallbackGstPercent - Used ONLY when no category config explicitly
+ *   sets gstPercent. B2B callers pass the company's charge-side deduction-rule GST here
+ *   so the payout-side deduction defaults to the same rate instead of silently 0.
+ */
+async function resolvePaymentRules(categoryCode, configSnapshot = null, fallbackGstPercent = null) {
   if (configSnapshot?.paymentRules && Object.keys(configSnapshot.paymentRules).length) {
-    return { ...DEFAULT_PAYMENT_RULES, ...configSnapshot.paymentRules };
+    const merged = { ...DEFAULT_PAYMENT_RULES, ...configSnapshot.paymentRules };
+    if (!hasOwnGstPercent(configSnapshot.paymentRules) && fallbackGstPercent != null) {
+      merged.gstPercent = fallbackGstPercent;
+    }
+    return merged;
   }
   const cfg = await ServiceConfig.findOne({
     categoryCode: String(categoryCode || '').toUpperCase(),
@@ -36,6 +48,13 @@ async function resolvePaymentRules(categoryCode, configSnapshot = null) {
     ...(cfg?.paymentRules || {}),
     ...(cfg?.commissionRules || {})
   };
+  if (
+    !hasOwnGstPercent(cfg?.paymentRules) &&
+    !hasOwnGstPercent(cfg?.commissionRules) &&
+    fallbackGstPercent != null
+  ) {
+    merged.gstPercent = fallbackGstPercent;
+  }
   const settings = await Settings.findOne().select('platformFeePercentage servicePayoutPercentage').lean();
   if (settings?.platformFeePercentage != null && merged.platformCommissionPercent == null) {
     merged.platformCommissionPercent = Number(settings.platformFeePercentage);
@@ -44,6 +63,19 @@ async function resolvePaymentRules(categoryCode, configSnapshot = null) {
     merged.engineerSharePercent = Number(settings.servicePayoutPercentage);
   }
   return merged;
+}
+
+/** B2B-only: the charge-side GST rate the company was billed, to default the payout-side rate to. */
+async function getB2BFallbackGstPercent(companyId) {
+  if (!companyId) return null;
+  try {
+    const B2BDeductionRule = require('../models/B2BDeductionRule');
+    const rule = await B2BDeductionRule.findOne({ companyId, isActive: true }).select('gstPercent').lean();
+    const pct = Number(rule?.gstPercent);
+    return Number.isFinite(pct) ? pct : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function computeSplit(gross, rules) {
@@ -79,7 +111,8 @@ async function computeB2BEngineerPayout(job, configSnapshot = null) {
     categoryCode = null;
   }
 
-  const rules = await resolvePaymentRules(categoryCode, configSnapshot);
+  const fallbackGstPercent = await getB2BFallbackGstPercent(job.companyId);
+  const rules = await resolvePaymentRules(categoryCode, configSnapshot, fallbackGstPercent);
   const split = computeSplit(gross, rules);
   return {
     engineerShare: split.engineerShare,
@@ -545,8 +578,6 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
   const B2BWalletTransaction = require('../models/B2BWalletTransaction');
   const B2BCompany = require('../models/B2BCompany');
   const B2BJob = require('../models/B2BJob');
-  const Wallet = require('../models/Wallet');
-  const WalletTransaction = require('../models/WalletTransaction');
   const Transaction = require('../models/Transaction');
   const PaymentAuditLog = require('../models/PaymentAuditLog');
   const EnterpriseProjectFlow = require('../models/EnterpriseProjectFlow');
@@ -597,7 +628,8 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
   }
 
   const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: jobId });
-  const rules = await resolvePaymentRules(flow?.categoryCode, flow?.configSnapshot);
+  const fallbackGstPercent = await getB2BFallbackGstPercent(job.companyId);
+  const rules = await resolvePaymentRules(flow?.categoryCode, flow?.configSnapshot, fallbackGstPercent);
   const modeRaw = String(rules.assignmentMode || rules.marketplaceMode || 'engineer_direct').toLowerCase();
   const mode =
     modeRaw === 'vendor_marketplace' || modeRaw === 'vendor_first'
@@ -644,38 +676,44 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
       /* ignore */
     }
   } else {
-    // engineer_direct
+    // engineer_direct — credit Engineer.wallet.balance, the SAME field Flow 2's
+    // opsJobPayout.service.js credits and the only one the engineer wallet
+    // screen (GET /api/engineers/wallet) actually reads. The standalone `Wallet`
+    // model (ownerType:'engineer') this used to credit is never read by that
+    // screen, so money released here was previously invisible to the engineer.
     const engineerId = job.assignedTo;
     if (!engineerId) {
       return { ok: false, reason: 'engineer_not_assigned', status: 428 };
     }
     creditAmount = split.engineerShare;
-    let engineerWallet = await Wallet.findOne({ ownerId: engineerId, ownerType: 'engineer' });
-    if (!engineerWallet) {
-      engineerWallet = await Wallet.create({ ownerId: engineerId, ownerType: 'engineer' });
-    }
-    engineerWallet.availableBalance = (Number(engineerWallet.availableBalance) || 0) + creditAmount;
-    engineerWallet.totalEarned = (Number(engineerWallet.totalEarned) || 0) + creditAmount;
-    // Clear any pending marker
-    engineerWallet.pendingBalance = Math.max(
-      0,
-      (Number(engineerWallet.pendingBalance) || 0) - creditAmount
-    );
-    await engineerWallet.save();
 
-    await WalletTransaction.create({
-      walletId: engineerWallet._id,
-      ownerId: engineerId,
-      ownerType: 'engineer',
-      transactionType: 'credit',
-      amount: creditAmount,
-      description: `B2B escrow release — ${job.jobId}`,
-      sourceType: 'job',
-      sourceId: jobId,
-      status: 'completed',
-      idempotencyKey: idemKey
-    });
+    const engineer = await Engineer.findById(engineerId);
+    if (!engineer) {
+      return { ok: false, reason: 'engineer_not_found', status: 404 };
+    }
+    if (!engineer.wallet) {
+      engineer.wallet = { balance: 0, totalEarnings: 0, withdrawnAmount: 0, pendingBalance: 0 };
+    }
+    engineer.wallet.balance = (Number(engineer.wallet.balance) || 0) + creditAmount;
+    engineer.wallet.totalEarnings = (Number(engineer.wallet.totalEarnings) || 0) + creditAmount;
+    await engineer.save();
+
     creditedTo = { role: 'engineer', id: engineerId, amount: creditAmount };
+
+    try {
+      if (global.io) {
+        const payload = {
+          amount: creditAmount,
+          balanceAfter: engineer.wallet.balance,
+          jobId: job.jobId,
+          message: `₹${creditAmount.toLocaleString('en-IN')} credited to your wallet`
+        };
+        global.io.to(`engineer:${engineerId}`).emit('wallet:credited', payload);
+        global.io.to(`engineer:${engineerId}`).emit('wallet:updated', payload);
+      }
+    } catch (_) {
+      /* non-blocking */
+    }
   }
 
   // Move company escrow → spent (funds leave the company permanently)
@@ -717,6 +755,7 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
 
   await Transaction.create({
     vendorId: creditedTo?.role === 'vendor' ? creditedTo.id : undefined,
+    engineerId: creditedTo?.role === 'engineer' ? creditedTo.id : undefined,
     type: 'earnings_credit',
     amount: creditAmount,
     status: 'completed',
