@@ -96,12 +96,14 @@ const getAssignmentConfig = async (categoryCode) => {
       vendorResponseTimeoutMinutes: 120,
       maxVendorsToNotify: 10,
       vendorRetryCount: 3,
+      vendorBatchSize: 3,
       priorityMode: 'vendor_then_freelancer',
       releaseToFreelancerOnVendorExhausted: true,
       freelancerPoolTimeoutMinutes: 120,
       scoringWeights: { location: 30, service: 25, capacity: 20, rating: 15, responseScore: 10 }
     };
   }
+  if (cfg.vendorBatchSize == null) cfg.vendorBatchSize = 3;
   if (!cfg.freelancerPoolVendorId && process.env.FREELANCER_POOL_VENDOR_ID) {
     cfg = { ...cfg, freelancerPoolVendorId: process.env.FREELANCER_POOL_VENDOR_ID };
   }
@@ -868,17 +870,28 @@ const startAssignmentForOpportunity = async (opportunityId, opts = {}) => {
   return notifyNextVendor(opportunity._id);
 };
 
+/**
+ * Broadcast the next batch of ranked vendors (config.vendorBatchSize at a time)
+ * simultaneously, instead of a single vendor one-at-a-time. First to accept wins
+ * (see onVendorAccepted); the rest of the batch is cancelled once someone does.
+ */
 const notifyNextVendor = async (opportunityId) => {
   const opportunity = await Opportunity.findById(opportunityId);
   if (!opportunity || opportunity.status !== 'open') return null;
   const queue = opportunity.assignment?.vendorQueue || [];
   const config = opportunity.assignment?.configSnapshot || (await getAssignmentConfig(opportunity.categoryCode));
+  const batchSize = Math.max(1, Number(config.vendorBatchSize) || 3);
 
-  let nextIndex = opportunity.assignment.currentVendorIndex + 1;
-  while (nextIndex < queue.length && !['pending', 'timeout', 'rejected'].includes(queue[nextIndex].status)) {
-    nextIndex += 1;
+  const batchIndexes = [];
+  for (
+    let i = opportunity.assignment.currentVendorIndex + 1;
+    i < queue.length && batchIndexes.length < batchSize;
+    i += 1
+  ) {
+    if (['pending', 'timeout', 'rejected'].includes(queue[i].status)) batchIndexes.push(i);
   }
-  if (nextIndex >= queue.length) {
+
+  if (!batchIndexes.length) {
     if (config.releaseToFreelancerOnVendorExhausted !== false) {
       return releaseToFreelancerPool(opportunityId, 'vendor_queue_exhausted');
     }
@@ -887,22 +900,25 @@ const notifyNextVendor = async (opportunityId) => {
   }
 
   queue.forEach((q, i) => {
-    if (i < nextIndex && q.status === 'active') {
+    if (i < batchIndexes[0] && q.status === 'active') {
       q.status = 'skipped';
       q.respondedAt = q.respondedAt || new Date();
     }
   });
 
-  queue[nextIndex].status = 'active';
-  queue[nextIndex].notifiedAt = new Date();
-  opportunity.assignment.currentVendorIndex = nextIndex;
+  const now = new Date();
+  batchIndexes.forEach((i) => {
+    queue[i].status = 'active';
+    queue[i].notifiedAt = now;
+  });
+  opportunity.assignment.currentVendorIndex = batchIndexes[batchIndexes.length - 1];
   opportunity.assignment.phase = 'waiting_vendor_acceptance';
   opportunity.assignment.activeVendorUntil = new Date(
     Date.now() + (config.vendorResponseTimeoutMinutes || 120) * 60 * 1000
   );
 
   pushTimeline(opportunity, 'vendor_notified', 'Vendor Notified', {
-    vendorId: queue[nextIndex].vendorId
+    vendorIds: batchIndexes.map((i) => queue[i].vendorId)
   });
   pushTimeline(opportunity, 'vendor_reviewing', 'Vendor Reviewing');
 
@@ -923,18 +939,17 @@ const notifyNextVendor = async (opportunityId) => {
     assignmentPhase: opportunity.assignment.phase
   };
 
-  emitVendorOpportunity(queue[nextIndex].vendorId, payload);
-  await scheduleVendorTimeout(
-    opportunity._id,
-    queue[nextIndex].vendorId,
-    config.vendorResponseTimeoutMinutes
-  );
+  for (const i of batchIndexes) {
+    emitVendorOpportunity(queue[i].vendorId, payload);
+    await scheduleVendorTimeout(opportunity._id, queue[i].vendorId, config.vendorResponseTimeoutMinutes);
+  }
+
   emitUserTimeline(opportunity, 'Vendors have been notified about your project');
   await markB2BAllocationStage(
     opportunity,
     'vendor_marketplace',
-    `Vendor ${nextIndex + 1} of ${queue.length} reviewing`,
-    { vendorIndex: nextIndex, queueSize: queue.length }
+    `${batchIndexes.length} vendor(s) notified (batch ending at ${batchIndexes[batchIndexes.length - 1] + 1} of ${queue.length})`,
+    { batchIndexes, queueSize: queue.length }
   );
   return opportunity;
 };
@@ -963,6 +978,11 @@ const handleVendorTimeout = async (opportunityId, vendorId) => {
     /* ignore */
   }
 
+  // Other vendors in this batch may still be reviewing — only advance once the
+  // whole batch is resolved and nobody has already accepted elsewhere.
+  const stillWaiting = queue.some((q) => q.status === 'active');
+  if (stillWaiting || opportunity.assignment.phase !== 'waiting_vendor_acceptance') return opportunity;
+
   return notifyNextVendor(opportunityId);
 };
 
@@ -980,34 +1000,68 @@ const recordVendorReject = async (opportunityId, vendorId, reason = '') => {
     return { ok: false, message: 'Cannot reject at this stage' };
   }
 
-  const wasActive = queue[idx].status === 'active';
   await cancelVendorTimeout(opportunityId, vendorId);
   queue[idx].status = 'rejected';
   queue[idx].respondedAt = new Date();
   queue[idx].rejectionReason = reason || 'Vendor declined';
   await opportunity.save();
 
-  if (wasActive || opportunity.assignment.currentVendorIndex === idx) {
+  const stillWaiting = queue.some((q) => q.status === 'active');
+  if (!stillWaiting && opportunity.assignment.phase === 'waiting_vendor_acceptance') {
     await notifyNextVendor(opportunityId);
   }
   return { ok: true, opportunity };
 };
 
+/**
+ * First vendor in the current broadcast batch to accept wins the opportunity.
+ * The lock is an atomic single-document update guarded on the opportunity still
+ * being open and this vendor's queue entry still being 'active', so two vendors
+ * accepting within milliseconds of each other cannot both win.
+ */
 const onVendorAccepted = async (opportunityId, vendorId) => {
+  const vId = new mongoose.Types.ObjectId(vendorId);
+  const existing = await Opportunity.findById(opportunityId).select('assignment.vendorQueue');
+  if (!existing) return { ok: false, message: 'Project not found' };
+
+  const hasQueue = (existing.assignment?.vendorQueue || []).length > 0;
+
+  if (hasQueue) {
+    const claimed = await Opportunity.findOneAndUpdate(
+      {
+        _id: opportunityId,
+        status: 'open',
+        'assignment.phase': { $nin: ['awaiting_engineer', 'awarded'] },
+        'assignment.vendorQueue': { $elemMatch: { vendorId: vId, status: 'active' } }
+      },
+      { $set: { 'assignment.phase': 'awaiting_engineer' } }
+    );
+    if (!claimed) {
+      return { ok: false, message: 'Another vendor already accepted this project' };
+    }
+  }
+
   const opportunity = await Opportunity.findById(opportunityId);
-  if (!opportunity?.assignment?.vendorQueue) return;
-  const queue = opportunity.assignment.vendorQueue;
+  if (!opportunity) return { ok: false, message: 'Project not found' };
+
+  const queue = opportunity.assignment.vendorQueue || [];
   const idx = queue.findIndex((q) => String(q.vendorId) === String(vendorId));
   if (idx >= 0) {
     await cancelVendorTimeout(opportunityId, vendorId);
     queue[idx].status = 'accepted';
     queue[idx].respondedAt = new Date();
-    queue.forEach((q, i) => {
-      if (i !== idx && ['pending', 'active'].includes(q.status)) {
-        q.status = 'skipped';
-      }
-    });
   }
+  await Promise.all(
+    queue
+      .map((q, i) => (i !== idx && q.status === 'active' ? cancelVendorTimeout(opportunityId, q.vendorId) : null))
+      .filter(Boolean)
+  );
+  queue.forEach((q, i) => {
+    if (i !== idx && ['pending', 'active'].includes(q.status)) {
+      q.status = 'skipped';
+    }
+  });
+
   opportunity.assignment.phase = 'awaiting_engineer';
   pushTimeline(opportunity, 'vendor_accepted', 'Vendor Accepted', { vendorId });
   await opportunity.save();
@@ -1021,6 +1075,7 @@ const onVendorAccepted = async (opportunityId, vendorId) => {
       { status: 'Assigned', assignedVendorId: vendorId }
     );
   }
+  return { ok: true, opportunity };
 };
 
 const releaseToFreelancerPool = async (opportunityId, reason = 'vendor_exhausted') => {

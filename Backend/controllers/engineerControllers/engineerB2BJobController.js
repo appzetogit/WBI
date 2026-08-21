@@ -68,6 +68,22 @@ exports.getB2BJobById = async (req, res) => {
   }
 };
 
+exports.acceptB2BJobOffer = async (req, res) => {
+  try {
+    const engineerId = req.user.id || req.user._id;
+    const { jobId } = req.params;
+    const { acceptB2BJobOffer } = require('../../services/b2bMatchingService');
+    const result = await acceptB2BJobOffer(jobId, engineerId);
+    if (!result.ok) {
+      return res.status(result.status || 400).json({ success: false, message: result.message });
+    }
+    res.status(200).json({ success: true, message: 'Job accepted', job: result.job });
+  } catch (error) {
+    console.error('[acceptB2BJobOffer]', error);
+    res.status(500).json({ success: false, message: 'Failed to accept job offer' });
+  }
+};
+
 exports.resendStartOtp = async (req, res) => {
   try {
     const engineerId = req.user.id || req.user._id;

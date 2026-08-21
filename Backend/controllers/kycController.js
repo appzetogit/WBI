@@ -159,20 +159,47 @@ const syncToLegacy = async (role, entityId, documentType, status, fileUrl, fileK
       }
     } else if (role === 'vendor') {
       const updateData = {};
+      const vendorUpdate = {}; // Also sync to Vendor model for Admin Panel
+      const mappedStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'pending');
+      
+      // Update overall vendor KYC status if document uploaded
+      if (status === 'uploaded' || status === 'pending') {
+        vendorUpdate.kycStatus = 'pending';
+        vendorUpdate['compliance.kycStatus'] = 'pending';
+      }
+
       if (documentType === 'aadhaar') {
-        updateData.aadhaarStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'pending');
+        updateData.aadhaarStatus = mappedStatus;
         if (fileUrl) updateData.aadhaarUrl = fileUrl;
         if (meta.transactionId) updateData.digilockerReferenceId = meta.transactionId;
         if (status === 'verified') updateData.isDigilockerVerified = true;
+
+        if (fileUrl && fileUrl !== 'digilocker-fetch') {
+          if (meta.side === 'back') {
+            vendorUpdate['aadhar.backDocument'] = fileUrl;
+          } else {
+            vendorUpdate['aadhar.document'] = fileUrl;
+          }
+        }
       } else if (documentType === 'pan') {
-        updateData.panStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'pending');
+        updateData.panStatus = mappedStatus;
         if (fileUrl) updateData.panUrl = fileUrl;
+
+        if (fileUrl && fileUrl !== 'digilocker-fetch') {
+          vendorUpdate['pan.document'] = fileUrl;
+        }
       } else if (documentType === 'gst') {
-        updateData.gstStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'pending');
+        updateData.gstStatus = mappedStatus;
         if (fileUrl) updateData.gstCertificateUrl = fileUrl;
-      } else if (documentType === 'selfie') {
-        updateData.selfieStatus = status === 'verified' ? 'verified' : (status === 'failed' || status === 'rejected' ? 'rejected' : 'pending');
+      } else if (documentType === 'selfie' || documentType === 'profile_photo') {
+        updateData.selfieStatus = mappedStatus;
         if (fileUrl) updateData.ownerSelfieUrl = fileUrl;
+        if (fileUrl && fileUrl !== 'digilocker-fetch') {
+          vendorUpdate.profilePhoto = fileUrl;
+        }
+      } else if (documentType === 'bank') {
+        vendorUpdate.kycStatus = 'pending';
+        vendorUpdate['compliance.kycStatus'] = 'pending';
       }
       
       if (Object.keys(updateData).length > 0) {
@@ -181,6 +208,11 @@ const syncToLegacy = async (role, entityId, documentType, status, fileUrl, fileK
           updateData,
           { upsert: true, new: true }
         );
+      }
+
+      if (Object.keys(vendorUpdate).length > 0) {
+        const Vendor = require('../models/Vendor');
+        await Vendor.findByIdAndUpdate(entityId, vendorUpdate);
       }
     }
   } catch (err) {

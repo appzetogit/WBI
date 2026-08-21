@@ -95,6 +95,14 @@ const adminVendorService = {
   getVendorAnalytics: async (params = {}) => {
     const response = await api.get('/admin/reports/vendors', { params });
     return response.data;
+  },
+
+  /**
+   * Update vendor KYC status
+   */
+  updateKycStatus: async (id, status, reason = '') => {
+    const response = await api.patch(`/admin/vendors/${id}/kyc-status`, { status, reason });
+    return response.data;
   }
 };
 

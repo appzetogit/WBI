@@ -11,6 +11,11 @@ const projectAssignmentConfigSchema = new mongoose.Schema(
     vendorResponseTimeoutMinutes: { type: Number, default: 120, min: 5 },
     maxVendorsToNotify: { type: Number, default: 10, min: 1 },
     vendorRetryCount: { type: Number, default: 3, min: 0 },
+    /**
+     * How many vendors from the ranked queue are notified simultaneously per round
+     * (broadcast within the current score band), instead of one at a time.
+     */
+    vendorBatchSize: { type: Number, default: 3, min: 1 },
     priorityMode: {
       type: String,
       enum: ['vendor_first', 'freelancer_only', 'vendor_then_freelancer'],

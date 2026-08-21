@@ -13,7 +13,10 @@ const B2B_WAVE_RADII_KM = (process.env.B2B_MATCH_WAVE_RADII || '5,10,20,50,100')
   .map((n) => parseInt(n.trim(), 10))
   .filter((n) => !Number.isNaN(n) && n > 0);
 
-const B2B_WAVE_TIMEOUT_MS = parseInt(process.env.B2B_MATCH_WAVE_TIMEOUT_MS || '30000', 10);
+// 30s was fine as a dead-man's-switch around the old silent auto-assign; now that
+// this is the real window for an engineer to see the offer and tap accept, floor
+// it well above push-notification latency (mirrors Flow 1's worker-response floor).
+const B2B_WAVE_TIMEOUT_MS = Math.max(45000, parseInt(process.env.B2B_MATCH_WAVE_TIMEOUT_MS || '45000', 10));
 const B2B_MATCH_PER_WAVE_LIMIT = parseInt(process.env.B2B_MATCH_PER_WAVE_LIMIT || '10', 10);
 
 const redisOptions = {
@@ -164,7 +167,6 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
     return dispatchWave(jobId, waveIndex + 1);
   }
 
-  const target = matchingEngineers[0];
   const priorIds = (b2bJob.notifiedEngineers || []).map((id) => id.toString());
   const mergedIds = [...new Set([...priorIds, ...matchingEngineers.map((e) => e._id.toString())])];
   b2bJob.notifiedEngineers = mergedIds;
@@ -203,38 +205,38 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
     }
   }
 
-  try {
-    await assignJobToEngineer(b2bJob, target, radiusKm, waveIndex + 1);
-  } catch (assignErr) {
-    console.error(`[Matching] Assign failed for ${b2bJob.jobId}:`, assignErr.message);
-    // Keep searching: schedule next wave after timeout
-    await b2bMatchingQueue.add(
-      'processWaveTimeout',
-      { jobId: b2bJob._id.toString(), waveIndex },
-      {
-        delay: B2B_WAVE_TIMEOUT_MS,
-        jobId: `b2b-timeout-${b2bJob._id}-${waveIndex}`
-      }
-    );
-  }
+  // Broadcast, don't auto-assign: every matched engineer got the offer above.
+  // Whoever accepts first via acceptB2BJobOffer() wins; if nobody does within
+  // the wave window, processWaveTimeout expands the radius.
+  await b2bMatchingQueue.add(
+    'processWaveTimeout',
+    { jobId: b2bJob._id.toString(), waveIndex },
+    {
+      delay: B2B_WAVE_TIMEOUT_MS,
+      jobId: `b2b-timeout-${b2bJob._id}-${waveIndex}`
+    }
+  );
 };
 
 /**
- * Assign a B2B job to a specific engineer and issue start OTP to customer
+ * Finalize assignment of a B2B job to a specific engineer and issue start OTP to
+ * customer. Atomically gated so only one caller can ever win a given job — used
+ * both by the engineer's own accept action and by admin manual assignment.
  */
 const assignJobToEngineer = async (b2bJob, engineer, radiusKm = null, waveNumber = null) => {
-  const fresh = await B2BJob.findById(b2bJob._id);
-  if (!fresh || !['pending', 'searching_engineer'].includes(fresh.status)) {
-    console.log(`[Matching] Job ${b2bJob.jobId} no longer assignable (status=${fresh?.status})`);
-    return;
+  const claimed = await B2BJob.findOneAndUpdate(
+    { _id: b2bJob._id, status: { $in: ['pending', 'searching_engineer'] }, assignedTo: null },
+    { $set: { status: 'assigned', assignedTo: engineer._id, assignedToName: engineer.name } }
+  );
+  if (!claimed) {
+    console.log(`[Matching] Job ${b2bJob.jobId} no longer assignable (already claimed or closed)`);
+    return { ok: false, reason: 'unavailable' };
   }
 
+  const fresh = await B2BJob.findById(b2bJob._id);
   const startOtp = generateStartOtp();
 
-  fresh.status = 'assigned';
   fresh.trackingStatus = 'assigned';
-  fresh.assignedTo = engineer._id;
-  fresh.assignedToName = engineer.name;
   fresh.assignedAt = new Date();
   fresh.startOtp = startOtp;
   fresh.startOtpSentAt = new Date();
@@ -305,7 +307,45 @@ const assignJobToEngineer = async (b2bJob, engineer, radiusKm = null, waveNumber
     /* non-blocking */
   }
 
+  // Tell the rest of the broadcast wave the job is gone so their offer UI clears.
+  const losers = (fresh.notifiedEngineers || []).filter((id) => String(id) !== String(engineer._id));
+  for (const loserId of losers) {
+    emitSocket(`worker:${loserId}`, 'engineer:b2bJobOfferClosed', { jobId: fresh.jobId, mongoId: String(fresh._id) });
+    emitSocket(`engineer:${loserId}`, 'engineer:b2bJobOfferClosed', { jobId: fresh.jobId, mongoId: String(fresh._id) });
+  }
+
   console.log(`[Matching] Assigned Job ${fresh.jobId} → ${engineer.name} (OTP issued)`);
+  return { ok: true, job: fresh };
+};
+
+/**
+ * Engineer accepts a broadcast offer for a B2B job. First to accept wins; the
+ * atomic guard lives in assignJobToEngineer, so this just validates the caller
+ * is eligible and was actually part of the wave that got the offer.
+ */
+const acceptB2BJobOffer = async (jobId, engineerId) => {
+  const b2bJob = await B2BJob.findById(jobId).select('_id jobId status assignedTo notifiedEngineers companyId');
+  if (!b2bJob) return { ok: false, status: 404, message: 'Job not found' };
+  if (b2bJob.assignedTo || !['pending', 'searching_engineer'].includes(b2bJob.status)) {
+    return { ok: false, status: 409, message: 'This job has already been assigned to another engineer' };
+  }
+
+  const notified = (b2bJob.notifiedEngineers || []).map((id) => id.toString());
+  if (notified.length && !notified.includes(String(engineerId))) {
+    return { ok: false, status: 403, message: 'You were not offered this job' };
+  }
+
+  const engineer = await Engineer.findById(engineerId).select('name phone approvalStatus isActive');
+  if (!engineer) return { ok: false, status: 404, message: 'Engineer not found' };
+  if (engineer.approvalStatus !== 'approved' || engineer.isActive === false) {
+    return { ok: false, status: 403, message: 'Your account is not approved/active' };
+  }
+
+  const result = await assignJobToEngineer(b2bJob, engineer);
+  if (!result.ok) {
+    return { ok: false, status: 409, message: 'This job has already been assigned to another engineer' };
+  }
+  return { ok: true, job: result.job };
 };
 
 const handleMatchingFailure = async (b2bJob, reason) => {
@@ -482,6 +522,7 @@ module.exports = {
   initMatchingWorker,
   dispatchWave,
   assignJobToEngineer,
+  acceptB2BJobOffer,
   B2B_WAVE_RADII_KM,
   B2B_WAVE_TIMEOUT_MS
 };
