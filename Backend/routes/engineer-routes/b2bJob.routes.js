@@ -10,6 +10,7 @@ router.use(authenticate);
 router.use(isEngineer);
 
 router.get('/', engineerApiLimiter, engineerB2BJobController.getAssignedB2BJobs);
+router.post('/:jobId/accept', engineerActionLimiter, engineerB2BJobController.acceptB2BJobOffer);
 router.get('/:jobId', engineerApiLimiter, engineerB2BJobController.getB2BJobById);
 router.post('/:jobId/resend-otp', engineerActionLimiter, engineerB2BJobController.resendStartOtp);
 router.post('/:jobId/start', engineerActionLimiter, engineerB2BJobController.startB2BJob);

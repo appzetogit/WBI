@@ -483,7 +483,7 @@ const acceptClientRequest = async (req, res) => {
       return res.status(gate.status).json({ success: false, message: gate.message, code: gate.code });
     }
 
-    const opportunity = await Opportunity.findOne({
+    let opportunity = await Opportunity.findOne({
       _id: id,
       eligibleVendors: new mongoose.Types.ObjectId(vendorId),
       status: 'open'
@@ -513,13 +513,14 @@ const acceptClientRequest = async (req, res) => {
       });
     }
 
-    // Assignment engine: only the active vendor in queue may accept (when queue exists)
+    // Broadcast dispatch: several vendors can be 'active' (notified) at once for the
+    // current batch. Just confirm this vendor is one of them — first to accept wins.
     if (queue.length) {
-      const active = queue.find((q) => q.status === 'active');
-      if (active && vidStr(active.vendorId) !== vidStr(vendorId)) {
+      const mine = queue.find((q) => vidStr(q.vendorId) === vidStr(vendorId));
+      if (!mine || !['active', 'pending'].includes(mine.status)) {
         return res.status(403).json({
           success: false,
-          message: 'Another vendor is currently reviewing this project. Please wait for your turn.'
+          message: 'This project is not currently awaiting your response.'
         });
       }
     }
@@ -539,6 +540,18 @@ const acceptClientRequest = async (req, res) => {
         return res.status(400).json({ success: false, message: 'This request has expired' });
       }
     }
+
+    // Broadcast dispatch means several vendors may hit accept within milliseconds of
+    // each other — this atomically locks the opportunity to the first one through,
+    // before any project/bid records are created, so two vendors can never both win.
+    const claim = await onVendorAccepted(id, vendorId);
+    if (!claim.ok) {
+      return res.status(409).json({
+        success: false,
+        message: claim.message || 'This project is no longer available'
+      });
+    }
+    opportunity = claim.opportunity;
 
     const paidSr = opportunity.assignment?.serviceRequestId
       ? await ServiceRequest.findById(opportunity.assignment.serviceRequestId)
@@ -596,8 +609,6 @@ const acceptClientRequest = async (req, res) => {
       awardedAt: null
     };
     await opportunity.save();
-
-    await onVendorAccepted(opportunity._id, vendorId);
 
     let proposal = null;
     try {

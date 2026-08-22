@@ -114,6 +114,7 @@ exports.upsertAssignmentConfig = async (req, res) => {
       'vendorResponseTimeoutMinutes',
       'maxVendorsToNotify',
       'vendorRetryCount',
+      'vendorBatchSize',
       'priorityMode',
       'releaseToFreelancerOnVendorExhausted',
       'freelancerPoolVendorId',
@@ -128,6 +129,9 @@ exports.upsertAssignmentConfig = async (req, res) => {
     }
     if (patch.maxVendorsToNotify != null) {
       patch.maxVendorsToNotify = Math.min(50, Math.max(1, Number(patch.maxVendorsToNotify)));
+    }
+    if (patch.vendorBatchSize != null) {
+      patch.vendorBatchSize = Math.min(20, Math.max(1, Number(patch.vendorBatchSize)));
     }
     if (patch.freelancerPoolVendorId === '') patch.freelancerPoolVendorId = null;
 

@@ -115,7 +115,7 @@ const BookingConfirmation = () => {
 
           // Check if vendor is already assigned
           const currentStatus = data.status?.toLowerCase();
-          if (data.vendorId || (currentStatus !== 'requested' && currentStatus !== 'searching')) {
+          if (data.vendorId || (currentStatus !== 'requested' && currentStatus !== 'searching' && currentStatus !== 'searching_worker')) {
             setIsSearching(false);
           }
         } else {
@@ -154,7 +154,7 @@ const BookingConfirmation = () => {
           setBooking(updatedBooking);
           // If vendor accepted or status changed
           const currentStatus = updatedBooking.status?.toLowerCase();
-          if (updatedBooking.vendorId || (currentStatus !== 'requested' && currentStatus !== 'searching')) {
+          if (updatedBooking.vendorId || (currentStatus !== 'requested' && currentStatus !== 'searching' && currentStatus !== 'searching_worker')) {
             setIsSearching(false);
             clearInterval(pollInterval);
           }

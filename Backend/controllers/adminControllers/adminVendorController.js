@@ -89,10 +89,12 @@ const getVendorDetails = async (req, res) => {
 
     let VendorBank;
     let VendorDocument;
+    let KYCVerification;
     try { VendorBank = require('../../models/VendorBank'); } catch (_) { VendorBank = null; }
     try { VendorDocument = require('../../models/VendorDocument'); } catch (_) { VendorDocument = null; }
+    try { KYCVerification = require('../../models/KYCVerification'); } catch (_) { KYCVerification = null; }
 
-    const [bankAccounts, vaultDocuments, totalBookings, completedBookings, earningsResult] = await Promise.all([
+    const [bankAccounts, vaultDocuments, kycDocuments, totalBookings, completedBookings, earningsResult] = await Promise.all([
       VendorBank
         ? VendorBank.find({ vendorId: vendor._id })
           .select('-accountNumberEncrypted')
@@ -101,6 +103,9 @@ const getVendorDetails = async (req, res) => {
         : Promise.resolve([]),
       VendorDocument
         ? VendorDocument.find({ vendorId: vendor._id }).sort({ uploadedAt: -1 }).lean()
+        : Promise.resolve([]),
+      KYCVerification
+        ? KYCVerification.find({ role: 'vendor', entityId: vendor._id }).lean()
         : Promise.resolve([]),
       Booking.countDocuments({ vendorId: vendor._id }),
       Booking.countDocuments({ vendorId: vendor._id, status: BOOKING_STATUS.COMPLETED }),
@@ -145,6 +150,17 @@ const getVendorDetails = async (req, res) => {
       _id: d._id
     })).filter((d) => d.url);
 
+    const kycVerifications = (kycDocuments || []).map((d) => ({
+      label: String(d.documentType).replace('_', ' ').toUpperCase(),
+      url: d.fileUrl || d.frontFileUrl || d.backFileUrl || d.fileKey,
+      number: d.documentNumberMasked || null,
+      status: d.status || d.physicalUploadStatus,
+      type: 'kyc',
+      documentType: d.documentType,
+      source: 'kyc',
+      _id: d._id
+    })).filter((d) => d.url);
+
     let resolveDocumentPreviewUrl = null;
     let isRealFileUrl = null;
     try {
@@ -152,7 +168,7 @@ const getVendorDetails = async (req, res) => {
     } catch (_) { /* optional */ }
 
     const seen = new Set();
-    const documents = [...profileDocs, ...vaultDocs]
+    const documents = [...profileDocs, ...vaultDocs, ...kycVerifications]
       .map((d) => {
         let previewUrl = d.url;
         if (resolveDocumentPreviewUrl) {

@@ -192,6 +192,44 @@ const AllVendors = () => {
     }
   };
 
+  const handleKycApprove = async (vendorId) => {
+    try {
+      const response = await adminVendorService.updateKycStatus(vendorId, 'verified');
+      if (response.success) {
+        setVendors((prev) => prev.map((v) => (v.id === vendorId ? { ...v, kycStatus: 'verified' } : v)));
+        setSelectedVendor((prev) => (prev?.id === vendorId || prev?._id === vendorId
+          ? { ...prev, kycStatus: 'verified', compliance: { ...prev.compliance, kycStatus: 'verified' } }
+          : prev));
+        toast.success('KYC verified successfully!');
+      } else {
+        toast.error(response.message || 'Failed to verify KYC');
+      }
+    } catch (error) {
+      console.error('Error verifying KYC:', error);
+      toast.error('Failed to verify KYC. Please try again.');
+    }
+  };
+
+  const handleKycReject = async (vendorId) => {
+    const reason = window.prompt('Please enter a reason for rejecting the KYC:');
+    if (reason === null) return;
+    try {
+      const response = await adminVendorService.updateKycStatus(vendorId, 'rejected', reason);
+      if (response.success) {
+        setVendors((prev) => prev.map((v) => (v.id === vendorId ? { ...v, kycStatus: 'rejected' } : v)));
+        setSelectedVendor((prev) => (prev?.id === vendorId || prev?._id === vendorId
+          ? { ...prev, kycStatus: 'rejected', compliance: { ...prev.compliance, kycStatus: 'rejected' } }
+          : prev));
+        toast.success('KYC rejected successfully.');
+      } else {
+        toast.error(response.message || 'Failed to reject KYC');
+      }
+    } catch (error) {
+      console.error('Error rejecting KYC:', error);
+      toast.error('Failed to reject KYC. Please try again.');
+    }
+  };
+
   const handleToggleStatus = async (vendorId, currentStatus) => {
     try {
       const newStatus = !currentStatus;
@@ -577,7 +615,7 @@ const AllVendors = () => {
                   className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
                 >
                   <FiCheck className="w-5 h-5" />
-                  Approve Vendor
+                  Approve Vendor Registration
                 </button>
                 <button
                   type="button"
@@ -589,7 +627,32 @@ const AllVendors = () => {
                   className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
                 >
                   <FiX className="w-5 h-5" />
-                  Reject Vendor
+                  Reject Vendor Registration
+                </button>
+              </div>
+            )}
+            
+            {(selectedVendor.compliance?.kycStatus === 'pending' || selectedVendor.kycStatus === 'pending') && (
+              <div className="flex gap-3 pt-4 border-t border-gray-200 sticky bottom-0 bg-white">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleKycApprove(selectedVendor.id);
+                  }}
+                  className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <FiCheck className="w-5 h-5" />
+                  Approve KYC Documents
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleKycReject(selectedVendor.id);
+                  }}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <FiX className="w-5 h-5" />
+                  Reject KYC Documents
                 </button>
               </div>
             )}

@@ -1,0 +1,6 @@
+Customer Name,Phone,Email,Address,City,State,Pincode,Latitude,Longitude,Service,Sub Service,Priority,Preferred Date,Preferred Time
+Ramesh Verma,9876500001,ramesh.v@example.com,12 Palasia Road,Indore,Madhya Pradesh,452001,22.7205,75.8590,Electrical Wiring Repair,Fan Installation,High,25/08/2026,10:00 AM
+Sunita Rao,9876500002,sunita.rao@example.com,45 Vijay Nagar,Indore,Madhya Pradesh,452010,22.7150,75.8540,CCTV Installation,4-Camera Setup,Medium,26/08/2026,02:00 PM
+Deepak Chawla,9876500003,,78 South Tukoganj,Indore,Madhya Pradesh,452001,22.7240,75.8620,AC Repair,Split AC Service,Low,27/08/2026,Anytime
+Priyanka Joshi,9876500004,priyanka.j@example.com,22 Rajwada,Indore,Madhya Pradesh,452007,22.7180,75.8560,Electrical Wiring Repair,Switchboard Fix,Medium,25/08/2026,11:30 AM
+Manish Gupta,9876500005,,9 Sapna Sangeeta,Indore,Madhya Pradesh,452001,22.7260,75.8650,CCTV Installation,8-Camera Setup,High,28/08/2026,09:00 AM
