@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --config vite.config.mjs --host",
-    "build": "vite --config vite.config.mjs build",
+    "dev": "node init && vite --config vite.config.mjs --host",
+    "build": "node init && vite --config vite.config.mjs build",
     "lint": "eslint .",
     "preview": "vite --config vite.config.mjs preview"
   },
