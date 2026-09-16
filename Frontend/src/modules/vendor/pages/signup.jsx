@@ -241,6 +241,13 @@ const VendorSignup = () => {
       }
 
       if (res.data.success) {
+        // Scoped token proving ownership of this onboarding. Sent as
+        // x-onboarding-token on the pre-approval steps (KYC, bank, induction),
+        // which run before a normal vendor session exists.
+        if (res.data.onboardingToken) {
+          localStorage.setItem('vendorOnboardingToken', res.data.onboardingToken);
+        }
+
         localStorage.setItem('vendorData', JSON.stringify({
           _id: res.data.vendorId,
           name: formData.ownerName || 'Partner',

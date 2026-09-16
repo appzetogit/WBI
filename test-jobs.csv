@@ -1,0 +1,4 @@
+Customer Name,Phone,Email,Address,City,State,Pincode,Service,Priority,Preferred Date
+QA Site Alpha,9812345670,alpha@qa.test,12 MG Road,Indore,MP,452001,CCTV & Surveillance,High,2026-09-15
+QA Site Beta,9812345671,beta@qa.test,44 AB Road,Indore,MP,452002,CCTV & Surveillance,Medium,2026-09-16
+QA Bad Row,123,notanemail,,,MP,452003,Nonexistent Service,Low,2026-09-17

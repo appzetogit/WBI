@@ -70,28 +70,79 @@ const queueJobMatching = async (jobId, app, waveIndex = 0) => {
 };
 
 /**
- * Find eligible online engineers within radiusKm using Engineer.geoLocation
+ * Explain *why* every wave failed, so the escalation reason is actionable.
+ *
+ * Runs one diagnostic scan at the widest radius with the skill gate off. If
+ * engineers were present but none qualified, the bottleneck is skill coverage
+ * (or catalog seeding) — not engineer supply. Only runs on the failure path.
  */
-const findEngineersInRadius = async (lng, lat, radiusKm, excludeIds = []) => {
-  const radiusMeters = radiusKm * 1000;
-  const query = {
-    roleType: { $in: ['Engineer', 'Both'] },
-    status: 'ONLINE',
-    approvalStatus: 'approved',
-    isActive: true,
-    geoLocation: {
-      $nearSphere: {
-        $geometry: { type: 'Point', coordinates: [lng, lat] },
-        $maxDistance: radiusMeters
-      }
+const describeExhaustion = async (b2bJob, radii) => {
+  const span = radii.join('→');
+  try {
+    const coords = b2bJob.coordinates?.coordinates;
+    if (!coords || coords.length !== 2) return `No engineers accepted across all waves (${span} km)`;
+
+    const { buildB2BJobSkillContext, findEligibleEngineersInRadius } = require('./b2bEngineerEligibility');
+    const [lng, lat] = coords;
+    const widest = radii[radii.length - 1];
+
+    // Skill gate off: how many engineers exist in range at all?
+    const { stats: openStats } = await findEligibleEngineersInRadius({
+      lng,
+      lat,
+      radiusKm: widest,
+      context: null,
+      limit: 1
+    });
+
+    if (openStats.scanned === 0) {
+      return `No online engineers within ${widest} km (waves ${span} km)`;
     }
-  };
 
-  if (excludeIds.length > 0) {
-    query._id = { $nin: excludeIds };
+    // Skill gate on: how many of those actually qualify?
+    const context = await buildB2BJobSkillContext(b2bJob);
+    const { engineers: qualified } = await findEligibleEngineersInRadius({
+      lng,
+      lat,
+      radiusKm: widest,
+      context,
+      limit: 1
+    });
+
+    if (qualified.length === 0) {
+      const svc = b2bJob.service || 'the requested service';
+      return context.resolved
+        ? `${openStats.scanned} engineer(s) online within ${widest} km, none skilled in "${svc}" (waves ${span} km)`
+        : `"${svc}" is not in the service catalog and no engineer skill matched it — add the category, then retry matching`;
+    }
+
+    return `${qualified.length}+ skilled engineer(s) available but none accepted in time (waves ${span} km)`;
+  } catch (err) {
+    console.warn('[Matching] describeExhaustion failed:', err.message);
+    return `No engineers accepted across all waves (${span} km)`;
   }
+};
 
-  return Engineer.find(query).limit(B2B_MATCH_PER_WAVE_LIMIT);
+/**
+ * Skill-aware candidate resolution for one wave.
+ *
+ * Delegates to b2bEngineerEligibility, which applies MANDATORY skill matching
+ * on top of the geo filter, plus workload and schedule gates. Proximity alone
+ * is never sufficient — an Electrical engineer is not offered an HVAC job.
+ *
+ * @returns {{ engineers:Array, stats:Object }}
+ */
+const findEngineersInRadius = async (lng, lat, radiusKm, excludeIds = [], context = null) => {
+  const { findEligibleEngineersInRadius } = require('./b2bEngineerEligibility');
+
+  return findEligibleEngineersInRadius({
+    lng,
+    lat,
+    radiusKm,
+    context,
+    excludeIds,
+    limit: B2B_MATCH_PER_WAVE_LIMIT
+  });
 };
 
 /**
@@ -113,7 +164,7 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
   }
 
   if (waveIndex >= radii.length) {
-    await handleMatchingFailure(b2bJob, `No engineers accepted across all waves (${radii.join('→')} km)`);
+    await handleMatchingFailure(b2bJob, await describeExhaustion(b2bJob, radii));
     return;
   }
 
@@ -148,17 +199,92 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
   const previouslyNotified = (b2bJob.notifiedEngineers || []).map((id) => id.toString());
   const excludeIds = previouslyNotified;
 
-  const matchingEngineers = await findEngineersInRadius(lng, lat, radiusKm, excludeIds);
+  // Resolve the job's service into catalog ids / skill names once per wave.
+  const { buildB2BJobSkillContext } = require('./b2bEngineerEligibility');
+  const skillContext = await buildB2BJobSkillContext(b2bJob);
+
+  if (skillContext.hasService && !skillContext.resolved) {
+    console.warn(
+      `[Matching] "${b2bJob.service}" did not resolve against the service catalog for ${b2bJob.jobId}. ` +
+        'Falling back to name-token skill matching — seed the catalog for precise routing.'
+    );
+  }
+
+  const { engineers: matchingEngineers, stats } = await findEngineersInRadius(
+    lng,
+    lat,
+    radiusKm,
+    excludeIds,
+    skillContext
+  );
+
+  // Parallel vendor discovery: a vendor with a matching, in-radius engineer
+  // is notified directly in this same wave, independent of whether a
+  // freelancer also matched. This is what lets the job reach the vendor
+  // (accept/reject, then pick its own engineer) instead of it only ever
+  // reaching that engineer via a direct self-accept offer that bypasses
+  // the vendor entirely.
+  try {
+    const { findEligibleVendorsInRadius } = require('./b2bEngineerEligibility');
+    const alreadyNotifiedVendors = (b2bJob.notifiedVendors || []).map((id) => id.toString());
+    const { vendorIds: newVendorIds } = await findEligibleVendorsInRadius({
+      lng,
+      lat,
+      radiusKm,
+      context: skillContext,
+      excludeVendorIds: alreadyNotifiedVendors
+    });
+
+    if (newVendorIds.length) {
+      b2bJob.notifiedVendors = [...new Set([...alreadyNotifiedVendors, ...newVendorIds.map((v) => v.toString())])];
+      await b2bJob.save();
+
+      for (const vId of newVendorIds) {
+        emitSocket(`vendor:${vId.toString()}`, 'b2b:jobRequestReceived', {
+          jobId: b2bJob.jobId,
+          mongoId: b2bJob._id.toString(),
+          service: b2bJob.service,
+          customerName: b2bJob.customerName,
+          city: b2bJob.city,
+          charge: b2bJob.charge,
+          waveNumber: waveIndex + 1,
+          radiusKm
+        });
+        try {
+          const { createNotification } = require('../controllers/notificationControllers/notificationController');
+          await createNotification({
+            vendorId: vId,
+            type: 'b2b_job_request',
+            title: 'New B2B job request',
+            message: `${b2bJob.service || 'Service'} — ${b2bJob.city || b2bJob.customerName || 'New request'}`,
+            relatedId: b2bJob._id,
+            relatedType: 'b2b_job',
+            priority: 'high'
+          });
+        } catch (_) {
+          /* non-blocking */
+        }
+      }
+      console.log(`[Matching] Wave ${waveIndex + 1} notified ${newVendorIds.length} new vendor(s) for ${b2bJob.jobId}`);
+    }
+  } catch (vendorErr) {
+    console.warn('[Matching] Vendor discovery failed (non-blocking):', vendorErr.message);
+  }
 
   console.log(
-    `[Matching] Wave ${waveIndex + 1} (${radiusKm}km): found ${matchingEngineers.length} new online engineers for ${b2bJob.jobId}`
+    `[Matching] Wave ${waveIndex + 1} (${radiusKm}km) ${b2bJob.jobId}: ` +
+      `scanned=${stats.scanned} eligible=${matchingEngineers.length} ` +
+      `skillRejected=${stats.skillRejected} workloadRejected=${stats.workloadRejected} ` +
+      `scheduleRejected=${stats.scheduleRejected}`
   );
 
   emitSocket(`b2b:${b2bJob.companyId.toString()}`, 'b2b:matchingWave', {
     jobId: b2bJob.jobId,
     waveNumber: waveIndex + 1,
     radiusKm,
-    engineersFound: matchingEngineers.length
+    engineersFound: matchingEngineers.length,
+    scanned: stats.scanned,
+    skillRejected: stats.skillRejected
   });
 
   // No new engineers this wave → expand immediately

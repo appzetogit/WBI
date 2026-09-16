@@ -2,6 +2,7 @@
  * Vendor company code + engineer join approvals
  */
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../../utils/txnOptions');
 const Vendor = require('../../models/Vendor');
 const Engineer = require('../../models/Engineer');
 const {
@@ -205,7 +206,7 @@ exports.listLinkedEngineers = async (req, res) => {
 /** POST /api/vendor/engineers/:id/approve */
 exports.approveLinkedEngineer = async (req, res) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
+  session.startTransaction(TXN_OPTS);
   try {
     const vendorId = getVendorId(req);
     const { id } = req.params;
@@ -264,7 +265,7 @@ exports.approveLinkedEngineer = async (req, res) => {
 /** POST /api/vendor/engineers/:id/reject  { reason? } */
 exports.rejectLinkedEngineer = async (req, res) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
+  session.startTransaction(TXN_OPTS);
   try {
     const vendorId = getVendorId(req);
     const { id } = req.params;

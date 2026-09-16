@@ -10,26 +10,48 @@ const DEFAULT = {
   eventsToday: 0
 };
 
+const POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const START_DELAY   = 21000;           // stagger: fire 21 s after mount
+
 const useProjectOpsCounts = () => {
   const [counts, setCounts] = useState(DEFAULT);
   const [loading, setLoading] = useState(true);
   const ref = useRef(null);
+  const retryRef = useRef(null);
+  const retryDelay = useRef(0);
 
   const load = useCallback(async () => {
     try {
       const res = await fetchPOCounts();
-      if (res.data?.success) setCounts(res.data.data);
+      if (res.data?.success) {
+        setCounts(res.data.data);
+        retryDelay.current = 0;
+      }
     } catch (e) {
-      console.warn('[POCounts]', e.message);
+      if (e?.response?.status === 429) {
+        const delay = Math.min(retryDelay.current ? retryDelay.current * 2 : 10000, POLL_INTERVAL);
+        retryDelay.current = delay;
+        clearTimeout(retryRef.current);
+        retryRef.current = setTimeout(load, delay);
+        console.warn('[POCounts] 429 — retrying in', delay / 1000, 's');
+      } else {
+        console.warn('[POCounts]', e.message);
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    load();
-    ref.current = setInterval(load, 60000);
-    return () => clearInterval(ref.current);
+    const start = setTimeout(() => {
+      load();
+      ref.current = setInterval(load, POLL_INTERVAL);
+    }, START_DELAY);
+    return () => {
+      clearTimeout(start);
+      clearInterval(ref.current);
+      clearTimeout(retryRef.current);
+    };
   }, [load]);
 
   return { counts, loading, refresh: load };

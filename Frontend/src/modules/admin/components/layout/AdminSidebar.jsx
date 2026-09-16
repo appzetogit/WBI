@@ -85,6 +85,7 @@ const getChildRoute = (parentRoute, childName) => {
       "CGPE Suite": "/admin/vendors/cgpe-suite",
     },
     "/admin/b2b": {
+      "Submissions QA Review": "/admin/b2b/submissions",
       "Company Approvals": "/admin/b2b/companies",
       "Corporate Wallets": "/admin/b2b/wallets",
       "Invoices": "/admin/b2b/invoices",

@@ -261,10 +261,38 @@ const updateLocation = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Latitude and Longitude are required' });
     }
 
-    // Update only the location field for performance
-    await Engineer.findByIdAndUpdate(engineerId, {
-      location: { lat, lng, updatedAt: new Date() }
-    });
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+      return res.status(400).json({ success: false, message: 'Latitude and Longitude must be numbers' });
+    }
+    if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+      return res.status(400).json({ success: false, message: 'Latitude must be -90..90 and Longitude -180..180' });
+    }
+    // [0,0] is the schema default and means "never set" — accepting it would
+    // silently park the engineer in the Gulf of Guinea and make them
+    // permanently unmatchable by $nearSphere.
+    if (latNum === 0 && lngNum === 0) {
+      return res.status(400).json({ success: false, message: 'Invalid coordinates (0,0)' });
+    }
+
+    // BOTH fields must be written:
+    //   `location`    — { lat, lng } used by profile/display code
+    //   `geoLocation` — GeoJSON Point, the 2dsphere-indexed field that
+    //                   b2bEngineerEligibility.findEligibleEngineersInRadius
+    //                   queries with $nearSphere for B2B dispatch.
+    // Writing only `location` (the previous behaviour, copied from the Worker
+    // controller where `location` IS the GeoJSON field) left geoLocation at its
+    // [0,0] default, so no engineer could ever be matched to a job.
+    await Engineer.findByIdAndUpdate(
+      engineerId,
+      {
+        location: { lat: latNum, lng: lngNum, updatedAt: new Date() },
+        geoLocation: { type: 'Point', coordinates: [lngNum, latNum] } // [lng, lat] order
+      },
+      { runValidators: true }
+    );
 
     res.status(200).json({ success: true, message: 'Location updated' });
   } catch (error) {

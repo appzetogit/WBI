@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 const Vendor = require('../../models/Vendor');
 const ServiceConfig = require('../../models/ServiceConfig');
 const VendorOpsProject = require('../../models/VendorOpsProject');
+const VendorOpsJob = require('../../models/VendorOpsJob');
+const B2BJob = require('../../models/B2BJob');
+const Booking = require('../../models/Booking');
+const ServiceRequest = require('../../models/ServiceRequest');
 const Opportunity = require('../../models/Opportunity');
 const VendorWorkforceEngineer = require('../../models/VendorWorkforceEngineer');
 const VendorResourceInstalledAsset = require('../../models/VendorResourceInstalledAsset');
@@ -10,12 +14,17 @@ const VendorGlobalCompliance = require('../../models/VendorGlobalCompliance');
 const VendorQualityIssue = require('../../models/VendorQualityIssue');
 const VendorQualityProof = require('../../models/VendorQualityProof');
 const VendorFinanceWallet = require('../../models/VendorFinanceWallet');
+const VendorFinanceTransaction = require('../../models/VendorFinanceTransaction');
+const VendorFinanceReceivable = require('../../models/VendorFinanceReceivable');
 const { getCache, setCache, delCache, isRedisConnected } = require('../../services/redisService');
 const { expandCategoryMatchCodes } = require('../../utils/serviceCategoryAliases');
 const { buildServiceRoutes, getPrimaryServiceSlug } = require('../../utils/serviceSlug');
 
 const SIDEBAR_SECTIONS = [
   'Dashboard',
+  'Requests',
+  'My Jobs',
+  'Engineers',
   'Business Intake',
   'Clients & Contracts',
   'Project Operations',
@@ -48,6 +57,12 @@ const mergeSidebarFromDashboards = async (codes) => {
       });
     });
     if (!byKey.size) return SIDEBAR_SECTIONS;
+
+    if (!byKey.has('Dashboard')) byKey.set('Dashboard', 0);
+    if (!byKey.has('Requests')) byKey.set('Requests', 1);
+    if (!byKey.has('My Jobs')) byKey.set('My Jobs', 2);
+    if (!byKey.has('Engineers')) byKey.set('Engineers', 3);
+
     return Array.from(byKey.entries())
       .sort((a, b) => a[1] - b[1])
       .map(([label]) => label);
@@ -370,7 +385,7 @@ exports.getDashboardKpis = async (req, res) => {
         status: 'active',
         availability: 'available'
       }).catch(() => 0),
-      VendorFinanceWallet.findOne({ vendorId }).select('availableBalance balance').lean().catch(() => null),
+      VendorFinanceWallet.findOne({ vendorId }).select('availableBalance balance escrowBalance').lean().catch(() => null),
       VendorOpsProject.countDocuments({ vendorId, status: /completed|closed/i }).catch(() => 0),
       VendorOpsProject.countDocuments({ vendorId }).catch(() => 1)
     ]);
@@ -410,6 +425,459 @@ exports.getDashboardKpis = async (req, res) => {
   } catch (error) {
     console.error('Dashboard KPIs error:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch dashboard KPIs' });
+  }
+};
+
+/**
+ * GET /api/vendor/dashboard/operational-summary
+ * Operational single-screen overview covering:
+ * 1. New User Requests
+ * 2. New B2B Jobs
+ * 3. Active Jobs (User vs B2B)
+ * 4. In Progress (Live execution)
+ * 5. Completed Jobs
+ * 6. Available Engineers
+ * 7. Earnings & Financial Summary
+ */
+exports.getOperationalSummary = async (req, res) => {
+  try {
+    const vid = vendorObjectId(req);
+    const vendorIdStr = String(req.user._id || req.user.id);
+
+    const vendorDoc = await Vendor.findById(vid)
+      .select('approvedServices categories service walletBalance businessName companyName vendorTier overallRating')
+      .lean();
+    if (!vendorDoc) {
+      return res.status(404).json({ success: false, message: 'Vendor not found' });
+    }
+
+    const approvedCodes = (vendorDoc.approvedServices || [])
+      .filter((s) => s.status !== 'suspended')
+      .map((s) => s.categoryCode)
+      .filter(Boolean);
+    const legacyCats = Array.isArray(vendorDoc.categories) ? vendorDoc.categories : [];
+    const matchCodes = expandCategoryMatchCodes([...approvedCodes, ...legacyCats]);
+
+    const oppCategoryFilter = matchCodes.length ? { categoryCode: { $in: matchCodes } } : {};
+
+    // ── 1. NEW USER REQUESTS ──
+    const [userOpps, pendingBookings, pendingServiceRequests] = await Promise.all([
+      Opportunity.find({
+        status: 'open',
+        type: 'client_request',
+        ...oppCategoryFilter,
+        $or: [{ eligibleVendors: vid }, { eligibleVendors: { $size: 0 } }, { 'clientInfo.targetVendorId': vid }]
+      }).sort({ createdAt: -1 }).limit(10).lean().catch(() => []),
+      Booking.find({
+        $or: [
+          { vendorId: vid, status: 'requested' },
+          { vendorId: null, status: { $in: ['requested', 'searching'] }, 'potentialVendors.vendorId': vid }
+        ]
+      }).sort({ createdAt: -1 }).limit(10).lean().catch(() => []),
+      ServiceRequest.find({
+        assignedVendorId: vid,
+        status: 'Pending'
+      }).sort({ createdAt: -1 }).limit(10).lean().catch(() => [])
+    ]);
+
+    const newUserRequestsList = [
+      ...userOpps.map((opp) => ({
+        id: opp._id,
+        oppCode: opp.opportunityCode,
+        title: opp.title,
+        source: 'USER JOB',
+        categoryName: opp.categoryName,
+        categoryCode: opp.categoryCode,
+        clientName: opp.clientInfo?.name || 'Customer',
+        clientPhone: opp.clientInfo?.phone || '',
+        city: opp.clientInfo?.city || opp.requirements?.cities?.[0] || 'Local',
+        address: opp.clientInfo?.address || '',
+        budget: opp.budget?.max || opp.budget?.min || 0,
+        priority: opp.priority || 'normal',
+        createdAt: opp.createdAt,
+        status: 'Action Required',
+        type: 'opportunity',
+        actionUrl: `/vendor/${(opp.categoryCode || 'general').toLowerCase()}/business-intake/client-requests`
+      })),
+      ...pendingBookings.map((b) => ({
+        id: b._id,
+        oppCode: b.bookingId || `BK-${String(b._id).slice(-6)}`,
+        title: b.serviceName || b.categoryName || 'Direct Booking Request',
+        source: 'USER JOB',
+        categoryName: b.categoryName || 'Home Service',
+        categoryCode: b.categoryCode || '',
+        clientName: b.userName || b.contactName || 'Customer',
+        clientPhone: b.userPhone || b.contactPhone || '',
+        city: b.city || b.address?.city || 'Local',
+        address: b.address?.addressLine || b.address?.fullAddress || '',
+        budget: b.totalAmount || b.estimatedAmount || 0,
+        priority: 'high',
+        createdAt: b.createdAt,
+        status: b.status || 'Requested',
+        type: 'booking',
+        actionUrl: `/vendor/${(b.categoryCode || 'general').toLowerCase()}/digital-solution/booking-alerts`
+      })),
+      ...pendingServiceRequests.map((sr) => ({
+        id: sr._id,
+        oppCode: sr.requestCode,
+        title: `${sr.categoryName} - ${sr.subCategoryName}`,
+        source: 'USER JOB',
+        categoryName: sr.categoryName,
+        categoryCode: sr.categoryCode,
+        clientName: sr.contact?.name || 'Customer',
+        clientPhone: sr.contact?.phone || '',
+        city: sr.contact?.city || 'Local',
+        address: sr.contact?.address || '',
+        budget: sr.payment?.amount || 0,
+        priority: 'normal',
+        createdAt: sr.createdAt,
+        status: 'Pending',
+        type: 'service_request',
+        actionUrl: `/vendor/${(sr.categoryCode || 'general').toLowerCase()}/business-intake/client-requests`
+      }))
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const newUserRequestsCount = newUserRequestsList.length;
+
+    // ── 2. NEW B2B JOBS ──
+    const [b2bOpps, directB2BJobs] = await Promise.all([
+      Opportunity.find({
+        status: 'open',
+        type: { $in: ['b2b_opportunity', 'bulk_requirement', 'bid_quote_request', 'direct_invitation'] },
+        ...oppCategoryFilter,
+        $or: [{ eligibleVendors: vid }, { eligibleVendors: { $size: 0 } }, { 'clientInfo.targetVendorId': vid }]
+      }).sort({ createdAt: -1 }).limit(10).lean().catch(() => []),
+      B2BJob.find({
+        assignedVendorId: vid,
+        status: { $in: ['pending', 'searching_engineer', 'assigned'] }
+      }).populate('companyId', 'companyName name').sort({ createdAt: -1 }).limit(10).lean().catch(() => [])
+    ]);
+
+    const newB2BJobsList = [
+      ...b2bOpps.map((opp) => ({
+        id: opp._id,
+        jobCode: opp.opportunityCode,
+        title: opp.title,
+        source: 'B2B JOB',
+        categoryName: opp.categoryName,
+        categoryCode: opp.categoryCode,
+        companyName: opp.clientInfo?.company || opp.clientInfo?.name || 'Enterprise Client',
+        city: opp.clientInfo?.city || opp.requirements?.cities?.[0] || 'Multi-site',
+        totalSites: opp.requirements?.totalSites || 1,
+        budget: opp.budget?.max || opp.budget?.min || 0,
+        priority: opp.priority || 'high',
+        createdAt: opp.createdAt,
+        status: 'Action Required',
+        type: 'opportunity',
+        actionUrl: `/vendor/${(opp.categoryCode || 'general').toLowerCase()}/business-intake/b2b`
+      })),
+      ...directB2BJobs.map((job) => ({
+        id: job._id,
+        jobCode: job.jobId,
+        title: `${job.service} - ${job.subService || 'Site Maintenance'}`,
+        source: 'B2B JOB',
+        categoryName: job.service,
+        categoryCode: job.service,
+        companyName: job.companyId?.companyName || job.customerName || 'B2B Enterprise',
+        city: job.city,
+        totalSites: 1,
+        budget: job.charge || 0,
+        priority: job.priority || 'Medium',
+        createdAt: job.createdAt,
+        status: job.status,
+        type: 'b2b_job',
+        actionUrl: `/vendor/${(approvedCodes[0] || 'general').toLowerCase()}/projects`
+      }))
+    ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const newB2BJobsCount = newB2BJobsList.length;
+
+    // ── 3. ACTIVE JOBS (with User vs B2B breakdown) ──
+    const [activeProjects, activeOpsJobs, activeB2BDirect, activeBookings] = await Promise.all([
+      VendorOpsProject.find({
+        vendorId: vid,
+        status: { $in: ['planning', 'in_progress', 'draft', 'at_risk'] }
+      }).sort({ updatedAt: -1 }).lean().catch(() => []),
+      VendorOpsJob.find({
+        vendorId: vid,
+        status: { $in: ['pending_acceptance', 'accepted', 'en_route', 'on_site', 'in_progress'] }
+      }).populate('engineerId', 'name phone').sort({ updatedAt: -1 }).lean().catch(() => []),
+      B2BJob.find({
+        assignedVendorId: vid,
+        status: { $in: ['assigned', 'accepted', 'travelling', 'arrived', 'in_progress', 'completion_submitted'] }
+      }).populate('assignedTo', 'name phone').sort({ updatedAt: -1 }).lean().catch(() => []),
+      Booking.find({
+        vendorId: vid,
+        status: { $in: ['accepted', 'assigned', 'in_progress', 'journey_started', 'visited', 'started', 'reached', 'on_the_way'] }
+      }).sort({ updatedAt: -1 }).lean().catch(() => [])
+    ]);
+
+    const userActiveProjectsCount = activeProjects.filter((p) => p.clientType === 'individual').length + activeBookings.length;
+    const b2bActiveProjectsCount = activeProjects.filter((p) => p.clientType !== 'individual').length + activeB2BDirect.length;
+    const totalActiveJobsCount = userActiveProjectsCount + b2bActiveProjectsCount;
+
+    const activeJobsList = [
+      ...activeProjects.map((p) => ({
+        id: p._id,
+        code: p.projectCode,
+        title: p.title,
+        source: p.clientType === 'individual' ? 'USER JOB' : 'B2B JOB',
+        sourceType: p.clientType === 'individual' ? 'user' : 'b2b',
+        clientName: p.clientName || (p.clientType === 'individual' ? 'Individual Customer' : 'B2B Corporate'),
+        categoryName: p.serviceCategoryName,
+        categoryCode: p.serviceCategoryCode,
+        status: p.status,
+        progress: p.progress || 0,
+        currentStage: p.currentStage || 'Active Operations',
+        city: p.city || 'Standard',
+        engineersAssigned: p.assignedEngineers || [],
+        updatedAt: p.updatedAt
+      })),
+      ...activeB2BDirect.map((b) => ({
+        id: b._id,
+        code: b.jobId,
+        title: `${b.service} (${b.subService || 'Work'})`,
+        source: 'B2B JOB',
+        sourceType: 'b2b',
+        clientName: b.customerName || 'B2B Enterprise',
+        categoryName: b.service,
+        categoryCode: b.service,
+        status: b.status,
+        progress: b.status === 'in_progress' ? 65 : b.status === 'completion_submitted' ? 90 : 35,
+        currentStage: b.trackingStatus || b.status,
+        city: b.city,
+        engineersAssigned: b.assignedTo ? [{ name: b.assignedTo.name, engineerId: b.assignedTo._id }] : [],
+        updatedAt: b.updatedAt
+      })),
+      ...activeBookings.map((bk) => ({
+        id: bk._id,
+        code: bk.bookingId || `BK-${String(bk._id).slice(-6)}`,
+        title: bk.serviceName || 'Direct Service Booking',
+        source: 'USER JOB',
+        sourceType: 'user',
+        clientName: bk.userName || 'Customer',
+        categoryName: bk.categoryName || 'Service',
+        categoryCode: bk.categoryCode,
+        status: bk.status,
+        progress: bk.status === 'in_progress' ? 70 : 40,
+        currentStage: bk.status,
+        city: bk.city || 'Local',
+        engineersAssigned: bk.workerName ? [{ name: bk.workerName }] : [],
+        updatedAt: bk.updatedAt
+      }))
+    ].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 10);
+
+    // ── 4. IN PROGRESS (Live Field Execution) ──
+    const inProgressOps = activeOpsJobs.filter((j) => ['in_progress', 'on_site', 'en_route'].includes(j.status));
+    const inProgressB2B = activeB2BDirect.filter((j) => ['in_progress', 'travelling', 'arrived'].includes(j.status));
+    const inProgressBookings = activeBookings.filter((b) => ['in_progress', 'started', 'reached', 'on_the_way'].includes(b.status));
+
+    const inProgressList = [
+      ...inProgressOps.map((j) => ({
+        id: j._id,
+        code: j.jobCode,
+        title: j.title,
+        source: 'B2B JOB',
+        sourceType: 'b2b',
+        engineerName: j.engineerName || j.engineerId?.name || 'Field Engineer',
+        engineerPhone: j.engineerId?.phone || '',
+        status: j.status,
+        startTime: j.startedAt || j.assignedAt,
+        city: j.city || '',
+        budget: j.budget || 0,
+        progress: j.status === 'in_progress' ? 75 : 40
+      })),
+      ...inProgressB2B.map((j) => ({
+        id: j._id,
+        code: j.jobId,
+        title: `${j.service} - ${j.subService || 'Field Work'}`,
+        source: 'B2B JOB',
+        sourceType: 'b2b',
+        engineerName: j.assignedToName || j.assignedTo?.name || 'Engineer',
+        engineerPhone: j.assignedTo?.phone || '',
+        status: j.status,
+        startTime: j.startedAt || j.travelStartedAt || j.assignedAt,
+        city: j.city,
+        budget: j.charge || 0,
+        progress: j.status === 'in_progress' ? 70 : 35
+      })),
+      ...inProgressBookings.map((b) => ({
+        id: b._id,
+        code: b.bookingId || `BK-${String(b._id).slice(-6)}`,
+        title: b.serviceName || 'Direct Booking Execution',
+        source: 'USER JOB',
+        sourceType: 'user',
+        engineerName: b.workerName || 'Technician',
+        engineerPhone: b.workerPhone || '',
+        status: b.status,
+        startTime: b.startedAt || b.createdAt,
+        city: b.city || '',
+        budget: b.totalAmount || 0,
+        progress: b.status === 'in_progress' ? 65 : 30
+      }))
+    ];
+    const inProgressCount = inProgressList.length;
+
+    // ── 5. COMPLETED JOBS & EARNINGS ──
+    const [completedProjects, completedOpsJobs, completedB2B, completedBookings] = await Promise.all([
+      VendorOpsProject.find({ vendorId: vid, status: /completed|closed/i }).sort({ updatedAt: -1 }).limit(10).lean().catch(() => []),
+      VendorOpsJob.find({ vendorId: vid, status: 'completed' }).sort({ completedAt: -1 }).limit(10).lean().catch(() => []),
+      B2BJob.find({ assignedVendorId: vid, status: 'completed' }).sort({ completedAt: -1 }).limit(10).lean().catch(() => []),
+      Booking.find({ vendorId: vid, status: 'completed' }).sort({ completedAt: -1 }).limit(10).lean().catch(() => [])
+    ]);
+
+    const totalCompletedCount = completedProjects.length + completedOpsJobs.length + completedB2B.length + completedBookings.length;
+
+    const completedList = [
+      ...completedProjects.map((p) => ({
+        id: p._id,
+        code: p.projectCode,
+        title: p.title,
+        source: p.clientType === 'individual' ? 'USER JOB' : 'B2B JOB',
+        sourceType: p.clientType === 'individual' ? 'user' : 'b2b',
+        engineerName: p.assignedEngineers?.[0]?.name || p.assignedManager || 'Field Team',
+        completionDate: p.endDate || p.updatedAt,
+        amount: p.budget || 0,
+        finalStatus: 'Completed'
+      })),
+      ...completedOpsJobs.map((j) => ({
+        id: j._id,
+        code: j.jobCode,
+        title: j.title,
+        source: 'B2B JOB',
+        sourceType: 'b2b',
+        engineerName: j.engineerName || 'Engineer',
+        completionDate: j.completedAt || j.updatedAt,
+        amount: j.budget || 0,
+        finalStatus: 'Completed'
+      })),
+      ...completedB2B.map((j) => ({
+        id: j._id,
+        code: j.jobId,
+        title: j.service,
+        source: 'B2B JOB',
+        sourceType: 'b2b',
+        engineerName: j.assignedToName || 'Engineer',
+        completionDate: j.completedAt || j.updatedAt,
+        amount: j.charge || 0,
+        finalStatus: 'Completed'
+      })),
+      ...completedBookings.map((b) => ({
+        id: b._id,
+        code: b.bookingId || `BK-${String(b._id).slice(-6)}`,
+        title: b.serviceName || 'Direct Booking',
+        source: 'USER JOB',
+        sourceType: 'user',
+        engineerName: b.workerName || 'Worker',
+        completionDate: b.completedAt || b.updatedAt,
+        amount: b.totalAmount || 0,
+        finalStatus: 'Completed'
+      }))
+    ].sort((a, b) => new Date(b.completionDate) - new Date(a.completionDate)).slice(0, 10);
+
+    // ── 6. AVAILABLE ENGINEERS ──
+    const [availableEngineersList, totalEngineersCount] = await Promise.all([
+      VendorWorkforceEngineer.find({
+        vendorId: vid,
+        status: 'active',
+        availability: 'available'
+      }).sort({ rating: -1, name: 1 }).limit(10).lean().catch(() => []),
+      VendorWorkforceEngineer.countDocuments({
+        vendorId: vid,
+        status: 'active'
+      }).catch(() => 0)
+    ]);
+
+    const availableEngineersCount = availableEngineersList.length;
+
+    // ── 7. EARNINGS & WALLET DATA ──
+    const [walletDoc, txns, receivables] = await Promise.all([
+      VendorFinanceWallet.findOne({ vendorId: vid }).lean().catch(() => null),
+      VendorFinanceTransaction.find({
+        vendorId: vid,
+        status: 'completed',
+        type: { $in: ['credit', 'escrow_release', 'payment', 'payout'] }
+      }).lean().catch(() => []),
+      VendorFinanceReceivable.find({
+        vendorId: vid,
+        status: { $in: ['pending', 'partial', 'overdue'] }
+      }).lean().catch(() => [])
+    ]);
+
+    const walletBalance = walletDoc?.availableBalance ?? walletDoc?.balance ?? vendorDoc.walletBalance ?? 0;
+    const escrowBalance = walletDoc?.escrowBalance ?? 0;
+
+    let totalEarnings = 0;
+    let b2bEarnings = 0;
+    let userEarnings = 0;
+
+    txns.forEach((t) => {
+      const amt = Number(t.amount || 0);
+      totalEarnings += amt;
+      if (t.source === 'b2b' || t.clientType === 'b2b' || t.notes?.toLowerCase().includes('b2b')) {
+        b2bEarnings += amt;
+      } else {
+        userEarnings += amt;
+      }
+    });
+
+    if (totalEarnings === 0 && (walletBalance > 0 || completedList.length > 0)) {
+      totalEarnings = completedList.reduce((sum, item) => sum + (Number(item.amount) || 0), 0) || walletBalance;
+      b2bEarnings = completedList.filter((i) => i.sourceType === 'b2b').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+      userEarnings = completedList.filter((i) => i.sourceType === 'user').reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    }
+
+    const pendingAmount = receivables.reduce((sum, r) => sum + ((Number(r.amount) || 0) - (Number(r.paidAmount) || 0)), 0);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        vendorProfile: {
+          companyName: vendorDoc.companyName || vendorDoc.businessName || 'Vendor Partner',
+          vendorTier: vendorDoc.vendorTier || 'bronze',
+          overallRating: vendorDoc.overallRating || 0,
+          approvedServices: vendorDoc.approvedServices || []
+        },
+        counts: {
+          newUserRequests: newUserRequestsCount,
+          newB2BJobs: newB2BJobsCount,
+          activeJobs: totalActiveJobsCount,
+          userActiveJobs: userActiveProjectsCount,
+          b2bActiveJobs: b2bActiveProjectsCount,
+          inProgress: inProgressCount,
+          completed: totalCompletedCount,
+          availableEngineers: availableEngineersCount,
+          totalEngineers: totalEngineersCount,
+          walletBalance,
+          escrowBalance,
+          totalEarnings,
+          userEarnings,
+          b2bEarnings,
+          pendingAmount
+        },
+        lists: {
+          newUserRequests: newUserRequestsList.slice(0, 5),
+          newB2BJobs: newB2BJobsList.slice(0, 5),
+          activeJobs: activeJobsList,
+          inProgress: inProgressList.slice(0, 8),
+          completed: completedList.slice(0, 8),
+          availableEngineers: availableEngineersList.map((e) => ({
+            id: e._id,
+            name: e.name,
+            phone: e.phone,
+            email: e.email,
+            rating: e.rating || 4.8,
+            primarySkill: e.primarySkill || e.skills?.[0] || 'Technician',
+            city: e.city || 'Standard',
+            availability: e.availability || 'available',
+            status: e.status
+          }))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('getOperationalSummary error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch operational summary' });
   }
 };
 

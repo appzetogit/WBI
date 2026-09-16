@@ -5,13 +5,15 @@ import {
   FiHome, FiUser, FiUsers, FiTool, FiBriefcase, FiShield, 
   FiClipboard, FiCalendar, FiFileText, FiCreditCard, FiDollarSign, 
   FiPieChart, FiBell, FiStar, FiHelpCircle, FiSettings, 
-  FiMenu, FiX, FiSearch, FiMessageSquare, FiChevronDown, FiLogOut
+  FiMenu, FiX, FiSearch, FiMessageSquare, FiChevronDown, FiLogOut, FiInbox
 } from 'react-icons/fi';
 import Logo from '../../../../components/common/Logo';
 import { logout } from '../../services/authService';
 
 const navItems = [
   { name: 'Dashboard', path: '/vendor/dashboard', icon: FiHome },
+  { name: 'Requests', path: '/vendor/requests', icon: FiInbox },
+  { name: 'My Jobs', path: '/vendor/my-jobs', icon: FiBriefcase },
   { name: 'My Profile', path: '/vendor/profile', icon: FiUser },
   { name: 'Team & Engineers', path: '/vendor/engineers', icon: FiUsers },
   { name: 'Services', path: '/vendor/services', icon: FiTool },

@@ -3,10 +3,12 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import DynamicSidebar from '../DynamicSidebar';
 import { VendorConfigProvider, useVendorConfig } from '../../context/VendorConfigContext';
 import { VendorSocketProvider } from '../../context/VendorSocketContext';
+import { VendorCountsProvider } from '../../context/VendorCountsContext';
 import ServiceSlugGuard from '../ServiceSlugGuard';
 import useVendorLogout from '../../hooks/useVendorLogout';
 import VendorLogoutConfirm from '../VendorLogoutConfirm';
 import useVendorBasePath from '../../hooks/useVendorBasePath';
+import NotificationDropdown from './NotificationDropdown';
 import {
   Bell,
   Search,
@@ -27,6 +29,9 @@ const HeaderBar = ({ onOpenMobileNav }) => {
   const menuRef = useRef(null);
 
   const p = location.pathname;
+  const isRequests = p.includes('/requests');
+  const isMyJobs = p.includes('/my-jobs');
+  const isEngineers = p.includes('/engineers');
   const isBusinessIntake = p.includes('/business-intake');
   const isClientsContracts = p.includes('/clients');
   const isProjectOps = p.includes('/projects');
@@ -47,7 +52,13 @@ const HeaderBar = ({ onOpenMobileNav }) => {
   const initials = vendorName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'V';
   const serviceLabel = primaryService?.categoryName || primaryService?.categoryCode || '';
 
-  const sectionTitle = isBusinessIntake
+  const sectionTitle = isRequests
+    ? 'Requests & Opportunities'
+    : isMyJobs
+    ? 'My Jobs & Execution'
+    : isEngineers
+    ? 'Engineers & Workforce'
+    : isBusinessIntake
     ? 'Business Intake'
     : isClientsContracts
     ? 'Clients & Contracts'
@@ -126,13 +137,7 @@ const HeaderBar = ({ onOpenMobileNav }) => {
         </div>
 
         <div className="flex items-center gap-4 shrink-0">
-          <Link
-            to={path('notifications')}
-            className="relative p-2 text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Notifications"
-          >
-            <Bell className="w-5 h-5" />
-          </Link>
+          <NotificationDropdown />
 
           <button
             type="button"
@@ -231,18 +236,20 @@ const DynamicVendorLayout = () => {
   return (
     <VendorSocketProvider>
       <VendorConfigProvider>
-        <ServiceSlugGuard>
-          <div className="flex h-screen overflow-hidden bg-gray-50">
-            <DynamicSidebar mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
+        <VendorCountsProvider>
+          <ServiceSlugGuard>
+            <div className="flex h-screen overflow-hidden bg-gray-50">
+              <DynamicSidebar mobileOpen={mobileNavOpen} onCloseMobile={() => setMobileNavOpen(false)} />
 
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-              <HeaderBar onOpenMobileNav={() => setMobileNavOpen(true)} />
-              <main className="flex-1 overflow-y-auto">
-                <Outlet />
-              </main>
+              <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+                <HeaderBar onOpenMobileNav={() => setMobileNavOpen(true)} />
+                <main className="flex-1 overflow-y-auto">
+                  <Outlet />
+                </main>
+              </div>
             </div>
-          </div>
-        </ServiceSlugGuard>
+          </ServiceSlugGuard>
+        </VendorCountsProvider>
       </VendorConfigProvider>
     </VendorSocketProvider>
   );

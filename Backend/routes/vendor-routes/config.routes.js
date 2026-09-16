@@ -6,5 +6,6 @@ const { authenticate } = require('../../middleware/authMiddleware');
 router.get('/config', authenticate, vendorConfigController.getDynamicConfig);
 router.get('/dashboard/kpis', authenticate, vendorConfigController.getDashboardKpis);
 router.get('/dashboard/alerts', authenticate, vendorConfigController.getDashboardAlerts);
+router.get('/dashboard/operational-summary', authenticate, vendorConfigController.getOperationalSummary);
 
 module.exports = router;

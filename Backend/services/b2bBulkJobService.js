@@ -395,6 +395,8 @@ const processValidation = async (batchId, app) => {
     let duplicates = 0;
 
     const parsedRows = [];
+    /** Valid rows only — input to the pricing engine (step 8). */
+    const validParsedRows = [];
     const errorChunks = [];
 
     // Track duplicates inside this file (Phone + Address combination)
@@ -475,6 +477,8 @@ const processValidation = async (batchId, app) => {
         });
       } else {
         validRows++;
+        // Only billable rows feed the pricing engine.
+        validParsedRows.push(mapped);
       }
 
       parsedRows.push(mapped);
@@ -512,15 +516,41 @@ const processValidation = async (batchId, app) => {
     // 7. Insert errors into DB in one bulk operation (Relational)
     await saveBatchErrors(batch._id, errorChunks);
 
-    // 8. Fetch active deduction rules to calculate costs
-    let rule = await B2BDeductionRule.findOne({ companyId: batch.companyId, isActive: true });
-    if (!rule) {
-      rule = await B2BDeductionRule.create({ companyId: batch.companyId, perJobCharge: 12, gstPercent: 18, isActive: true });
+    // 8. Cost calculation via the configuration-driven pricing engine.
+    //    Falls back to the company's B2BDeductionRule when no B2BPricingRule
+    //    matches, so pricing is unchanged until an admin configures rules.
+    let ratePerJob;
+    let estimatedCost;
+    let pricingBreakdown = null;
+
+    try {
+      const { calculateBatchPricing } = require('./b2bPricingEngine.service');
+      const priced = await calculateBatchPricing({
+        companyId: batch.companyId,
+        jobs: validParsedRows
+      });
+      ratePerJob = priced.perJobCharge;
+      estimatedCost = priced.estimatedCost;
+      pricingBreakdown = {
+        currency: priced.currency,
+        lines: priced.lines,
+        totals: priced.totals,
+        calculatedAt: new Date()
+      };
+    } catch (pricingErr) {
+      // Never fail a validated batch on a pricing error — fall back to the
+      // legacy flat rate and surface it for admin follow-up.
+      console.error(
+        `[Validation] Pricing engine failed for batch ${batch.batchId}, using legacy rate:`,
+        pricingErr.message
+      );
+      let rule = await B2BDeductionRule.findOne({ companyId: batch.companyId, isActive: true });
+      if (!rule) {
+        rule = await B2BDeductionRule.create({ companyId: batch.companyId, perJobCharge: 12, gstPercent: 18, isActive: true });
+      }
+      ratePerJob = parseFloat((rule.perJobCharge * (1 + rule.gstPercent / 100)).toFixed(2));
+      estimatedCost = parseFloat((validRows * ratePerJob).toFixed(2));
     }
-    const perJobCharge = rule.perJobCharge;
-    const gstPercent = rule.gstPercent;
-    const ratePerJob = parseFloat((perJobCharge * (1 + gstPercent / 100)).toFixed(2));
-    const estimatedCost = parseFloat((validRows * ratePerJob).toFixed(2));
 
     // 9. Update final batch data
     batch.validRows = validRows;
@@ -528,6 +558,7 @@ const processValidation = async (batchId, app) => {
     batch.duplicates = duplicates;
     batch.estimatedCost = estimatedCost;
     batch.perJobCharge = ratePerJob;
+    if (pricingBreakdown) batch.pricingBreakdown = pricingBreakdown;
     batch.status = 'validated';
     batch.failureReason = null;
     await batch.save();

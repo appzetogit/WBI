@@ -15,18 +15,26 @@ export const verifyBank = (accountNumber, ifsc) => api.post(`${base}/verify/bank
 export const sendContactOtp = (body) => api.post(`${base}/verify/contact-otp/send`, body);
 export const confirmContactOtp = (body) => api.post(`${base}/verify/contact-otp/confirm`, body);
 export const signSla = (body) => api.post(`${base}/sla/sign`, body);
-export const uploadB2BFile = (formData) => api.post('/b2b/documents/upload', formData, {
+export const uploadB2BFile = (formData) => api.post(`${base}/documents/upload`, formData, {
   headers: { 'Content-Type': 'multipart/form-data' }
 });
+export const uploadOnboardingDocument = uploadB2BFile;
 
 export const adminOnboardingDashboard = (params) => api.get('/admin/b2b-onboarding/dashboard', { params });
 export const adminOnboardingDetail = (companyId) => api.get(`/admin/b2b-onboarding/companies/${companyId}`);
 export const adminOnboardingReview = (companyId, body) => api.post(`/admin/b2b-onboarding/companies/${companyId}/review`, body);
 export const adminOnboardingConfig = () => api.get('/admin/b2b-onboarding/config');
 export const adminUpdateOnboardingConfig = (body) => api.put('/admin/b2b-onboarding/config', body);
+
 export const fetchOnboardingBranches = () => api.get(`${base}/branches`);
 export const createOnboardingBranch = (body) => api.post(`${base}/branches`, body);
+export const updateOnboardingBranch = (branchId, body) => api.patch(`${base}/branches/${branchId}`, body);
 export const deleteOnboardingBranch = (branchId) => api.delete(`${base}/branches/${branchId}`);
+
+export const fetchOnboardingContacts = () => api.get(`${base}/contacts`);
+export const saveOnboardingContact = (body) => api.post(`${base}/contacts`, body);
+export const deleteOnboardingContact = (contactId) => api.delete(`${base}/contacts/${contactId}`);
+
 export const fetchActivityTimeline = () => api.get(`${base}/activity-timeline`);
 
 export const adminSyncCatalog = () => api.post('/admin/b2b-onboarding/config/sync-catalog');

@@ -577,6 +577,10 @@ engineerSchema.index({ status: 1 });
 engineerSchema.index({ serviceCategories: 1 });
 engineerSchema.index({ vendorId: 1 });
 engineerSchema.index({ geoLocation: '2dsphere' });
+// Compound geo index for B2B dispatch: $nearSphere is always combined with the
+// same hard filters in b2bEngineerEligibility.findEligibleEngineersInRadius,
+// so folding them in cuts the post-geo filter set substantially.
+engineerSchema.index({ geoLocation: '2dsphere', status: 1, approvalStatus: 1, isActive: 1 });
 engineerSchema.index({ isDeleted: 1 });
 
 // Soft Delete filter for all find operations

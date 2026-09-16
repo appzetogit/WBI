@@ -274,11 +274,264 @@ const listUnmatchedServices = async (_req, res) => {
   }
 };
 
+/**
+ * Admin QA/Review: List submitted B2B job completions
+ */
+const listSubmissions = async (req, res) => {
+  try {
+    const { status, search, page: pageReq, limit: limitReq } = req.query;
+    const page = Math.max(1, parseInt(pageReq, 10) || 1);
+    const limit = Math.min(100, parseInt(limitReq, 10) || 25);
+
+    const filter = {};
+    if (status && status !== 'all') {
+      if (status === 'pending_review') {
+        filter.status = { $in: ['completion_submitted', 'admin_review'] };
+      } else {
+        filter.status = status;
+      }
+    } else {
+      filter.status = { $in: ['completion_submitted', 'admin_review', 'completed', 'revision_required'] };
+    }
+
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      const regex = new RegExp(q, 'i');
+      filter.$or = [
+        { jobId: regex },
+        { customerName: regex },
+        { service: regex },
+        { city: regex },
+        { assignedToName: regex }
+      ];
+    }
+
+    const [jobs, total, countsAgg] = await Promise.all([
+      B2BJob.find(filter)
+        .populate('companyId', 'companyName email phone')
+        .populate('assignedTo', 'name phone email engineerType')
+        .populate('assignedVendorId', 'vendorName businessName phone')
+        .sort({ completionSubmittedAt: -1, updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('-startOtp -endOtp')
+        .lean(),
+      B2BJob.countDocuments(filter),
+      B2BJob.aggregate([
+        { $match: { status: { $in: ['completion_submitted', 'admin_review', 'completed', 'revision_required'] } } },
+        { $group: { _id: '$status', n: { $sum: 1 } } }
+      ])
+    ]);
+
+    const countsMap = countsAgg.reduce((acc, r) => ({ ...acc, [r._id]: r.n }), {});
+    const counts = {
+      all: (countsMap.completion_submitted || 0) + (countsMap.admin_review || 0) + (countsMap.completed || 0) + (countsMap.revision_required || 0),
+      pending_review: (countsMap.completion_submitted || 0) + (countsMap.admin_review || 0),
+      completed: countsMap.completed || 0,
+      revision_required: countsMap.revision_required || 0
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: jobs,
+      counts,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    });
+  } catch (error) {
+    console.error('[admin b2b listSubmissions]', error);
+    return res.status(500).json({ success: false, message: 'Failed to load submission queue' });
+  }
+};
+
+/**
+ * Admin QA/Review: Get submission detail for a specific B2B Job
+ */
+const getSubmissionDetail = async (req, res) => {
+  try {
+    const job = await B2BJob.findById(req.params.jobId)
+      .populate('companyId', 'companyName email phone address')
+      .populate('assignedTo', 'name phone email engineerType vendorId rating')
+      .populate('assignedVendorId', 'vendorName businessName phone email')
+      .select('-startOtp -endOtp')
+      .lean();
+
+    if (!job) return res.status(404).json({ success: false, message: 'Job submission not found' });
+
+    const timeline = await JobStatusTimeline.find({ jobId: job._id }).sort({ createdAt: 1 }).lean();
+    const history = await JobHistory.find({ jobId: job._id }).sort({ createdAt: -1 }).limit(30).lean();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        job,
+        timeline,
+        history
+      }
+    });
+  } catch (error) {
+    console.error('[admin b2b getSubmissionDetail]', error);
+    return res.status(500).json({ success: false, message: 'Failed to load submission detail' });
+  }
+};
+
+/**
+ * Admin QA/Review: Approve B2B job completion & release escrow payout
+ */
+const approveCompletion = async (req, res) => {
+  try {
+    const adminId = req.user.id || req.user._id;
+    const { jobId } = req.params;
+    const { remarks } = req.body;
+
+    const job = await B2BJob.findById(jobId);
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+
+    if (['completed', 'cancelled', 'failed'].includes(job.status)) {
+      return res.status(400).json({ success: false, message: `Job is already ${job.status}` });
+    }
+
+    const now = new Date();
+    job.status = 'completed';
+    job.trackingStatus = 'completed';
+    job.completedAt = job.completedAt || now;
+
+    await job.save();
+
+    // Release held B2B escrow payment
+    try {
+      const { releaseB2BJobEscrowPayment } = require('../../services/escrowReleaseEngine.service');
+      const releaseResult = await releaseB2BJobEscrowPayment({
+        jobId: job._id,
+        actor: { id: adminId, role: 'admin' }
+      });
+      console.log(`[Admin Approve B2B Job] Escrow release result for ${job.jobId}:`, releaseResult);
+      if (releaseResult?.ok) {
+        job.payoutStatus = 'released';
+        await job.save();
+      }
+    } catch (escrowErr) {
+      console.error('[Admin Approve B2B Job] Escrow release error:', escrowErr.message);
+    }
+
+    await JobStatusTimeline.create({
+      jobId: job._id,
+      companyId: job.companyId,
+      engineerId: job.assignedTo,
+      status: 'completed',
+      remarks: remarks || 'Admin approved job completion & released escrow payment'
+    });
+
+    await JobHistory.create({
+      jobId: job._id,
+      status: 'completed',
+      remark: `Admin approved completion. ${remarks || ''}`,
+      role: 'admin',
+      changedBy: adminId
+    });
+
+    // Realtime Sockets
+    try {
+      const { getIO } = require('../../sockets');
+      const io = getIO();
+      if (io) {
+        const payload = { jobId: job._id.toString(), status: 'completed', trackingStatus: 'completed', updatedAt: now };
+        io.to(`b2b:${job.companyId.toString()}`).emit('b2b:jobStatusUpdated', payload);
+        io.to('admin').emit('b2b:jobStatusUpdated', payload);
+        if (job.assignedTo) {
+          io.to(`engineer:${job.assignedTo.toString()}`).emit('b2b:jobStatusUpdated', payload);
+        }
+      }
+    } catch (e) {
+      /* ignore socket emit warning */
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Job completion approved and payout released successfully.',
+      job
+    });
+  } catch (error) {
+    console.error('[admin b2b approveCompletion]', error);
+    return res.status(500).json({ success: false, message: 'Failed to approve job completion' });
+  }
+};
+
+/**
+ * Admin QA/Review: Request Revision / Reject B2B job completion
+ */
+const rejectCompletion = async (req, res) => {
+  try {
+    const adminId = req.user.id || req.user._id;
+    const { jobId } = req.params;
+    const { remarks } = req.body;
+
+    if (!remarks || !String(remarks).trim()) {
+      return res.status(400).json({ success: false, message: 'Revision / Rejection remarks are required' });
+    }
+
+    const job = await B2BJob.findById(jobId);
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+
+    const now = new Date();
+    job.status = 'revision_required';
+    job.trackingStatus = 'revision_required';
+    job.incompleteRemarks = remarks;
+    job.payoutStatus = 'held';
+
+    await job.save();
+
+    await JobStatusTimeline.create({
+      jobId: job._id,
+      companyId: job.companyId,
+      engineerId: job.assignedTo,
+      status: 'revision_required',
+      remarks: `Admin requested revision: ${remarks}`
+    });
+
+    await JobHistory.create({
+      jobId: job._id,
+      status: 'revision_required',
+      remark: `Admin rejected submission / requested revision: ${remarks}`,
+      role: 'admin',
+      changedBy: adminId
+    });
+
+    // Realtime Sockets
+    try {
+      const { getIO } = require('../../sockets');
+      const io = getIO();
+      if (io) {
+        const payload = { jobId: job._id.toString(), status: 'revision_required', trackingStatus: 'revision_required', updatedAt: now };
+        io.to(`b2b:${job.companyId.toString()}`).emit('b2b:jobStatusUpdated', payload);
+        io.to('admin').emit('b2b:jobStatusUpdated', payload);
+        if (job.assignedTo) {
+          io.to(`engineer:${job.assignedTo.toString()}`).emit('b2b:jobStatusUpdated', payload);
+        }
+      }
+    } catch (e) {
+      /* ignore socket emit warning */
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Revision requested from engineer successfully.',
+      job
+    });
+  } catch (error) {
+    console.error('[admin b2b rejectCompletion]', error);
+    return res.status(500).json({ success: false, message: 'Failed to request revision' });
+  }
+};
+
 module.exports = {
   listEscalations,
   getEscalationDetail,
   retryAllocation,
   manualAssign,
   suggestEngineers,
-  listUnmatchedServices
+  listUnmatchedServices,
+  listSubmissions,
+  getSubmissionDetail,
+  approveCompletion,
+  rejectCompletion
 };

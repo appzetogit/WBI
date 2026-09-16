@@ -1,11 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const reviewController = require('../../controllers/adminControllers/reviewController');
-const { protect, admin } = require('../../middleware/authMiddleware');
+const { authenticate } = require('../../middleware/authMiddleware');
+const { isAdmin } = require('../../middleware/roleMiddleware');
 
-// All review routes should be protected and restricted to admins
-router.use(protect);
-router.use(admin);
+/**
+ * NOTE: this router is currently NOT mounted — server.js uses
+ * reviewManagement.routes instead. It previously destructured
+ * `{ protect, admin }` from authMiddleware, which exports neither, so
+ * `router.use(undefined)` would have thrown the moment anyone mounted it.
+ * Corrected to the real middleware so it is safe to wire up.
+ */
+router.use(authenticate, isAdmin);
 
 // Route to get all reviews (with status filtering)
 router.get('/', reviewController.getAllReviews);

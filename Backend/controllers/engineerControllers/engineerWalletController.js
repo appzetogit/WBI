@@ -281,10 +281,20 @@ const requestWithdrawal = async (req, res) => {
 
     const withdrawal = await Withdrawal.create({
       engineerId,
+      source: 'engineer',
+      method: method === 'upi' || upiId ? 'upi' : 'bank',
       amount,
       status: 'pending',
       bankDetails: payoutDetails,
-      requestDate: new Date()
+      requestDate: new Date(),
+      timeline: [
+        {
+          status: 'pending',
+          message: 'Withdrawal requested — balance held',
+          actorType: 'system',
+          at: new Date()
+        }
+      ]
     });
 
     const transaction = await Transaction.create({

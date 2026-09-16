@@ -15,7 +15,8 @@ import {
 
 const STEPS = ['Eligibility', 'Bank / UPI', 'Amount & Fees', 'OTP Confirm', 'Status'];
 
-export default function WithdrawalWizard({ open, onClose, onComplete }) {
+export default function WithdrawalWizard({ open, isOpen, onClose, onComplete, onSuccess }) {
+  const isVisible = open !== undefined ? open : isOpen;
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [eligibility, setEligibility] = useState(null);
@@ -64,7 +65,7 @@ export default function WithdrawalWizard({ open, onClose, onComplete }) {
   };
 
   useEffect(() => {
-    if (open) {
+    if (isVisible) {
       setStep(0);
       setResult(null);
       setOtp('');
@@ -72,9 +73,9 @@ export default function WithdrawalWizard({ open, onClose, onComplete }) {
       setAmount('');
       load();
     }
-  }, [open]);
+  }, [isVisible]);
 
-  if (!open) return null;
+  if (!isVisible) return null;
 
   const config = eligibility?.config || {};
   const balances = eligibility?.balances || {};
@@ -172,7 +173,7 @@ export default function WithdrawalWizard({ open, onClose, onComplete }) {
           : 'Withdrawal submitted for approval'
       );
       setStep(4);
-      onComplete?.();
+      (onComplete || onSuccess)?.();
       const hist = await fetchWithdrawals({ limit: 5 });
       setHistory(hist.data?.data || []);
     } catch (error) {
@@ -187,7 +188,7 @@ export default function WithdrawalWizard({ open, onClose, onComplete }) {
       await cancelWithdrawal(id);
       toast.success('Withdrawal cancelled');
       await load();
-      onComplete?.();
+      (onComplete || onSuccess)?.();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Cancel failed');
     }

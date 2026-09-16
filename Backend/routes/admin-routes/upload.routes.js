@@ -2,6 +2,21 @@ const express = require('express');
 const router = express.Router();
 const { uploadImage, uploadMedia, uploadGenericFile } = require('../../middleware/uploadMiddleware');
 const { getSignature } = require('../../controllers/cloudinaryController');
+const { uploadLimiter } = require('../../middleware/rateLimiter');
+
+/**
+ * This router is mounted twice: at /api/admin and at /api (generic access).
+ *
+ * It deliberately stays unauthenticated because vendor and engineer signup
+ * wizards upload KYC documents before any session exists — requiring auth here
+ * would break registration. Guarding only the /api/admin mount would achieve
+ * nothing, since the same handlers are reachable via /api.
+ *
+ * The real controls are therefore: mime/extension filtering and size caps in
+ * uploadMiddleware, plus this volume limit so the endpoints cannot be abused as
+ * anonymous object storage.
+ */
+router.use(uploadLimiter);
 
 // Get signature for direct signed upload
 router.get('/upload/sign-signature', getSignature);

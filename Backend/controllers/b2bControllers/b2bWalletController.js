@@ -9,6 +9,7 @@ const {
   getPendingWalletGate,
   activatePendingWalletJobs
 } = require('../../services/b2bWalletService');
+const { generateAndUploadInvoicePdf } = require('../../utils/invoicePdfGenerator');
 
 // Socket notification helper
 const emitWalletEvent = (req, eventName, roomName, data) => {
@@ -201,21 +202,63 @@ const verifyTopupPayment = async (req, res) => {
     await wallet.save();
 
     // 4. Update parent company schema balance block
-    await B2BCompany.findByIdAndUpdate(txn.companyId, { walletBalance: wallet.balance });
+    const company = await B2BCompany.findByIdAndUpdate(
+      txn.companyId,
+      { walletBalance: wallet.balance },
+      { new: true }
+    );
 
-    // 5. Generate B2BInvoice record
+    // 5. Generate a real PDF invoice and upload it, then create the B2BInvoice record
     const invoiceId = `INV-${Date.now()}`;
     const invoiceNumber = `WBI-B2B-INV-${Date.now().toString().substring(5)}`;
+    const now = new Date();
+
+    let pdfUrl = '';
+    try {
+      pdfUrl = await generateAndUploadInvoicePdf({
+        invoiceNumber,
+        invoiceDate: now,
+        dueDate: now,
+        billingPeriod: now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+        companySnapshot: {
+          companyName: company?.companyName || 'B2B Client Company',
+          gstNumber: company?.gstNumber || 'N/A',
+          email: company?.email || 'N/A',
+          phone: company?.phone || 'N/A',
+          billingAddress: company?.billingAddress || 'N/A'
+        },
+        totalJobs: 1,
+        perJobCharge: txn.amount,
+        platformFee: 0,
+        subtotal: txn.amount,
+        gstPercent: 0,
+        gstAmount: 0,
+        totalAmount: txn.amount,
+        status: 'Settled',
+        paymentStatus: 'paid',
+        paymentDate: now,
+        transactionId: razorpayPaymentId,
+        paymentMethod: 'Razorpay (Online)'
+      });
+    } catch (pdfErr) {
+      // Never let a PDF rendering/upload failure block a successful, already-
+      // verified payment — the invoice record still gets created, and the
+      // download endpoint reports "not generated yet" instead of streaming a
+      // dead link, until this is retried.
+      console.error('[B2B Topup] Invoice PDF generation failed (non-blocking):', pdfErr.message);
+    }
+
     await B2BInvoice.create({
       companyId: txn.companyId,
       invoiceId,
       invoiceNumber,
       invoiceType: 'topup',
-      billingPeriod: new Date().toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+      billingPeriod: now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
       amount: txn.amount,
       totalAmount: txn.amount,
       status: 'Settled',
-      fileUrl: `https://wbi-invoices.s3.amazonaws.com/${invoiceNumber}.pdf` // Mock PDF file url
+      invoicePdfUrl: pdfUrl || undefined,
+      fileUrl: pdfUrl || undefined
     });
 
     // 6. Emit real-time websockets updates

@@ -39,6 +39,7 @@ const BillingPage = lazy(() => import('../pages/BillingPage'));
 const Schedule = lazy(() => import('../pages/Schedule'));
 const Proposals = lazy(() => import('../pages/Proposals'));
 const B2BJobs = lazy(() => import('../pages/B2BJobs'));
+const B2BJobDetail = lazy(() => import('../pages/B2BJobDetail'));
 const OpsJobs = lazy(() => import('../pages/OpsJobs'));
 const OpsJobDetail = lazy(() => import('../pages/OpsJobs/OpsJobDetail'));
 const FreelancerPool = lazy(() => import('../pages/FreelancerPool'));
@@ -76,6 +77,7 @@ const EngineerRoutes = () => {
     location.pathname === '/engineer/signup' ||
     location.pathname === '/engineer/forgot-password' ||
     location.pathname.startsWith('/engineer/job') ||
+    location.pathname.startsWith('/engineer/b2b-jobs/') ||
     location.pathname.endsWith('/map') ||
     location.pathname.endsWith('/success') ||
     location.pathname.includes('/billing') ||
@@ -97,6 +99,7 @@ const EngineerRoutes = () => {
               <Route path="/dashboard" element={protectedPage(Dashboard)} />
               <Route path="/jobs" element={protectedPage(AssignedJobs)} />
               <Route path="/b2b-jobs" element={protectedPage(B2BJobs)} />
+              <Route path="/b2b-jobs/:jobId" element={protectedPage(B2BJobDetail)} />
               <Route path="/ops-jobs" element={protectedPage(OpsJobs)} />
               <Route path="/ops-jobs/:id" element={protectedPage(OpsJobDetail)} />
               <Route path="/freelancer-pool" element={protectedPage(FreelancerPool)} />

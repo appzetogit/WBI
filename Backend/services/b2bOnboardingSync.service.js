@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../utils/txnOptions');
 const B2BCompany = require('../models/B2BCompany');
 const B2BBranch = require('../models/B2BBranch');
 const B2BBankAccount = require('../models/B2BBankAccount');
@@ -142,7 +143,7 @@ async function syncOnboardingPartial(companyId, onboarding) {
       await syncContactsFromOnboarding(companyId, onboarding, session);
       await syncBranchesFromOnboarding(companyId, onboarding, session);
       await syncCreditFromOnboarding(companyId, onboarding, session, { approved: false });
-    });
+    }, TXN_OPTS);
   } finally {
     session.endSession();
   }
@@ -173,7 +174,7 @@ async function materializeOnActivation(companyId, onboarding, adminId) {
         targetType: 'B2BCompany',
         changes: { lifecycleStatus: 'active', scores: onboarding.scores }
       }], { session });
-    });
+    }, TXN_OPTS);
   } finally {
     session.endSession();
   }

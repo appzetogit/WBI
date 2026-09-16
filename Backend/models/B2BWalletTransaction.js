@@ -87,6 +87,8 @@ const b2bWalletTransactionSchema = new mongoose.Schema({
 
 
 b2bWalletTransactionSchema.index({ companyId: 1, date: 1 });
+// Ledger reads sort by createdAt, not date.
+b2bWalletTransactionSchema.index({ companyId: 1, createdAt: -1 });
 b2bWalletTransactionSchema.index({ razorpayOrderId: 1 });
 
 module.exports = mongoose.model('B2BWalletTransaction', b2bWalletTransactionSchema);

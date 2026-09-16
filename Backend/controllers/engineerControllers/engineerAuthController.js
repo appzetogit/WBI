@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../../utils/txnOptions');
 const { logAudit } = require('../../utils/auditLogger');
 const Engineer = require('../../models/Engineer');
 const { findUserAcrossCollections } = require('../../utils/authHelper');
@@ -231,7 +232,7 @@ const register = async (req, res) => {
 
     // Start Mongoose Transaction Session
     const session = await mongoose.startSession();
-    session.startTransaction();
+    session.startTransaction(TXN_OPTS);
 
     try {
       // Check existing
@@ -681,6 +682,11 @@ const logout = async (req, res) => {
 
       await Engineer.findByIdAndUpdate(req.user.id, updateQuery);
       console.log(`[AUTH] ✅ ${platform} session & tokens cleared for engineer: ${req.user.id}`);
+
+      try {
+        const { markEngineerOffline } = require('../../utils/engineerLocationSession.util');
+        await markEngineerOffline(req.user.id);
+      } catch (_) { /* non-blocking */ }
     }
 
     res.status(200).json({

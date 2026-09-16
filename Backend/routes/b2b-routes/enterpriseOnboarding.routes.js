@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../../middleware/authMiddleware');
+const { uploadGenericFile, handleMulterError } = require('../../middleware/uploadMiddleware');
+const { uploadDocument } = require('../../controllers/b2bControllers/profile.controller');
 const ctrl = require('../../controllers/b2bControllers/b2bEnterpriseOnboarding.controller');
 
 router.get('/config', ctrl.getConfig);
@@ -13,6 +15,7 @@ router.get('/activation-status', ctrl.activationStatus);
 router.get('/verification-history', ctrl.verificationHistory);
 router.patch('/steps/:step', ctrl.saveStep);
 router.post('/documents', ctrl.uploadDocumentMeta);
+router.post('/documents/upload', uploadGenericFile, handleMulterError, uploadDocument);
 router.post('/submit', ctrl.submit);
 router.post('/verify/gst', ctrl.verifyGst);
 router.post('/verify/pan', ctrl.verifyPan);
@@ -26,6 +29,8 @@ router.post('/branches', ctrl.createBranch);
 router.patch('/branches/:branchId', ctrl.updateBranch);
 router.delete('/branches/:branchId', ctrl.deleteBranch);
 router.get('/contacts', ctrl.listContacts);
+router.post('/contacts', ctrl.createOrUpdateContact);
+router.delete('/contacts/:contactId', ctrl.deleteContact);
 router.get('/activity-timeline', ctrl.getActivityTimeline);
 
 module.exports = router;

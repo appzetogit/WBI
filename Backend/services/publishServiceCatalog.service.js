@@ -3,6 +3,7 @@
  * Soft lifecycle only — never hard-deletes production catalog rows.
  */
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../utils/txnOptions');
 const ServiceConfig = require('../models/ServiceConfig');
 const ServiceCategory = require('../models/ServiceCategory');
 const SubService = require('../models/SubService');
@@ -122,7 +123,7 @@ async function ensureRegistrationAndDashboardDefaults(config) {
 async function publishServiceCatalog(categoryCode, { actor, ensureForms = true } = {}) {
   const code = String(categoryCode).toUpperCase();
   const session = await mongoose.startSession();
-  session.startTransaction();
+  session.startTransaction(TXN_OPTS);
 
   try {
     const config = await ServiceConfig.findOne({ categoryCode: code }).session(session);

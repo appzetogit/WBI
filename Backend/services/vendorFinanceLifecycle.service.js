@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../utils/txnOptions');
 const VendorFinanceDocument = require('../models/VendorFinanceDocument');
 const VendorFinanceMilestone = require('../models/VendorFinanceMilestone');
 const VendorFinanceReceivable = require('../models/VendorFinanceReceivable');
@@ -707,7 +708,7 @@ async function requestFinanceWithdrawal(vendorId, {
   }
 
   const session = await mongoose.startSession();
-  session.startTransaction();
+  session.startTransaction(TXN_OPTS);
   try {
     wallet.availableBalance -= amt;
     wallet.processingWithdrawal = (wallet.processingWithdrawal || 0) + amt;

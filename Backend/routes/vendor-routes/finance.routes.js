@@ -5,6 +5,10 @@ const {
   getCounts,
   getWallet,
   getEarningsByService,
+  getEarningsOverview,
+  getEngineerPayments,
+  recordEngineerPayment,
+  getSettlements,
   getWithdrawEligibility,
   quoteWithdrawal,
   listBankAccounts,
@@ -22,19 +26,23 @@ const {
   getQuotations,
   getInvoices,
   updateDocument,
+  downloadDocument,
+  createInvoicePayOrder,
+  verifyInvoicePay,
   getMilestones,
   updateMilestone,
   syncFinance,
-  exportLedger,
-  downloadDocument,
-  createInvoicePayOrder,
-  verifyInvoicePay
+  exportLedger
 } = require('../../controllers/vendorControllers/financeController');
 
 router.get('/counts', authenticate, getCounts);
+router.get('/earnings', authenticate, getEarningsOverview);
 router.get('/earnings-by-service', authenticate, getEarningsByService);
 router.get('/wallet', authenticate, getWallet);
 router.get('/wallet/export', authenticate, exportLedger);
+router.get('/engineer-payments', authenticate, getEngineerPayments);
+router.post('/engineer-payments/pay', authenticate, recordEngineerPayment);
+router.get('/settlements', authenticate, getSettlements);
 
 router.get('/withdraw/eligibility', authenticate, getWithdrawEligibility);
 router.post('/withdraw/quote', authenticate, quoteWithdrawal);

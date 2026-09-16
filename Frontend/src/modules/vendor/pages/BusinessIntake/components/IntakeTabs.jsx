@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react';
 import { NavLink } from 'react-router-dom';
-import useBusinessIntakeCounts from '../../../hooks/useBusinessIntakeCounts';
+import { useVendorCounts } from '../../../context/VendorCountsContext';
 import useVendorBasePath from '../../../hooks/useVendorBasePath';
 
 const IntakeTabs = () => {
-  const { counts } = useBusinessIntakeCounts();
+  const { businessIntake: { counts } } = useVendorCounts();
   const { basePath } = useVendorBasePath();
   const base = `${basePath}/business-intake`;
 

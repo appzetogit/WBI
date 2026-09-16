@@ -187,6 +187,18 @@ export default function GlobalWorkerJobAlert() {
         toast('Confirm team, timeline, and resources to accept', { icon: '📋' });
         return;
       }
+      if (alert?.isB2BJob) {
+        // A B2BJob id is not a Booking id: respondToJob() and /engineer/job/:id
+        // both 404 on it. Use the B2B accept endpoint and the B2B jobs screen.
+        stopAlertRing();
+        await engineerService.acceptB2BJob(id);
+        setActiveAlerts((prev) => prev.filter((b) => String(b.id || b._id) !== String(id)));
+        toast.success('B2B Job Accepted!');
+        window.dispatchEvent(new Event('engineerJobsUpdated'));
+        navigate('/engineer/b2b-jobs');
+        return;
+      }
+
       await engineerService.respondToJob(id, 'ACCEPTED');
       toast.success('Job Accepted Successfully!');
       navigate(`/engineer/job/${id}`);

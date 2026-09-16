@@ -599,6 +599,31 @@ export const SocketProvider = ({ children }) => {
         if (isSoundEnabled('engineer')) playAlertRing();
         window.dispatchEvent(new Event('engineerJobsUpdated'));
         window.dispatchEvent(new Event('workerNotificationsUpdated'));
+
+        // B2B wave offers previously only raised a toast, so the engineer never
+        // got the accept/reject popup that ops and B2C jobs get — and the wave
+        // timed out. Raise the same full-screen alert, flagged as B2B so
+        // GlobalWorkerJobAlert calls the B2B accept endpoint (a B2BJob id 404s
+        // on the B2C booking route).
+        const b2bAlert = {
+          // b2bMatchingService sends { jobId, mongoId, ... }; mongoId is the _id
+          // every /engineers/b2b-jobs/:jobId route expects.
+          id: data.mongoId || data.jobId,
+          _id: data.mongoId || data.jobId,
+          jobId: data.jobId,
+          isB2BJob: true,
+          serviceName: data.service || 'B2B Service',
+          serviceType: data.service || 'B2B Service',
+          customerName: data.customerName || 'B2B Client',
+          location: {
+            address: data.address || data.city || 'Location shared'
+          },
+          status: 'pending_acceptance',
+          expiresInSec: data.timeoutSec,
+          createdAt: new Date().toISOString()
+        };
+        window.dispatchEvent(new CustomEvent('showWorkerJobAlert', { detail: b2bAlert }));
+
         toast(`New B2B offer: ${data.service || data.jobId}`, {
           duration: 5000,
           onClick: () => navigate('/engineer/b2b-jobs')

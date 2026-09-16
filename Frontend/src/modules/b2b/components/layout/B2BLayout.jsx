@@ -117,7 +117,13 @@ const B2BLayout = () => {
     navigate('/b2b/login');
   };
 
-  const visibleNavItems = navItems;
+  const isOnboardingDone = companyData?.lifecycleStatus === 'active' || (companyData?.status === 'active' && companyData?.onboardingStatus === 'completed');
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.onboardingOnly && isOnboardingDone && !location.pathname.startsWith('/b2b/onboarding')) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="flex h-screen bg-[#F0FDFA] overflow-hidden font-sans">
@@ -218,14 +224,23 @@ const B2BLayout = () => {
                 <PrefetchLink
                   key={item.name}
                   to={item.path}
-                  className={`flex items-center px-4 py-2.5 rounded-xl transition-all group ${
+                  className={`flex items-center justify-between px-4 py-2.5 rounded-xl transition-all group ${
                     isActive 
                       ? 'bg-[#10AFA5] text-white shadow-md shadow-[#10AFA5]/10' 
                       : 'text-gray-600 hover:bg-[#F0FDFA] hover:text-[#10AFA5]'
                   }`}
                 >
-                  <item.icon className={`w-5 h-5 mr-3 transition-colors ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-[#10AFA5]'}`} />
-                  <span className="text-sm font-semibold">{item.name}</span>
+                  <div className="flex items-center min-w-0">
+                    <item.icon className={`w-5 h-5 mr-3 shrink-0 transition-colors ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-[#10AFA5]'}`} />
+                    <span className="text-sm font-semibold truncate">{item.name}</span>
+                  </div>
+                  {item.onboardingOnly && !isOnboardingDone && (
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ml-1.5 shrink-0 ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      Pending
+                    </span>
+                  )}
                 </PrefetchLink>
               );
             })}

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../../middleware/authMiddleware');
 const { isVendor } = require('../../middleware/roleMiddleware');
+const { authenticateOnboarding, optionalOnboardingAuth } = require('../../middleware/onboardingAuthMiddleware');
+const { registrationLimiter } = require('../../middleware/rateLimiter');
 const { 
   getConfig, 
   updateBusinessDetails, 
@@ -32,22 +34,40 @@ router.post('/upload', uploadGenericFile, handleMulterError, async (req, res) =>
   }
 });
 
+// Public: read-only registration form configuration (no vendor data).
 router.get('/registration-config', getConfig);
-router.patch('/onboarding/business', updateBusinessDetails);
-router.patch('/onboarding/models', updateModels);
-router.patch('/onboarding/one-time-capability', updateOneTimeCapability);
-router.patch('/onboarding/project-capability', updateProjectCapability);
-router.post('/onboarding/portfolio', addPortfolio);
-router.get('/onboarding/document-requirements', getDocumentRequirements);
-router.get('/onboarding/kyc-snapshot', getKycSnapshot);
-router.post('/onboarding/sync-kyc', syncKycCompliance);
-// POST /onboarding/documents can be handled by /upload and updating the VendorDocument schema (not fully implemented in controller yet, but we'll leave placeholder)
-router.post('/onboarding/submit', submitApplication);
 
-router.post('/verify-kyc', verifyKyc);
-router.post('/verify-bank-penny-drop', verifyBankPennyDrop);
-router.post('/complete-induction', completeInduction);
-router.get('/onboarding/status', getOnboardingStatus);
+// Public: creates the Vendor record — there is no identity to authenticate yet.
+// Rate-limited to blunt automated vendor-record creation.
+router.post('/onboarding/submit', registrationLimiter, optionalOnboardingAuth, submitApplication);
+
+/**
+ * Onboarding-scoped endpoints.
+ *
+ * These act on an existing, not-yet-approved vendor, so a normal vendor session
+ * is not available (`authenticate` rejects unapproved vendors). They are guarded
+ * by `authenticateOnboarding`, which resolves the vendor from a session or a
+ * signed onboarding token instead of a body-supplied vendorId.
+ */
+router.get('/onboarding/status', authenticateOnboarding, getOnboardingStatus);
+router.get('/onboarding/document-requirements', authenticateOnboarding, getDocumentRequirements);
+router.get('/onboarding/kyc-snapshot', authenticateOnboarding, getKycSnapshot);
+router.post('/onboarding/sync-kyc', authenticateOnboarding, syncKycCompliance);
+router.post('/verify-kyc', authenticateOnboarding, verifyKyc);
+router.post('/verify-bank-penny-drop', authenticateOnboarding, verifyBankPennyDrop);
+router.post('/complete-induction', authenticateOnboarding, completeInduction);
+
+/**
+ * Step-wise wizard endpoints — no current frontend caller (verified by grep
+ * across Frontend/src). Kept for API compatibility but require a full vendor
+ * session, since nothing legitimately calls them pre-auth.
+ */
+router.patch('/onboarding/business', authenticate, isVendor, updateBusinessDetails);
+router.patch('/onboarding/models', authenticate, isVendor, updateModels);
+router.patch('/onboarding/one-time-capability', authenticate, isVendor, updateOneTimeCapability);
+router.patch('/onboarding/project-capability', authenticate, isVendor, updateProjectCapability);
+router.post('/onboarding/portfolio', authenticate, isVendor, addPortfolio);
+
 router.post('/activate-account', authenticate, isVendor, activateAccount);
 
 module.exports = router;

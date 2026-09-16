@@ -111,13 +111,43 @@ if (process.env.FRONTEND_URL) {
   });
 }
 
+/**
+ * Vercel preview allowance.
+ *
+ * The previous test was `origin.includes('.vercel.app')`, which with
+ * `credentials: true` let ANY Vercel deployment — including one an attacker
+ * creates in seconds — make credentialed cross-origin requests against
+ * production. The substring test also matched hosts like
+ * `https://evil-vercel.app.attacker.com`.
+ *
+ * Now: parse the URL, require https, require the hostname to genuinely END with
+ * `.vercel.app`, and require it to match this project's preview prefix.
+ * Set VERCEL_PREVIEW_PREFIX to your project slug (e.g. "wbi-frontend"); leave
+ * VERCEL_PREVIEW_PREFIX empty to disable preview origins entirely.
+ */
+const VERCEL_PREVIEW_PREFIX = (process.env.VERCEL_PREVIEW_PREFIX || '').trim();
+
+const isAllowedVercelPreview = (origin) => {
+  if (!VERCEL_PREVIEW_PREFIX) return false;
+  let url;
+  try {
+    url = new URL(origin);
+  } catch (_) {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  const host = url.hostname.toLowerCase();
+  if (!host.endsWith('.vercel.app')) return false;
+  return host.startsWith(`${VERCEL_PREVIEW_PREFIX.toLowerCase()}-`) ||
+         host === `${VERCEL_PREVIEW_PREFIX.toLowerCase()}.vercel.app`;
+};
+
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    // Allow allowedOrigins or any Vercel preview URL for this project
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('.vercel.app')) {
+    if (allowedOrigins.indexOf(origin) !== -1 || isAllowedVercelPreview(origin)) {
       callback(null, true);
     } else {
       console.log('BLOCKED CORS ORIGIN:', origin);
@@ -362,6 +392,9 @@ app.use('/api/vendor/resources', require('./routes/vendor-routes/resourcesOps.ro
 app.use('/api/vendor/quality', require('./routes/vendor-routes/qualityControl.routes'));
 app.use('/api/vendor/finance', require('./routes/vendor-routes/finance.routes'));
 app.use('/api/vendor/global', require('./routes/vendor-routes/globalModules.routes'));
+app.use('/api/vendor/requests', require('./routes/vendor-routes/requests.routes'));
+app.use('/api/vendor/my-jobs', require('./routes/vendor-routes/myJobs.routes'));
+app.use('/api/vendor/engineers', require('./routes/vendor-routes/engineers.routes'));
 
 // Worker routes
 app.use('/api/worker/services', require('./routes/worker-routes/workerServices.routes'));
@@ -411,6 +444,7 @@ app.use('/api/admin', require('./routes/admin-routes/b2bBulkJobAdmin.routes'));
 app.use('/api/admin/b2b-wallets', require('./routes/admin-routes/b2bWalletAdmin.routes'));
 app.use('/api/admin/b2b/invoices', require('./routes/admin-routes/b2bInvoiceAdmin.routes'));
 app.use('/api/admin/b2b/reports', require('./routes/admin-routes/b2bReportAdmin.routes'));
+app.use('/api/admin/b2b/pricing-rules', require('./routes/admin-routes/b2bPricingAdmin.routes'));
 app.use('/api/admin/b2b/jobs', require('./routes/admin-routes/b2bJobEscalation.routes'));
 app.use('/api/admin/b2b/support', require('./routes/admin-routes/b2bSupportAdmin.routes'));
 app.use('/api/admin/vendor-support', require('./routes/admin-routes/adminVendorSupport.routes'));
@@ -604,6 +638,37 @@ app.use((req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  // Malformed ObjectId / bad cast is a client input error, not a server fault.
+  // Returning 500 here misreports the failure and pollutes error monitoring.
+  if (err && err.name === 'CastError') {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid value for '${err.path}'.`,
+      field: err.path
+    });
+  }
+
+  // Mongoose schema validation → 400 with the offending fields.
+  if (err && err.name === 'ValidationError') {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: Object.values(err.errors || {}).map((e) => ({
+        field: e.path,
+        message: e.message
+      }))
+    });
+  }
+
+  // Duplicate key on a unique index → 409, not 500.
+  if (err && err.code === 11000) {
+    return res.status(409).json({
+      success: false,
+      message: 'A record with these details already exists.',
+      fields: Object.keys(err.keyPattern || err.keyValue || {})
+    });
+  }
+
   console.error('Error:', err);
   res.status(err.status || 500).json({
     success: false,
@@ -718,9 +783,17 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
   // Handle unhandled promise rejections
   process.on('unhandledRejection', (err) => {
     console.error('Unhandled Promise Rejection:', err);
-    server.close(() => {
+    // `server` is only assigned once listen() is called. A rejection during
+    // boot (e.g. Redis not yet initialised) would otherwise throw
+    // "Cannot read properties of undefined (reading 'close')" here, masking
+    // the real error with a misleading TypeError.
+    if (server && typeof server.close === 'function') {
+      server.close(() => process.exit(1));
+      // Don't hang forever if connections refuse to drain.
+      setTimeout(() => process.exit(1), 10000).unref();
+    } else {
       process.exit(1);
-    });
+    }
   });
 
   const { registerGracefulShutdown } = require('./infrastructure/gracefulShutdown');

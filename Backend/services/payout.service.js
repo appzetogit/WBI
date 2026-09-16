@@ -1,4 +1,5 @@
 const PayoutRule = require('../models/PayoutRule');
+const { TXN_OPTS } = require('../utils/txnOptions');
 const EscrowLedger = require('../models/EscrowLedger');
 const Wallet = require('../models/Wallet');
 const WalletTransaction = require('../models/WalletTransaction');
@@ -76,7 +77,7 @@ class PayoutService {
 
   async releasePayout(paymentId, adminUserId) {
     const session = await mongoose.startSession();
-    session.startTransaction();
+    session.startTransaction(TXN_OPTS);
 
     try {
       const escrow = await EscrowLedger.findOne({ paymentId }).session(session);

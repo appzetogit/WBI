@@ -96,27 +96,76 @@ const b2bJobSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  status: { 
+  assignmentType: {
+    type: String,
+    enum: ['freelancer', 'vendor_engineer'],
+    default: 'freelancer'
+  },
+  assignedVendorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor',
+    default: null
+  },
+  assignedVendorName: {
+    type: String,
+    default: null
+  },
+  /**
+   * Vendors currently holding this job as a pending request in their
+   * Requests inbox — set when the matching engine finds a vendor with a
+   * skilled engineer nearby, before any vendor has accepted. A vendor is
+   * removed from this list once it accepts (assignedVendorId is then set)
+   * or explicitly rejects.
+   */
+  notifiedVendors: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Vendor'
+  }],
+  vendorRejections: [{
+    vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
+    reason: { type: String, default: '' },
+    rejectedAt: { type: Date, default: Date.now }
+  }],
+  status: {
     type: String, 
     enum: [
       'pending',
       'pending_wallet',
       'searching_engineer',
       'assigned',
+      'accepted',
+      'travelling',
+      'arrived',
       'in_progress',
+      'completion_submitted',
+      'admin_review',
       'on_hold',
       'completed',
       'cancelled',
       'rejected',
       'escalated',
       'failed',
-      'closed'
+      'closed',
+      'revision_required'
     ], 
     default: 'pending' 
   },
   trackingStatus: {
     type: String,
-    enum: ['assigned', 'accepted', 'en_route', 'reached_location', 'work_started', 'completed', 'cancelled', 'failed'],
+    enum: [
+      'assigned',
+      'accepted',
+      'en_route',
+      'reached_location',
+      'work_started',
+      'completion_submitted',
+      'admin_review',
+      'completed',
+      'cancelled',
+      'failed',
+      'rejected',
+      'revision_required'
+    ],
     default: 'assigned'
   },
   eta: {
@@ -127,13 +176,62 @@ const b2bJobSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  acceptedAt: {
+    type: Date,
+    default: null
+  },
+  travelStartedAt: {
+    type: Date,
+    default: null
+  },
+  arrivedAt: {
+    type: Date,
+    default: null
+  },
   startedAt: {
+    type: Date,
+    default: null
+  },
+  completionSubmittedAt: {
     type: Date,
     default: null
   },
   completedAt: {
     type: Date,
     default: null
+  },
+  rejectionReason: {
+    type: String,
+    default: null
+  },
+  rejectionRemarks: {
+    type: String,
+    default: null
+  },
+  rejectedAt: {
+    type: Date,
+    default: null
+  },
+  rejectedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Engineer',
+    default: null
+  },
+  travelStartLocation: {
+    lat: Number,
+    lng: Number
+  },
+  arrivalLocation: {
+    lat: Number,
+    lng: Number
+  },
+  startLocation: {
+    lat: Number,
+    lng: Number
+  },
+  completionLocation: {
+    lat: Number,
+    lng: Number
   },
   charge: { 
     type: Number, 
@@ -165,6 +263,14 @@ const b2bJobSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  startOtpAttempts: {
+    type: Number,
+    default: 0
+  },
+  startOtpLastAttemptAt: {
+    type: Date,
+    default: null
+  },
   endOtp: {
     type: String,
     default: null
@@ -173,6 +279,40 @@ const b2bJobSchema = new mongoose.Schema({
     type: String
   }],
   afterPhotos: [{
+    type: String
+  }],
+  workNotes: {
+    type: String,
+    default: ''
+  },
+  partsReplaced: {
+    type: String,
+    default: ''
+  },
+  checklist: [{
+    itemId: String,
+    label: String,
+    checked: { type: Boolean, default: false },
+    checkedAt: Date
+  }],
+  customerSignature: {
+    type: String,
+    default: null
+  },
+  customerSignoffMethod: {
+    type: String,
+    enum: ['signature', 'otp', 'verbal', 'none'],
+    default: 'none'
+  },
+  customerUnavailableAt: {
+    type: Date,
+    default: null
+  },
+  customerUnavailableRemarks: {
+    type: String,
+    default: null
+  },
+  customerUnavailablePhotos: [{
     type: String
   }],
   // Progressive matching wave state (km radii: 5→10→20→50→100)
@@ -264,7 +404,7 @@ const b2bJobSchema = new mongoose.Schema({
   /** Engineer / vendor payout after escrow release */
   payoutStatus: {
     type: String,
-    enum: ['none', 'pending_release', 'released', 'refunded'],
+    enum: ['none', 'pending_review', 'held', 'approved', 'released', 'refunded', 'disputed'],
     default: 'none'
   },
   invoiceId: {
@@ -283,6 +423,8 @@ const b2bJobSchema = new mongoose.Schema({
 
 
 b2bJobSchema.index({ companyId: 1, date: 1 });
+// Company-scoped time-window analytics (heatmap, SLA, repeat calls).
+b2bJobSchema.index({ companyId: 1, createdAt: -1 });
 b2bJobSchema.index({ assignedTo: 1, preferredDate: 1 });
 b2bJobSchema.index({ assignedTo: 1, status: 1 });
 

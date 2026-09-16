@@ -169,6 +169,98 @@ const BulkJobReview = () => {
           ))}
         </div>
 
+        {/* Transparent cost breakdown — only when the pricing engine produced one.
+            Legacy flat-rate batches keep the summary grid above and nothing here. */}
+        {batch.pricingBreakdown?.totals && (
+          <div className="rounded-2xl border border-gray-100 overflow-hidden">
+            <div className="px-4 py-3 bg-gray-50/60 flex items-center justify-between">
+              <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">
+                Cost Breakdown
+              </span>
+              <span className="text-[10px] text-gray-400 font-semibold">
+                {batch.pricingBreakdown.currency || 'INR'} · {batch.validRows} billable job
+                {batch.validRows === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            {/* Per-service lines: a mixed-service batch bills at real rates, not a blended one */}
+            {Array.isArray(batch.pricingBreakdown.lines) && batch.pricingBreakdown.lines.length > 1 && (
+              <div className="overflow-x-auto border-b border-gray-50">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">
+                      <th className="text-left px-4 py-2 font-bold">Service</th>
+                      <th className="text-left px-4 py-2 font-bold">Region</th>
+                      <th className="text-right px-4 py-2 font-bold">Jobs</th>
+                      <th className="text-right px-4 py-2 font-bold">Per Job</th>
+                      <th className="text-right px-4 py-2 font-bold">Line Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batch.pricingBreakdown.lines.map((line, i) => (
+                      <tr key={i} className="border-t border-gray-50 text-gray-600 font-semibold">
+                        <td className="px-4 py-2">{line.service || 'Unspecified'}</td>
+                        <td className="px-4 py-2 text-gray-400">
+                          {line.city || line.pincode || 'Any'}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">{line.count}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">
+                          ₹{Number(line.perJob?.total || 0).toLocaleString('en-IN')}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-800 font-bold">
+                          ₹{Number(line.lineTotal || 0).toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Totals ladder */}
+            <div className="px-4 py-3 space-y-1.5 text-xs font-semibold">
+              {[
+                ['Base Amount', batch.pricingBreakdown.totals.subtotal],
+                ['Service Charges', batch.pricingBreakdown.totals.serviceCharges],
+                ['Geographic Charges', batch.pricingBreakdown.totals.geographicCharges],
+                ['Additional Charges', batch.pricingBreakdown.totals.additionalCharges]
+              ]
+                .filter(([, v]) => Number(v) > 0)
+                .map(([label, value]) => (
+                  <div key={label} className="flex justify-between text-gray-500">
+                    <span>{label}</span>
+                    <span className="tabular-nums">₹{Number(value).toLocaleString('en-IN')}</span>
+                  </div>
+                ))}
+
+              {Number(batch.pricingBreakdown.totals.discount) > 0 && (
+                <div className="flex justify-between text-green-600">
+                  <span>Volume Discount</span>
+                  <span className="tabular-nums">
+                    −₹{Number(batch.pricingBreakdown.totals.discount).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+
+              {Number(batch.pricingBreakdown.totals.tax) > 0 && (
+                <div className="flex justify-between text-gray-500">
+                  <span>Tax</span>
+                  <span className="tabular-nums">
+                    ₹{Number(batch.pricingBreakdown.totals.tax).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-between pt-2 mt-1 border-t border-gray-100 text-gray-900 font-black text-sm">
+                <span>Total Payable</span>
+                <span className="tabular-nums">
+                  ₹{Number(batch.pricingBreakdown.totals.grandTotal).toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Banner alerts depending on valid status */}
         {batch.invalidRows > 0 ? (
           <div className="bg-red-50/50 border border-red-100 rounded-2xl p-4 flex gap-3 text-red-500 items-start text-xs font-semibold leading-relaxed">

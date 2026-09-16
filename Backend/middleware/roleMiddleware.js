@@ -69,22 +69,32 @@ const isAdminOrVendor = (req, res, next) => {
  */
 const isSuperAdmin = async (req, res, next) => {
   try {
-    /* if (req.userRole !== USER_ROLES.ADMIN && req.userRole !== 'super_admin') {
+    const role = String(req.userRole || '').toLowerCase();
+    if (role !== 'admin' && role !== 'super_admin') {
       return res.status(403).json({
         success: false,
         message: 'Access denied. Admin role required.'
       });
     }
 
+    // The token only proves "an admin"; super_admin is a database attribute,
+    // so it must be read from the record rather than trusted from the claim.
     const Admin = require('../models/Admin');
-    const admin = await Admin.findById(req.user.id);
+    const admin = await Admin.findById(req.user?.id || req.userId).select('role isActive').lean();
 
-    if (!admin || admin.role !== 'super_admin') {
+    if (!admin || admin.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin account not found or inactive.'
+      });
+    }
+
+    if (admin.role !== 'super_admin') {
       return res.status(403).json({
         success: false,
         message: 'Access denied. Super Admin role required.'
       });
-    } */
+    }
 
     next();
   } catch (error) {

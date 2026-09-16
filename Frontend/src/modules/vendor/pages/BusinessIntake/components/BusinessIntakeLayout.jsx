@@ -10,12 +10,12 @@ import IntakeTabs from './IntakeTabs';
 import RightPanel from './RightPanel';
 import ProposalBuilderHost from './ProposalBuilderHost';
 import { useVendorConfig } from '../../../context/VendorConfigContext';
-import useBusinessIntakeCounts from '../../../hooks/useBusinessIntakeCounts';
+import { useVendorCounts } from '../../../context/VendorCountsContext';
 
 const BusinessIntakeLayoutInner = () => {
   const { vendorProfile, approvedServices = [] } = useVendorConfig() || {};
   const { triggerRefresh } = useBusinessIntake();
-  const { refresh: refreshCounts } = useBusinessIntakeCounts();
+  const { businessIntake: { refresh: refreshCounts } } = useVendorCounts();
 
   const handleRefresh = () => {
     triggerRefresh();

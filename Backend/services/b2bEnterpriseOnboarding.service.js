@@ -110,6 +110,152 @@ function stepFieldMap() {
   };
 }
 
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^[6-9]\d{9}$/;
+const PINCODE_RE = /^\d{6}$/;
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+function validateStepPayload(step, payload, onboarding) {
+  const errors = [];
+  const data = payload || {};
+
+  switch (step) {
+    case 1: {
+      if (!data.legalName?.trim()) errors.push('Legal company name is required');
+      if (!data.gstNumber?.trim()) errors.push('GSTIN is required');
+      else if (!GSTIN_RE.test(String(data.gstNumber).trim().toUpperCase())) errors.push('Invalid GSTIN format');
+      if (!data.panNumber?.trim()) errors.push('PAN is required');
+      else if (!PAN_RE.test(String(data.panNumber).trim().toUpperCase())) errors.push('Invalid PAN format');
+      break;
+    }
+    case 2: {
+      const addr = data;
+      if (!addr.registered?.trim() && !addr.registeredAddress?.trim()) errors.push('Registered address is required');
+      break;
+    }
+    case 3: {
+      if (!data.name?.trim()) errors.push('Contact name is required');
+      if (!data.email?.trim()) errors.push('Email is required');
+      else if (!EMAIL_RE.test(data.email)) errors.push('Invalid email format');
+      if (!data.phone?.trim() && !data.mobile?.trim()) errors.push('Phone number is required');
+      else {
+        const ph = String(data.phone || data.mobile || '').replace(/\D/g, '').slice(-10);
+        if (ph && !PHONE_RE.test(ph)) errors.push('Invalid phone number format');
+      }
+      break;
+    }
+    case 4: {
+      if (!data.name?.trim()) errors.push('Finance contact name is required');
+      if (!data.email?.trim()) errors.push('Finance contact email is required');
+      else if (!EMAIL_RE.test(data.email)) errors.push('Invalid email format');
+      break;
+    }
+    case 5: {
+      const selected = data.selectedServices || [];
+      if (!selected.length) errors.push('At least one service must be selected');
+      break;
+    }
+    case 6: {
+      // Coverage - optional but check if branches exist
+      break;
+    }
+    case 7: {
+      if (!data.accountNumber?.trim() && !data.accountHolderName?.trim()) {
+        errors.push('Bank account details are required');
+      }
+      if (data.ifsc && !IFSC_RE.test(String(data.ifsc).trim().toUpperCase())) {
+        errors.push('Invalid IFSC code format');
+      }
+      break;
+    }
+    case 8: // Credit - optional
+    case 9: // Payment rules - optional
+    case 10: // SLA - optional
+    case 11: // Approvals - optional
+    case 12: // Bulk projects - optional
+    case 13: // Compliance - optional
+      break;
+    case 14: // KYC - validated by verification flags
+    case 15: // Review - read-only
+    case 16: // Submit - handled separately
+      break;
+  }
+  return errors;
+}
+
+function computeStepCompletion(onboarding) {
+  const completion = new Map();
+  const o = onboarding;
+
+  // Step 1: Company Info
+  const ci = o.companyInfo || {};
+  const s1Complete = !!(ci.legalName?.trim() && ci.gstNumber?.trim() && ci.panNumber?.trim());
+  completion.set('1', { completed: s1Complete, completedAt: s1Complete ? (o.updatedAt || new Date()) : null, validationErrors: s1Complete ? [] : ['Incomplete'] });
+
+  // Step 2: Addresses
+  const addr = o.addresses || {};
+  const s2Complete = !!(addr.registered?.trim() || addr.registeredAddress?.trim());
+  completion.set('2', { completed: s2Complete, completedAt: s2Complete ? (o.updatedAt || new Date()) : null, validationErrors: s2Complete ? [] : ['Incomplete'] });
+
+  // Step 3: Primary Contact
+  const pc = o.primaryContact || {};
+  const s3Complete = !!(pc.name?.trim() && (pc.email?.trim() || pc.phone?.trim()));
+  completion.set('3', { completed: s3Complete, completedAt: s3Complete ? (o.updatedAt || new Date()) : null, validationErrors: s3Complete ? [] : ['Incomplete'] });
+
+  // Step 4: Finance Contact
+  const fc = o.financeContact || {};
+  const s4Complete = !!(fc.name?.trim() && fc.email?.trim());
+  completion.set('4', { completed: s4Complete, completedAt: s4Complete ? (o.updatedAt || new Date()) : null, validationErrors: s4Complete ? [] : ['Incomplete'] });
+
+  // Step 5: Services
+  const sr = o.serviceRequirements || {};
+  const s5Complete = (sr.selectedServices || []).length > 0;
+  completion.set('5', { completed: s5Complete, completedAt: s5Complete ? (o.updatedAt || new Date()) : null, validationErrors: s5Complete ? [] : ['Incomplete'] });
+
+  // Step 6: Coverage - optional, always complete if visited
+  const oc = o.operationalCoverage || {};
+  const s6Complete = !!(oc.regions?.trim() || (oc.branches && oc.branches.length > 0));
+  completion.set('6', { completed: s6Complete, completedAt: s6Complete ? (o.updatedAt || new Date()) : null, validationErrors: [] });
+
+  // Step 7: Banking
+  const bk = o.banking || {};
+  const s7Complete = !!(bk.accountNumber || bk.accountHolderName);
+  completion.set('7', { completed: s7Complete, completedAt: s7Complete ? (o.updatedAt || new Date()) : null, validationErrors: s7Complete ? [] : ['Incomplete'] });
+
+  // Steps 8-13: Optional config steps - mark complete if any data exists
+  const optionalSteps = [
+    { step: '8', field: o.creditProfile },
+    { step: '9', field: o.escrowPaymentRules },
+    { step: '10', field: o.slaConfig },
+    { step: '11', field: o.approvalHierarchy },
+    { step: '12', field: o.bulkProjectSettings },
+    { step: '13', field: o.compliance }
+  ];
+  optionalSteps.forEach(({ step, field }) => {
+    const data = field || {};
+    const hasData = Object.keys(data).some(k => k !== '_id' && data[k] != null && data[k] !== '' && data[k] !== false);
+    completion.set(step, { completed: hasData, completedAt: hasData ? (o.updatedAt || new Date()) : null, validationErrors: [] });
+  });
+
+  // Step 14: KYC & Docs
+  const k = o.kycFlags || {};
+  const kycChecks = ['gst', 'pan', 'bank'];
+  const kycPassed = kycChecks.filter(c => k[c]?.status === 'verified').length;
+  const s14Complete = kycPassed >= 2; // At least GST+PAN verified
+  completion.set('14', { completed: s14Complete, completedAt: s14Complete ? (o.updatedAt || new Date()) : null, validationErrors: s14Complete ? [] : ['KYC verification incomplete'] });
+
+  // Step 15: Review - always accessible
+  completion.set('15', { completed: true, completedAt: o.updatedAt || new Date(), validationErrors: [] });
+
+  // Step 16: Submit
+  const s16Complete = !!o.submittedAt;
+  completion.set('16', { completed: s16Complete, completedAt: o.submittedAt || null, validationErrors: [] });
+
+  return completion;
+}
+
 async function resolveRequiredDocuments(onboarding, config) {
   const baseKeys = (config.documentTemplates || [])
     .filter((d) => d.required)
@@ -268,7 +414,13 @@ async function saveOnboardingStep({ companyId, step, payload, actorType = 'b2b',
   const onboarding = await getOrCreateOnboardingForCompany(companyId);
   onboarding[field] = { ...(onboarding[field] || {}), ...payload };
   onboarding.currentStep = Math.max(onboarding.currentStep || 1, step);
-  pushTimeline(onboarding, `step_${step}_saved`, actorType, actorId, { field });
+  
+  // Track step completion and validation
+  const completionMap = computeStepCompletion(onboarding);
+  onboarding.stepCompletion = completionMap;
+  const validationErrors = validateStepPayload(Number(step), onboarding[field], onboarding);
+
+  pushTimeline(onboarding, `step_${step}_saved`, actorType, actorId, { field, validationErrors });
   await onboarding.save();
 
   try {
@@ -278,7 +430,7 @@ async function saveOnboardingStep({ companyId, step, payload, actorType = 'b2b',
     console.error('[onboarding] partial sync failed:', e.message);
   }
 
-  return onboarding;
+  return { onboarding, validationErrors };
 }
 
 async function getOnboardingState(companyId) {
@@ -287,6 +439,7 @@ async function getOnboardingState(companyId) {
   await resolveRequiredDocuments(onboarding, config);
   await refreshDocumentSummary(companyId, onboarding);
   computeScores(onboarding);
+  onboarding.stepCompletion = computeStepCompletion(onboarding);
   await onboarding.save();
 
   const company = await B2BCompany.findById(companyId).select('-passwordHash').lean();
@@ -316,5 +469,7 @@ module.exports = {
   computeScores,
   pushTimeline,
   createDraftSession,
-  stepFieldMap
+  stepFieldMap,
+  validateStepPayload,
+  computeStepCompletion
 };

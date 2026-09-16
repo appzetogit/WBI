@@ -28,7 +28,9 @@ const RESERVED_VENDOR_SEGMENTS = new Set([
   'wallet',
   'profile',
   'jobs',
-  'workers'
+  'workers',
+  'requests',
+  'my-jobs'
 ]);
 
 const ServiceSlugRoute = ({ children }) => {
@@ -127,6 +129,9 @@ const DynamicVendorLayout = lazyLoad(() => import('../components/layout/DynamicV
 const VendorHomeRedirect = lazyLoad(() => import('../components/VendorHomeRedirect'));
 const LegacyDynamicRedirect = lazyLoad(() => import('../components/LegacyDynamicRedirect'));
 const DynamicDashboard = lazyLoad(() => import('../pages/Dashboard/DynamicDashboard'));
+const Requests = lazyLoad(() => import('../pages/Requests'));
+const MyJobs = lazyLoad(() => import('../pages/MyJobs'));
+const Engineers = lazyLoad(() => import('../pages/Engineers'));
 const BusinessIntake = lazyLoad(() => import('../pages/BusinessIntake/BusinessIntake'));
 const ClientsContracts = lazyLoad(() => import('../pages/ClientsContracts/ClientsContracts'));
 const ProjectOperations = lazyLoad(() => import('../pages/ProjectOperations/ProjectOperations'));
@@ -170,6 +175,10 @@ const VendorRoutes = () => {
             {/* Digital Solution specific routes (Main Vendor Layout now) */}
             <Route element={<ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute>}>
               <Route path="digital-solution/dashboard" element={<VendorHomeRedirect suffix="dashboard" />} />
+              <Route path="digital-solution/requests" element={<AnimatedPage><Requests /></AnimatedPage>} />
+              <Route path="digital-solution/requests/*" element={<AnimatedPage><Requests /></AnimatedPage>} />
+              <Route path="digital-solution/my-jobs" element={<AnimatedPage><MyJobs /></AnimatedPage>} />
+              <Route path="digital-solution/my-jobs/*" element={<AnimatedPage><MyJobs /></AnimatedPage>} />
               <Route path="digital-solution/my-profile" element={<AnimatedPage><DigitalProfile /></AnimatedPage>} />
               <Route path="digital-solution/booking-alerts" element={<AnimatedPage><BookingAlerts /></AnimatedPage>} />
               <Route path="digital-solution/booking-alert/:id" element={<AnimatedPage><BookingAlert /></AnimatedPage>} />
@@ -178,7 +187,7 @@ const VendorRoutes = () => {
               <Route path="digital-solution/booking/:id/billing" element={<AnimatedPage><BillingPage /></AnimatedPage>} />
               <Route path="digital-solution/booking/:id/timeline" element={<AnimatedPage><BookingTimeline /></AnimatedPage>} />
               <Route path="digital-solution/jobs" element={<AnimatedPage><ActiveJobs /></AnimatedPage>} />
-              <Route path="digital-solution/engineers" element={<AnimatedPage><DigitalTeamEngineers /></AnimatedPage>} />
+              <Route path="digital-solution/engineers" element={<AnimatedPage><Engineers /></AnimatedPage>} />
               <Route path="digital-solution/services" element={<AnimatedPage><DigitalServices /></AnimatedPage>} />
               <Route path="digital-solution/workers" element={<AnimatedPage><WorkersList /></AnimatedPage>} />
               <Route path="digital-solution/projects" element={<AnimatedPage><Projects /></AnimatedPage>} />
@@ -218,13 +227,15 @@ const VendorRoutes = () => {
             {/* Flat legacy aliases — MUST be before :serviceSlug or "dashboard" is swallowed as a slug */}
             <Route path="dashboard" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />
             <Route path="projects" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="projects" /></ProtectedRoute>} />
-            <Route path="engineers" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="workforce" /></ProtectedRoute>} />
+            <Route path="engineers" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="engineers" /></ProtectedRoute>} />
             <Route path="work-orders" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="projects" /></ProtectedRoute>} />
             <Route path="earnings" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="finance" /></ProtectedRoute>} />
             <Route path="settings" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="settings" /></ProtectedRoute>} />
             <Route path="notifications" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="notifications" /></ProtectedRoute>} />
             <Route path="reviews" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="performance" /></ProtectedRoute>} />
             <Route path="support" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="support" /></ProtectedRoute>} />
+            <Route path="requests" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="requests" /></ProtectedRoute>} />
+            <Route path="my-jobs" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="my-jobs" /></ProtectedRoute>} />
 
             {/* ── Service-specific portal: /vendor/:serviceSlug/... ─────── */}
             <Route
@@ -238,19 +249,30 @@ const VendorRoutes = () => {
               }
             >
               <Route index element={<Navigate to="dashboard" replace />} />
+              {/* 5 Core Pillars */}
               <Route path="dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
-              <Route path="business-intake/*" element={<AnimatedPage><BusinessIntake /></AnimatedPage>} />
-              <Route path="clients/*" element={<AnimatedPage><ClientsContracts /></AnimatedPage>} />
-              <Route path="projects/*" element={<AnimatedPage><ProjectOperations /></AnimatedPage>} />
-              <Route path="workforce/*" element={<AnimatedPage><Workforce /></AnimatedPage>} />
-              <Route path="resources/*" element={<AnimatedPage><Resources /></AnimatedPage>} />
-              <Route path="quality/*" element={<AnimatedPage><QualityControl /></AnimatedPage>} />
+              <Route path="my-jobs/*" element={<AnimatedPage><MyJobs /></AnimatedPage>} />
+              <Route path="engineers/*" element={<AnimatedPage><Engineers /></AnimatedPage>} />
               <Route path="finance/*" element={<AnimatedPage><Finance /></AnimatedPage>} />
-              <Route path="performance/*" element={<AnimatedPage><Performance /></AnimatedPage>} />
-              <Route path="compliance/*" element={<AnimatedPage><Compliance /></AnimatedPage>} />
               <Route path="notifications/*" element={<AnimatedPage><Notifications /></AnimatedPage>} />
-              <Route path="support/*" element={<AnimatedPage><Support /></AnimatedPage>} />
+
+              {/* Profile & Settings */}
               <Route path="settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
+              <Route path="profile/*" element={<AnimatedPage><Profile /></AnimatedPage>} />
+
+              {/* Backward compatibility redirects */}
+              <Route path="requests/*" element={<Navigate to="../my-jobs" replace />} />
+              <Route path="business-intake/*" element={<Navigate to="../my-jobs" replace />} />
+              <Route path="clients/*" element={<Navigate to="../my-jobs" replace />} />
+              <Route path="projects/*" element={<Navigate to="../my-jobs" replace />} />
+              <Route path="workforce/*" element={<Navigate to="../engineers" replace />} />
+              <Route path="resources/*" element={<Navigate to="../engineers" replace />} />
+              <Route path="quality/*" element={<Navigate to="../my-jobs" replace />} />
+              <Route path="performance/*" element={<Navigate to="../dashboard" replace />} />
+              <Route path="compliance/*" element={<Navigate to="../dashboard" replace />} />
+              <Route path="support/*" element={<Navigate to="../settings" replace />} />
+              <Route path="wallet/*" element={<Navigate to="../finance/wallet" replace />} />
+              <Route path="earnings/*" element={<Navigate to="../finance/earnings" replace />} />
             </Route>
 
             <Route path="*" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />

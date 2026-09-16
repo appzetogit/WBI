@@ -6,7 +6,7 @@ import {
   FiHome, FiUser, FiUsers, FiBriefcase, FiFolder, FiClipboard, 
   FiMapPin, FiGlobe, FiFileText, FiCreditCard, FiDollarSign, 
   FiBarChart2, FiBell, FiStar, FiHelpCircle, FiSettings, 
-  FiMenu, FiSearch, FiMessageSquare, FiChevronDown, FiLogOut, FiExternalLink, FiCheckCircle, FiShield, FiGrid
+  FiMenu, FiSearch, FiMessageSquare, FiChevronDown, FiLogOut, FiExternalLink, FiCheckCircle, FiShield, FiGrid, FiInbox
 } from 'react-icons/fi';
 import Logo from '../../../../components/common/Logo';
 import { logout } from '../../services/authService';
@@ -15,6 +15,8 @@ import GlobalBookingAlert from '../common/GlobalBookingAlert';
 
 const navItems = [
   { name: 'Dashboard', path: '/vendor', icon: FiHome },
+  { name: 'Requests', path: '/vendor/digital-solution/requests', icon: FiInbox },
+  { name: 'My Jobs', path: '/vendor/digital-solution/my-jobs', icon: FiBriefcase },
   { name: 'My Profile', path: '/vendor/digital-solution/my-profile', icon: FiUser },
   { name: 'Team & Engineers', path: '/vendor/digital-solution/engineers', icon: FiUsers },
   { name: 'Services', path: '/vendor/digital-solution/services', icon: FiBriefcase },

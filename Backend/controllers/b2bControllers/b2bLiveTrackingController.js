@@ -1,10 +1,44 @@
 const mongoose = require('mongoose');
+const axios = require('axios');
 const B2BCompany = require('../../models/B2BCompany');
 const B2BJob = require('../../models/B2BJob');
 const Engineer = require('../../models/Engineer');
 const EngineerLocationSession = require('../../models/EngineerLocationSession');
 const EngineerAssignment = require('../../models/EngineerAssignment');
 const JobStatusLog = require('../../models/JobStatusLog');
+
+// B2BJob's real lifecycle never passes through a status literally named
+// 'assigned' — it goes accepted -> travelling -> arrived -> in_progress.
+// The "current job" lookups below previously matched only
+// ['assigned', 'in_progress'], so an engineer who had accepted, was
+// travelling, or had arrived showed no current job on the live map at all.
+const ACTIVE_JOB_STATUSES = ['accepted', 'travelling', 'arrived', 'in_progress'];
+
+// Real road-network routing (OSRM). Uses a self-hosted instance when
+// OSRM_BASE_URL is configured, otherwise the public demo server — no API
+// key required. Falls back to straight-line interpolation only if the
+// routing service is unreachable, so the map never breaks.
+const OSRM_BASE_URL = process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+
+async function fetchRoadRoute(startLat, startLng, endLat, endLng) {
+  const url = `${OSRM_BASE_URL}/route/v1/driving/${startLng},${startLat};${endLng},${endLat}`;
+  const { data } = await axios.get(url, {
+    params: { overview: 'full', geometries: 'geojson' },
+    timeout: 6000
+  });
+
+  const route = data?.routes?.[0];
+  if (!route || !route.geometry?.coordinates?.length) {
+    throw new Error('OSRM returned no route');
+  }
+
+  return {
+    path: route.geometry.coordinates.map(([lng, lat]) => ({ lat, lng })),
+    distanceKm: Number((route.distance / 1000).toFixed(2)),
+    etaMins: Math.ceil(route.duration / 60),
+    source: 'osrm'
+  };
+}
 
 // Helper to calculate Haversine distance
 const calculateHaversineDistance = (lat1, lon1, lat2, lon2) => {
@@ -97,11 +131,21 @@ exports.getSummary = async (req, res) => {
     const sessions = await EngineerLocationSession.find({
       engineerId: { $in: engineerIds }
     }).lean();
+    const sessionByEngineer = new Map(sessions.map((s) => [s.engineerId.toString(), s]));
 
     let onDutyCount = 0;
     let enRouteCount = 0;
     let atLocationCount = 0;
     let offlineCount = 0;
+
+    // Fallback for engineers who are logged in / available but have not yet
+    // started a tracked job today (no session row exists for them yet) —
+    // matches the per-engineer fallback in getEngineersList so the summary
+    // cards and the list never disagree.
+    const unrecordedIds = engineerIds.filter((id) => !sessionByEngineer.has(id.toString()));
+    const onlineNoSession = unrecordedIds.length
+      ? await Engineer.countDocuments({ _id: { $in: unrecordedIds }, status: { $in: ['ONLINE', 'active'] } })
+      : 0;
 
     sessions.forEach(sess => {
       if (sess.isOnline) {
@@ -113,11 +157,8 @@ exports.getSummary = async (req, res) => {
       }
     });
 
-    // In case some engineers don't have location sessions yet, consider them offline
-    const totalEngineers = engineerIds.length;
-    const recordedEngineers = sessions.length;
-    const unrecordedCount = Math.max(0, totalEngineers - recordedEngineers);
-    offlineCount += unrecordedCount;
+    onDutyCount += onlineNoSession;
+    offlineCount += Math.max(0, unrecordedIds.length - onlineNoSession);
 
     res.status(200).json({
       success: true,
@@ -187,7 +228,7 @@ exports.getEngineersList = async (req, res) => {
     // Fetch active B2B job for each engineer
     const activeJobs = await B2BJob.find({
       assignedTo: { $in: engineerIds },
-      status: { $in: ['assigned', 'in_progress'] }
+      status: { $in: ACTIVE_JOB_STATUSES }
     }).lean();
 
     const jobsMap = {};
@@ -299,7 +340,7 @@ exports.getEngineerDetails = async (req, res) => {
     const session = await EngineerLocationSession.findOne({ engineerId }).lean();
     const currentJob = await B2BJob.findOne({
       assignedTo: engineerId,
-      status: { $in: ['assigned', 'in_progress'] }
+      status: { $in: ACTIVE_JOB_STATUSES }
     }).lean();
 
     // Count today's jobs for engineer
@@ -410,10 +451,11 @@ exports.getEngineerTimeline = async (req, res) => {
       }
     }
 
-    // Find current active job
+    // Find current or most recent job (active statuses plus completed, so the
+    // timeline stays viewable right after a job wraps up)
     const activeJob = await B2BJob.findOne({
       assignedTo: engineerId,
-      status: { $in: ['assigned', 'in_progress', 'completed'] }
+      status: { $in: [...ACTIVE_JOB_STATUSES, 'completed'] }
     })
     .sort({ updatedAt: -1 })
     .lean();
@@ -471,19 +513,23 @@ exports.getJobRoute = async (req, res) => {
     const endLat = job.coordinates.coordinates[1];
     const endLng = job.coordinates.coordinates[0];
 
-    const distance = calculateHaversineDistance(startLat, startLng, endLat, endLng);
-    const eta = estimateETA(distance);
-
-    // Dynamic routing fallback interpolation
-    const routePath = interpolateRoute(startLat, startLng, endLat, endLng);
+    let route;
+    try {
+      route = await fetchRoadRoute(startLat, startLng, endLat, endLng);
+    } catch (osrmErr) {
+      console.warn('[getJobRoute] OSRM unavailable, falling back to straight-line estimate:', osrmErr.message);
+      const distance = calculateHaversineDistance(startLat, startLng, endLat, endLng);
+      route = {
+        distanceKm: Number(distance.toFixed(2)),
+        etaMins: estimateETA(distance),
+        path: interpolateRoute(startLat, startLng, endLat, endLng),
+        source: 'straight_line_estimate'
+      };
+    }
 
     res.status(200).json({
       success: true,
-      route: {
-        distanceKm: Number(distance.toFixed(2)),
-        etaMins: eta,
-        path: routePath
-      }
+      route
     });
   } catch (error) {
     console.error('Error getting route:', error);
@@ -503,7 +549,7 @@ exports.refreshTracking = async (req, res) => {
     for (const sess of sessions) {
       const activeJob = await B2BJob.findOne({
         assignedTo: sess.engineerId,
-        status: { $in: ['assigned', 'in_progress'] }
+        status: { $in: ACTIVE_JOB_STATUSES }
       });
       
       if (activeJob && activeJob.coordinates && sess.currentLocation) {

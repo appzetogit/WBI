@@ -1,6 +1,10 @@
 const B2BOnboardingConfig = require('../../models/B2BOnboardingConfig');
 const B2BEnterpriseOnboarding = require('../../models/B2BEnterpriseOnboarding');
 const B2BDocument = require('../../models/B2BDocument');
+const B2BBranch = require('../../models/B2BBranch');
+const B2BOrganizationContact = require('../../models/B2BOrganizationContact');
+const B2BVerificationLog = require('../../models/B2BVerificationLog');
+const AuditLog = require('../../models/AuditLog');
 const {
   getOnboardingState,
   saveOnboardingStep,
@@ -48,14 +52,16 @@ const saveStep = async (req, res) => {
   try {
     const step = Number(req.params.step);
     const companyId = req.companyId;
-    const onboarding = await saveOnboardingStep({
+    const result = await saveOnboardingStep({
       companyId,
       step,
       payload: req.body,
       actorType: 'b2b',
       actorId: req.user?.id
     });
-    res.json({ success: true, data: onboarding });
+    const onboarding = result?.onboarding || result;
+    const validationErrors = result?.validationErrors || [];
+    res.json({ success: true, data: onboarding, validationErrors });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
@@ -247,11 +253,6 @@ const getStepsMeta = async (req, res) => {
   res.json({ success: true, data: { steps: stepFieldMap(), totalSteps: 16 } });
 };
 
-const B2BBranch = require('../../models/B2BBranch');
-const B2BOrganizationContact = require('../../models/B2BOrganizationContact');
-const B2BVerificationLog = require('../../models/B2BVerificationLog');
-const AuditLog = require('../../models/AuditLog');
-
 const listBranches = async (req, res) => {
   try {
     const branches = await B2BBranch.find({ companyId: req.companyId, isActive: true }).lean();
@@ -321,6 +322,50 @@ const listContacts = async (req, res) => {
   }
 };
 
+const createOrUpdateContact = async (req, res) => {
+  try {
+    const { contactId, contactType, name, designation, email, mobile, altPhone, isPrimary } = req.body;
+    if (!name?.trim()) return res.status(400).json({ success: false, message: 'Name is required' });
+    let contact;
+    if (contactId) {
+      contact = await B2BOrganizationContact.findOneAndUpdate(
+        { _id: contactId, companyId: req.companyId, deletedAt: null },
+        { contactType, name: name.trim(), designation, email: email?.trim(), mobile: mobile?.trim(), altPhone: altPhone?.trim(), isPrimary: !!isPrimary },
+        { new: true }
+      );
+      if (!contact) return res.status(404).json({ success: false, message: 'Contact not found' });
+    } else {
+      contact = await B2BOrganizationContact.create({
+        companyId: req.companyId,
+        contactType: contactType || 'other',
+        name: name.trim(),
+        designation,
+        email: email?.trim(),
+        mobile: mobile?.trim(),
+        altPhone: altPhone?.trim(),
+        isPrimary: !!isPrimary
+      });
+    }
+    res.json({ success: true, data: contact });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteContact = async (req, res) => {
+  try {
+    const contact = await B2BOrganizationContact.findOneAndUpdate(
+      { _id: req.params.contactId, companyId: req.companyId, deletedAt: null },
+      { deletedAt: new Date() },
+      { new: true }
+    );
+    if (!contact) return res.status(404).json({ success: false, message: 'Contact not found' });
+    res.json({ success: true, data: contact });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 const getActivityTimeline = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -367,5 +412,7 @@ module.exports = {
   updateBranch,
   deleteBranch,
   listContacts,
+  createOrUpdateContact,
+  deleteContact,
   getActivityTimeline
 };

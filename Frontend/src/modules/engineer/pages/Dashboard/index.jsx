@@ -378,6 +378,7 @@ const Dashboard = () => {
                   stats.recentJobs.map((job) => {
                     const isOpsJob = !!job.isOpsJob;
                     const isDigital = !!job.isDigital;
+                    const isB2BJob = !!job.isB2BJob;
                     const jobTitle = isOpsJob
                       ? (job.serviceId?.title || job.serviceId?.name || 'Vendor job')
                       : (job?.serviceId?.name || job?.serviceId?.title || job?.serviceCategory || 'Service Task');
@@ -385,6 +386,8 @@ const Dashboard = () => {
                       ? (job?.userId?.name || 'Vendor client')
                       : isDigital
                       ? (job?.address?.city || 'Digital Client')
+                      : isB2BJob
+                      ? (job?.userId?.name || 'B2B Customer')
                       : (job?.userId?.name || 'Onsite Customer');
                     const priceDisplay = isDigital
                       ? `₹${Number(job?.basePrice || 0).toLocaleString()} - ₹${Number(job?.finalAmount || 0).toLocaleString()}`
@@ -400,6 +403,7 @@ const Dashboard = () => {
                         onClick={() => {
                           if (isOpsJob) navigate(`/engineer/ops-jobs/${job._id}`);
                           else if (isDigital) navigate('/engineer/projects');
+                          else if (isB2BJob) navigate(`/engineer/b2b-jobs/${job._id}`);
                           else navigate(`/engineer/job/${job?._id}`);
                         }}
                         className="bg-white rounded-3xl p-4 shadow-sm border border-gray-100 cursor-pointer active:scale-[0.99] transition-transform"
@@ -410,8 +414,8 @@ const Dashboard = () => {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
-                              <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${isOpsJob ? 'bg-indigo-500' : isDigital ? 'bg-indigo-500' : 'bg-teal-500'}`}>
-                                {isOpsJob ? 'Vendor' : isDigital ? 'Digital' : 'Onsite'}
+                              <span className={`text-white text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${isOpsJob ? 'bg-indigo-500' : isDigital ? 'bg-indigo-500' : isB2BJob ? 'bg-cyan-600' : 'bg-teal-500'}`}>
+                                {isOpsJob ? 'Vendor' : isDigital ? 'Digital' : isB2BJob ? 'B2B' : 'Onsite'}
                               </span>
                               <span className="text-gray-400 text-xs font-medium">{displayDate}</span>
                             </div>

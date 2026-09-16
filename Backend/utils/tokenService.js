@@ -60,6 +60,45 @@ module.exports = {
   verifyRefreshToken,
 
   /**
+   * Scoped token proving the holder owns an in-progress vendor onboarding.
+   *
+   * Vendor onboarding runs BEFORE the vendor can hold a normal access token
+   * (`authenticate` blocks vendors whose approvalStatus !== 'approved'). Those
+   * endpoints previously trusted a raw `vendorId` from the request body, which
+   * let anyone enumerate ids and edit another vendor's onboarding. This token
+   * binds each onboarding request to the vendor it was issued for.
+   *
+   * Deliberately narrow: it authorises onboarding steps only — never login,
+   * never any authenticated vendor API.
+   *
+   * @param {string} vendorId
+   * @returns {string} JWT, valid for the onboarding window
+   */
+  generateOnboardingToken: (vendorId) => {
+    return jwt.sign(
+      { vendorId: String(vendorId), type: 'vendor_onboarding' },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.VENDOR_ONBOARDING_TOKEN_EXPIRE || '30d' }
+    );
+  },
+
+  /**
+   * @param {string} token
+   * @returns {string|null} vendorId when the token is a valid onboarding token
+   */
+  verifyOnboardingToken: (token) => {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (decoded && decoded.type === 'vendor_onboarding' && decoded.vendorId) {
+        return String(decoded.vendorId);
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  },
+
+  /**
    * Generate temporary verification token for signup flow
    * @param {string} phone - Verified phone number
    * @returns {string} - JWT verification token

@@ -149,6 +149,28 @@ const strictApiLimiter = rateLimit({
   store: createRedisStore('strict')
 });
 
+/**
+ * File uploads.
+ *
+ * The generic upload endpoints must stay unauthenticated: vendor and engineer
+ * signup wizards upload KYC documents before any session exists. Type and size
+ * limits are enforced by uploadMiddleware; this bounds volume so the endpoints
+ * cannot be used as free object storage.
+ *
+ * Sized for a real onboarding step (several documents back to back), not a
+ * single upload.
+ */
+const uploadLimiter = rateLimit({
+  ...baseOpts,
+  windowMs: 5 * 60 * 1000,
+  max: parseInt(process.env.UPLOAD_RATE_LIMIT_MAX, 10) || 30,
+  message: {
+    success: false,
+    message: 'Too many uploads. Please wait a few minutes and try again.'
+  },
+  store: createRedisStore('upload')
+});
+
 const vendorCodeValidateLimiter = rateLimit({
   ...baseOpts,
   windowMs: 10 * 60 * 1000,
@@ -186,6 +208,7 @@ rateLimiter.paymentLimiter = paymentLimiter;
 rateLimiter.paymentVerifyLimiter = paymentVerifyLimiter;
 rateLimiter.registrationLimiter = registrationLimiter;
 rateLimiter.strictApiLimiter = strictApiLimiter;
+rateLimiter.uploadLimiter = uploadLimiter;
 rateLimiter.vendorCodeValidateLimiter = vendorCodeValidateLimiter;
 rateLimiter.engineerApiLimiter = engineerApiLimiter;
 rateLimiter.engineerActionLimiter = engineerActionLimiter;

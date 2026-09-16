@@ -183,7 +183,9 @@ const exportExcel = async (req, res) => {
       { 'Metric': 'Pending Jobs', 'Value': summary.pendingJobs.value, 'Growth (MoM)': summary.pendingJobs.changeText },
       { 'Metric': 'Cancelled Jobs', 'Value': summary.cancelledJobs.value, 'Growth (MoM)': summary.cancelledJobs.changeText },
       { 'Metric': 'Total Spend (INR)', 'Value': summary.totalSpend.value, 'Growth (MoM)': summary.totalSpend.changeText },
-      { 'Metric': 'Average Rating', 'Value': summary.averageRating.value, 'Growth (MoM)': summary.averageRating.changeText }
+      { 'Metric': 'Average Rating', 'Value': summary.averageRating.value, 'Growth (MoM)': summary.averageRating.changeText },
+      { 'Metric': 'SLA Compliance', 'Value': summary.slaCompliance.value != null ? `${summary.slaCompliance.value}%` : 'N/A', 'Growth (MoM)': summary.slaCompliance.changeText },
+      { 'Metric': 'First-Time Fix Rate', 'Value': summary.firstTimeFixRate.value != null ? `${summary.firstTimeFixRate.value}%` : 'N/A', 'Growth (MoM)': summary.firstTimeFixRate.changeText }
     ];
     const wsSummary = XLSX.utils.json_to_sheet(summaryData);
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary Metrics');
@@ -205,7 +207,8 @@ const exportExcel = async (req, res) => {
       'Assigned Jobs': e.assignedJobs,
       'Completed Jobs': e.completedJobs,
       'Active Jobs': e.activeJobs,
-      'Average Rating': e.averageRating
+      'Average Rating': e.averageRating,
+      'Utilization': e.utilization
     })));
     XLSX.utils.book_append_sheet(wb, wsEngineer, 'Engineer Performance');
 

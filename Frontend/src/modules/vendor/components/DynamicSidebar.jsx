@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import useBusinessIntakeCounts from '../hooks/useBusinessIntakeCounts';
-import useClientsContractsCounts from '../hooks/useClientsContractsCounts';
-import useProjectOpsCounts from '../hooks/useProjectOpsCounts';
-import useWorkforceCounts from '../hooks/useWorkforceCounts';
-import useResourcesCounts from '../hooks/useResourcesCounts';
-import useQualityCounts from '../hooks/useQualityCounts';
-import useFinanceCounts from '../hooks/useFinanceCounts';
-import useGlobalCounts from '../hooks/useGlobalCounts';
+import { useVendorCounts } from '../context/VendorCountsContext';
 import useVendorLogout from '../hooks/useVendorLogout';
 import useVendorBasePath from '../hooks/useVendorBasePath';
 import VendorLogoutConfirm from './VendorLogoutConfirm';
@@ -14,6 +7,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useVendorConfig } from '../context/VendorConfigContext';
 import {
   LayoutDashboard,
+  Inbox,
   Briefcase,
   FolderKanban,
   Users,
@@ -38,14 +32,16 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
   const [expandedSections, setExpandedSections] = useState({});
   const location = useLocation();
   const { loggingOut, confirmOpen, openConfirm, closeConfirm, confirmLogout } = useVendorLogout();
-  const { counts } = useBusinessIntakeCounts();
-  const { counts: ccCounts } = useClientsContractsCounts();
-  const { counts: poCounts } = useProjectOpsCounts();
-  const { counts: wfCounts } = useWorkforceCounts();
-  const { counts: resCounts } = useResourcesCounts();
-  const { counts: qcCounts } = useQualityCounts();
-  const { counts: finCounts } = useFinanceCounts();
-  const { counts: globalCounts } = useGlobalCounts();
+  const {
+    businessIntake: { counts },
+    clientsContracts: { counts: ccCounts },
+    projectOps: { counts: poCounts },
+    workforce: { counts: wfCounts },
+    resources: { counts: resCounts },
+    quality: { counts: qcCounts },
+    finance: { counts: finCounts },
+    global: { counts: globalCounts },
+  } = useVendorCounts();
 
   const vendorName = vendorProfile?.businessName || vendorProfile?.companyName || 'Vendor Portal';
   const vendorEmail = vendorProfile?.email || vendorProfile?.phone || 'Partner account';
@@ -68,114 +64,57 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
 
   const NAV_ITEMS = useMemo(() => {
     const b = basePath;
+    const newJobsCount = (counts.clientRequests || 0) + (counts.b2bOpportunities || 0);
     return {
-    'Dashboard': { path: `${b}/dashboard`, icon: LayoutDashboard },
-    'Business Intake': { 
-      path: `${b}/business-intake`, 
-      icon: Briefcase,
-      subItems: [
-        { name: 'All Opportunities', path: `${b}/business-intake/all`, badge: counts.allOpportunities },
-        { name: 'Client Requests', path: `${b}/business-intake/requests`, badge: counts.clientRequests },
-        { name: 'B2B Opportunities', path: `${b}/business-intake/b2b`, badge: counts.b2bOpportunities },
-        { name: 'Bulk Requirements', path: `${b}/business-intake/bulk`, badge: counts.bulkRequirements },
-        { name: 'Bid / Quote Requests', path: `${b}/business-intake/rfq`, badge: counts.bidQuoteRequests },
-        { name: 'Direct Invitations', path: `${b}/business-intake/invitations`, badge: counts.directInvitations, badgeRed: true },
-        { name: 'Proposals & Quotations', path: `${b}/business-intake/proposals`, badge: counts.proposalsPending },
-        { name: 'Accepted Work', path: `${b}/business-intake/accepted`, badge: counts.acceptedThisWeek }
-      ]
-    },
-    'Clients & Contracts': {
-      path: `${b}/clients`,
-      icon: Handshake,
-      subItems: [
-        { name: 'Individual Clients', path: `${b}/clients/individual`, badge: ccCounts.individualClients },
-        { name: 'B2B Clients', path: `${b}/clients/b2b`, badge: ccCounts.b2bClients },
-        { name: 'Conversations', path: `${b}/clients/conversations`, badge: ccCounts.conversationsUnread, badgeRed: true },
-        { name: 'Proposals', path: `${b}/clients/proposals`, badge: ccCounts.proposalsPending },
-        { name: 'Contracts', path: `${b}/clients/contracts`, badge: ccCounts.activeContracts },
-        { name: 'Scope Changes', path: `${b}/clients/scope-changes`, badge: ccCounts.scopeChangesPending, badgeRed: true }
-      ]
-    },
-    'Project Operations': { 
-      path: `${b}/projects`, 
-      icon: FolderKanban,
-      subItems: [
-        { name: 'Project OS', path: `${b}/projects/os`, badge: poCounts.activeProjects },
-        { name: 'Sites & Locations', path: `${b}/projects/sites`, badge: poCounts.activeSites },
-        { name: 'Milestones & Tasks', path: `${b}/projects/milestones`, badge: poCounts.openMilestones },
-        { name: 'Dispatch Center', path: `${b}/projects/dispatch`, badge: poCounts.availableEngineers },
-        { name: 'Live Operations', path: `${b}/projects/live`, badge: poCounts.liveJobs, badgeRed: true },
-        { name: 'Calendar & Schedule', path: `${b}/projects/calendar`, badge: poCounts.eventsToday }
-      ]
-    },
-    'Workforce': { 
-      path: `${b}/workforce`, 
-      icon: Users,
-      subItems: [
-        { name: 'Engineers', path: `${b}/workforce/engineers`, badge: wfCounts.totalEngineers },
-        { name: 'Project Teams', path: `${b}/workforce/teams`, badge: wfCounts.activeTeams },
-        { name: 'Team Structure', path: `${b}/workforce/structure` },
-        { name: 'Skill Matrix', path: `${b}/workforce/skills` },
-        { name: 'Assignments', path: `${b}/workforce/assignments`, badge: wfCounts.openAssignments },
-        { name: 'Availability', path: `${b}/workforce/availability`, badge: wfCounts.available },
-        { name: 'Attendance', path: `${b}/workforce/attendance`, badge: wfCounts.presentToday },
-        { name: 'Leave & Calendar', path: `${b}/workforce/leave`, badge: wfCounts.pendingLeave },
-        { name: 'Certifications', path: `${b}/workforce/certifications`, badge: wfCounts.expiringCerts, badgeRed: true }
-      ]
-    },
-    'Resources': { 
-      path: `${b}/resources`, 
-      icon: Box,
-      subItems: [
-        { name: 'Capacity Center', path: `${b}/resources/capacity` },
-        { name: 'Inventory', path: `${b}/resources/inventory`, badge: resCounts.inventoryItems },
-        { name: 'Tools & Equipment', path: `${b}/resources/tools`, badge: resCounts.toolsAvailable },
-        { name: 'Warehouses', path: `${b}/resources/warehouses`, badge: resCounts.warehouses },
-        { name: 'Installed Assets', path: `${b}/resources/assets`, badge: resCounts.installedAssets }
-      ]
-    },
-    'Quality & Control': { 
-      path: `${b}/quality`, 
-      icon: ShieldCheck,
-      subItems: [
-        { name: 'Proof Review', path: `${b}/quality/proof`, badge: qcCounts.proofPending },
-        { name: 'QA & Rework', path: `${b}/quality/qa`, badge: qcCounts.qaPending },
-        { name: 'Client Approvals', path: `${b}/quality/client-approvals`, badge: qcCounts.clientPending },
-        { name: 'B2B Approvals', path: `${b}/quality/b2b-approvals`, badge: qcCounts.b2bPending },
-        { name: 'Issues & Risks', path: `${b}/quality/issues`, badge: qcCounts.openIssues, badgeRed: true },
-        { name: 'Change Requests', path: `${b}/quality/change-requests`, badge: qcCounts.changePending },
-        { name: 'Damage Incidents', path: `${b}/quality/damage`, badge: qcCounts.openDamage, badgeRed: true }
-      ]
-    },
-    'Finance': { 
-      path: `${b}/finance`, 
-      icon: Wallet,
-      subItems: [
-        { name: 'Master Wallet', path: `${b}/finance/wallet` },
-        { name: 'Client Receivables', path: `${b}/finance/client-receivables`, badge: finCounts.clientPending },
-        { name: 'B2B Receivables', path: `${b}/finance/b2b-receivables`, badge: finCounts.b2bPending },
-        { name: 'Quotations', path: `${b}/finance/quotations`, badge: finCounts.quotations },
-        { name: 'Invoices', path: `${b}/finance/invoices`, badge: finCounts.invoicesDue, badgeRed: true },
-        { name: 'Payment Milestones', path: `${b}/finance/milestones`, badge: finCounts.milestonesDue }
-      ]
-    },
-    'Performance': { path: `${b}/performance`, icon: Activity },
-    'Compliance': { path: `${b}/compliance`, icon: FileCheck, badge: globalCounts.complianceAlerts },
-    'Notifications': { path: `${b}/notifications`, icon: Bell, badge: globalCounts.unreadNotifications, badgeRed: true },
-    'Support': { path: `${b}/support`, icon: HelpCircle, badge: globalCounts.openTickets },
-    'Settings': { path: `${b}/settings`, icon: Settings },
-  };
-  }, [basePath, counts, ccCounts, poCounts, wfCounts, resCounts, qcCounts, finCounts, globalCounts]);
+      'Dashboard': { path: `${b}/dashboard`, icon: LayoutDashboard },
+      'My Jobs': {
+        path: `${b}/my-jobs`,
+        icon: Briefcase,
+        subItems: [
+          { name: 'All Jobs', path: `${b}/my-jobs?tab=all` },
+          { name: 'User Projects', path: `${b}/my-jobs?tab=user`, badge: counts.clientRequests, badgeRed: Boolean(counts.clientRequests > 0) },
+          { name: 'B2B Jobs', path: `${b}/my-jobs?tab=b2b`, badge: counts.b2bOpportunities, badgeRed: Boolean(counts.b2bOpportunities > 0) },
+          { name: 'In Progress', path: `${b}/my-jobs?status=in_progress`, badge: poCounts.liveJobs, badgeRed: Boolean(poCounts.liveJobs > 0) },
+          { name: 'Completed', path: `${b}/my-jobs?status=completed` }
+        ]
+      },
+      'Engineers': {
+        path: `${b}/engineers`,
+        icon: Users,
+        subItems: [
+          { name: 'Engineer List', path: `${b}/engineers?tab=all`, badge: wfCounts.totalEngineers },
+          { name: 'Available', path: `${b}/engineers?tab=available`, badge: wfCounts.available },
+          { name: 'Busy / On Job', path: `${b}/engineers?tab=busy`, badge: wfCounts.openAssignments, badgeRed: Boolean(wfCounts.openAssignments > 0) },
+          { name: 'Skills', path: `${b}/engineers?tab=skills` }
+        ]
+      },
+      'Finance': {
+        path: `${b}/finance`,
+        icon: Wallet,
+        subItems: [
+          { name: 'Earnings', path: `${b}/finance/earnings` },
+          { name: 'Wallet / Ledger', path: `${b}/finance/wallet` },
+          { name: 'Engineer Payments', path: `${b}/finance/engineer-payments` },
+          { name: 'Settlements', path: `${b}/finance/settlements` }
+        ]
+      },
+      'Notifications': { path: `${b}/notifications`, icon: Bell, badge: globalCounts.unreadNotifications, badgeRed: true }
+    };
+  }, [basePath, counts, poCounts, wfCounts, globalCounts]);
+
+  const sectionsToRender = useMemo(() => {
+    return ['Dashboard', 'My Jobs', 'Engineers', 'Finance', 'Notifications'];
+  }, []);
 
   // Auto-expand active section
   useEffect(() => {
-    sidebarSections?.forEach((section) => {
+    sectionsToRender.forEach((section) => {
       const item = NAV_ITEMS[section];
       if (item?.path && location.pathname.startsWith(item.path)) {
         setExpandedSections((prev) => ({ ...prev, [section]: true }));
       }
     });
-  }, [location.pathname, sidebarSections]);
+  }, [location.pathname, sectionsToRender, NAV_ITEMS]);
 
   return (
     <>
@@ -213,7 +152,7 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
       
       <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
         <nav className="space-y-1 px-2">
-          {sidebarSections?.map((section) => {
+          {sectionsToRender.map((section) => {
             const item = NAV_ITEMS[section];
             if (!item) return null;
             

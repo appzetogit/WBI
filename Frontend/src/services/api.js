@@ -73,6 +73,20 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Vendor onboarding runs before a vendor session exists (unapproved vendors
+    // are rejected by `authenticate`). These endpoints authorise via a scoped
+    // onboarding token instead, issued at /vendor/onboarding/submit.
+    if (config.url?.includes('/vendor/onboarding') ||
+        config.url?.includes('/vendor/verify-kyc') ||
+        config.url?.includes('/vendor/verify-bank-penny-drop') ||
+        config.url?.includes('/vendor/complete-induction')) {
+      const onboardingToken = localStorage.getItem('vendorOnboardingToken');
+      if (onboardingToken) {
+        config.headers['x-onboarding-token'] = onboardingToken;
+      }
+    }
+
     return config;
   },
   (error) => {

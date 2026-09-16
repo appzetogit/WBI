@@ -3,8 +3,12 @@ import api from '../../../services/api';
 const BASE = '/vendor/finance';
 
 export const fetchFinanceCounts = () => api.get(`${BASE}/counts`);
+export const fetchEarningsOverview = (params = {}) => api.get(`${BASE}/earnings`, { params });
 export const fetchEarningsByService = () => api.get(`${BASE}/earnings-by-service`);
 export const fetchWallet = (params = {}) => api.get(`${BASE}/wallet`, { params });
+export const fetchEngineerPayments = (params = {}) => api.get(`${BASE}/engineer-payments`, { params });
+export const recordEngineerPayment = (payload) => api.post(`${BASE}/engineer-payments/pay`, payload);
+export const fetchSettlements = (params = {}) => api.get(`${BASE}/settlements`, { params });
 export const requestWithdrawal = (payload) =>
   api.post(`${BASE}/wallet/withdraw`, typeof payload === 'number' ? { amount: payload } : payload);
 export const fetchWithdrawEligibility = () => api.get(`${BASE}/withdraw/eligibility`);

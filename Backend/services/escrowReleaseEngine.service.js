@@ -630,18 +630,48 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
   const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: jobId });
   const fallbackGstPercent = await getB2BFallbackGstPercent(job.companyId);
   const rules = await resolvePaymentRules(flow?.categoryCode, flow?.configSnapshot, fallbackGstPercent);
-  const modeRaw = String(rules.assignmentMode || rules.marketplaceMode || 'engineer_direct').toLowerCase();
-  const mode =
-    modeRaw === 'vendor_marketplace' || modeRaw === 'vendor_first'
-      ? 'vendor_marketplace'
-      : 'engineer_direct';
+  // Payout must follow WHO ACTUALLY DID THE WORK, not a static config flag.
+  //
+  // Previously the mode came only from ServiceConfig.paymentRules.assignmentMode,
+  // which is unset on all 24 live ServiceConfigs — so every job defaulted to
+  // 'engineer_direct'. Meanwhile 45 opportunities had genuinely been awarded to
+  // vendors through the marketplace fallback. Those vendors would have been paid
+  // nothing, and where B2BJob.assignedTo was null the release aborted with
+  // 'engineer_not_assigned', stranding the money in escrow.
+  //
+  // Resolution order:
+  //   1. An explicitly configured mode still wins (deliberate business override).
+  //   2. Otherwise, if a vendor actually won/accepted this job → vendor_marketplace.
+  //   3. Otherwise, if an engineer is assigned → engineer_direct.
+  const configuredRaw = String(rules.assignmentMode || rules.marketplaceMode || '').toLowerCase();
+  const configuredMode = configuredRaw
+    ? (configuredRaw === 'vendor_marketplace' || configuredRaw === 'vendor_first'
+        ? 'vendor_marketplace'
+        : 'engineer_direct')
+    : null;
+
+  const executingVendorId = await resolveVendorForB2BJob(job, flow);
+  const detectedMode = executingVendorId
+    ? 'vendor_marketplace'
+    : (job.assignedTo ? 'engineer_direct' : null);
+
+  const mode = configuredMode || detectedMode || 'engineer_direct';
+
+  if (!configuredMode && detectedMode) {
+    console.info(
+      `[escrow] ${job.jobId}: payout mode resolved from executor → ${detectedMode}` +
+        (executingVendorId ? ` (vendor ${executingVendorId})` : ` (engineer ${job.assignedTo})`)
+    );
+  }
   const split = computeSplit(remaining, rules);
 
   let creditedTo = null;
   let creditAmount = 0;
 
   if (mode === 'vendor_marketplace') {
-    const vendorId = await resolveVendorForB2BJob(job, flow);
+    // Already resolved above when detecting the executor; re-resolve only if the
+    // mode was force-configured without a detected vendor.
+    const vendorId = executingVendorId || (await resolveVendorForB2BJob(job, flow));
     if (!vendorId) {
       return { ok: false, reason: 'vendor_not_assigned', status: 428 };
     }
@@ -762,6 +792,7 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
     paymentMethod: 'system',
     description: `B2B escrow release (${mode}) — ${job.jobId}`,
     metadata: {
+      source: 'b2b_escrow',
       idempotencyKey: idemKey,
       jobId: String(jobId),
       mode,

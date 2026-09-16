@@ -118,7 +118,9 @@ const generateReportPdf = (company, summary, servicePerformance, engineerPerform
     { label: 'Pending Jobs', val: summary.pendingJobs.value, change: summary.pendingJobs.changeText },
     { label: 'Cancelled Jobs', val: summary.cancelledJobs.value, change: summary.cancelledJobs.changeText },
     { label: 'Total Spend (INR)', val: `₹${summary.totalSpend.value.toLocaleString('en-IN')}`, change: summary.totalSpend.changeText },
-    { label: 'Average Rating', val: `${summary.averageRating.value} / 5`, change: summary.averageRating.changeText }
+    { label: 'Average Rating', val: `${summary.averageRating.value} / 5`, change: summary.averageRating.changeText },
+    { label: 'SLA Compliance', val: summary.slaCompliance.value != null ? `${summary.slaCompliance.value}%` : 'N/A', change: summary.slaCompliance.changeText },
+    { label: 'First-Time Fix Rate', val: summary.firstTimeFixRate.value != null ? `${summary.firstTimeFixRate.value}%` : 'N/A', change: summary.firstTimeFixRate.changeText }
   ];
 
   cards.forEach((card, idx) => {
@@ -144,13 +146,14 @@ const generateReportPdf = (company, summary, servicePerformance, engineerPerform
     doc.fontSize(14).font('Helvetica-Bold').fillColor(textDark).text(String(card.val), boxX + 8, boxY + 18);
     
     // MoM text color (green for up, red for down)
-    const isUp = card.change.includes('↑');
+    const isUp = String(card.change).includes('↑');
     const momColor = isUp ? '#10B981' : '#EF4444';
-    doc.fontSize(7).font('Helvetica-Bold').fillColor(momColor).text(card.change, boxX + 8, boxY + 36);
+    doc.fontSize(7).font('Helvetica-Bold').fillColor(momColor).text(String(card.change), boxX + 8, boxY + 36);
   });
 
   // --- Section 2: Service Performance Table ---
-  let nextY = startY + (cardHeight * 2) + 45;
+  const cardRows = Math.ceil(cards.length / 3);
+  let nextY = startY + (cardHeight * cardRows) + (15 * (cardRows - 1)) + 30;
   doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Service Performance Analysis', 40, nextY);
 
   const serviceCols = [
@@ -176,10 +179,11 @@ const generateReportPdf = (company, summary, servicePerformance, engineerPerform
   doc.fontSize(10).font('Helvetica-Bold').fillColor(textDark).text('Engineer Performance Statistics', 40, engY);
 
   const engineerCols = [
-    { key: 'engineerName', label: 'Engineer Name', width: 180 },
-    { key: 'assignedJobs', label: 'Assigned Jobs', width: 90, align: 'center' },
-    { key: 'completedJobs', label: 'Completed Jobs', width: 95, align: 'center' },
-    { key: 'activeJobs', label: 'Active Jobs', width: 90, align: 'center' },
+    { key: 'engineerName', label: 'Engineer Name', width: 150 },
+    { key: 'assignedJobs', label: 'Assigned', width: 65, align: 'center' },
+    { key: 'completedJobs', label: 'Completed', width: 70, align: 'center' },
+    { key: 'activeJobs', label: 'Active', width: 60, align: 'center' },
+    { key: 'utilization', label: 'Utilization', width: 70, align: 'center' },
     { key: 'averageRating', label: 'Avg Rating', width: 60, align: 'right' }
   ];
 

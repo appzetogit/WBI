@@ -4,8 +4,14 @@ const WorkerProject = require('../../models/WorkerProject');
 const DigitalJob = require('../../models/DigitalJob');
 const DigitalAssignment = require('../../models/DigitalAssignment');
 const VendorOpsJob = require('../../models/VendorOpsJob');
+const B2BJob = require('../../models/B2BJob');
 const Transaction = require('../../models/Transaction');
 const { BOOKING_STATUS } = require('../../utils/constants');
+
+// A job document exists in one of these statuses while it's actively being
+// worked (accepted through completion submission) — mirrors the real
+// B2BJob status enum, which never uses a literal 'assigned' status.
+const B2B_ACTIVE_STATUSES = ['accepted', 'travelling', 'arrived', 'in_progress', 'completion_submitted'];
 
 /**
  * Get engineer dashboard statistics
@@ -36,7 +42,11 @@ const getDashboardStats = async (req, res) => {
       opsEarningStats,
       opsActiveCount,
       opsCompletedCount,
-      recentOpsJobs
+      recentOpsJobs,
+      b2bEarningStats,
+      b2bActiveCount,
+      b2bCompletedCount,
+      recentB2BJobs
     ] = await Promise.all([
       Booking.aggregate([
         { $match: { workerId: engineer._id, status: { $in: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.WORK_DONE] } } },
@@ -101,6 +111,36 @@ const getDashboardStats = async (req, res) => {
         .sort({ updatedAt: -1 })
         .limit(5)
         .select('title clientName city budget status jobCode updatedAt createdAt projectId')
+        .lean(),
+      Transaction.aggregate([
+        {
+          $match: {
+            engineerId: engineer._id,
+            status: 'completed',
+            type: 'earnings_credit',
+            'metadata.source': 'b2b_escrow'
+          }
+        },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      B2BJob.countDocuments({
+        assignedTo: engineer._id,
+        status: { $in: B2B_ACTIVE_STATUSES }
+      }),
+      B2BJob.countDocuments({
+        assignedTo: engineer._id,
+        status: 'completed'
+      }),
+      // Both jobs already assigned to this engineer AND jobs merely offered
+      // to them (notifiedEngineers, awaiting accept/reject) — a B2B/freelancer
+      // job offer must show up here the same way a fresh booking or ops job
+      // offer does, not only after acceptance.
+      B2BJob.find({
+        $or: [{ assignedTo: engineer._id }, { notifiedEngineers: engineer._id }]
+      })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .select('jobId customerName service city address charge preferredDate createdAt status assignedTo')
         .lean()
     ]);
 
@@ -119,10 +159,11 @@ const getDashboardStats = async (req, res) => {
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const opsTxnEarnings = walletOpsCredits.length ? walletOpsCredits[0].total : 0;
-    const totalEarnings = hardwareEarnings + digitalEarnings + Math.max(opsEarnings, opsTxnEarnings);
-    const activeJobsCount = hardwareActiveJobsCount + digitalActiveJobsCount + opsActiveCount;
+    const b2bEarnings = b2bEarningStats.length ? b2bEarningStats[0].total : 0;
+    const totalEarnings = hardwareEarnings + digitalEarnings + Math.max(opsEarnings, opsTxnEarnings) + b2bEarnings;
+    const activeJobsCount = hardwareActiveJobsCount + digitalActiveJobsCount + opsActiveCount + b2bActiveCount;
     const activeProjectsCount = hardwareActiveProjectsCount + digitalActiveProjectsCount;
-    const completedJobsCount = completedHardwareCount + completedDigitalCount + opsCompletedCount;
+    const completedJobsCount = completedHardwareCount + completedDigitalCount + opsCompletedCount + b2bCompletedCount;
     const averageRating = ratingStats.length > 0 ? parseFloat(ratingStats[0].avgRating.toFixed(1)) : (engineer.rating || 0);
 
     const allRecentJobs = [
@@ -151,7 +192,25 @@ const getDashboardStats = async (req, res) => {
         status: job.status,
         isOpsJob: true,
         jobCode: job.jobCode
-      }))
+      })),
+      ...recentB2BJobs.map((job) => {
+        // Not yet assigned to this engineer = a live offer awaiting their
+        // accept/reject, same "NEW" treatment DigitalJob offers get above.
+        const isOffer = !job.assignedTo || String(job.assignedTo) !== String(engineer._id);
+        return {
+          _id: job._id,
+          serviceId: { name: job.service, title: job.service },
+          userId: { name: job.customerName || 'B2B Customer' },
+          address: { city: job.city || job.address },
+          finalAmount: job.charge || 0,
+          basePrice: job.charge || 0,
+          scheduledDate: job.preferredDate || job.createdAt,
+          createdAt: job.createdAt,
+          status: isOffer ? 'NEW' : job.status,
+          isB2BJob: true,
+          jobCode: job.jobId
+        };
+      })
     ].sort((a, b) => new Date(b.createdAt || b.scheduledDate) - new Date(a.createdAt || a.scheduledDate)).slice(0, 8);
 
     const timeTaken = Date.now() - startTime;

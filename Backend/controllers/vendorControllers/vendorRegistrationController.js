@@ -35,20 +35,23 @@ const { normalizeCin, isValidCinFormat } = require('../../utils/cin.util');
 
 async function resolveOnboardingVendor(req, res, { requireAuth = false } = {}) {
   const authId = req.user?.id || req.user?._id;
-  const bodyId = req.body?.vendorId || req.query?.vendorId;
 
   if (requireAuth && !authId) {
     res.status(401).json({ success: false, message: 'Please sign in to continue.' });
     return null;
   }
 
-  const vendorId = authId || bodyId;
+  // Identity comes from the authenticated session or the signed onboarding
+  // token resolved by `authenticateOnboarding` — never from the request body,
+  // which any caller could set to another vendor's id.
+  const vendorId = authId || req.onboardingVendorId;
   if (!vendorId) {
     res.status(400).json({ success: false, message: 'Vendor ID is required.' });
     return null;
   }
 
-  if (authId && bodyId && String(authId) !== String(bodyId)) {
+  // A session and an onboarding token must never disagree about who is acting.
+  if (authId && req.onboardingVendorId && String(authId) !== String(req.onboardingVendorId)) {
     res.status(403).json({ success: false, message: 'Vendor mismatch.' });
     return null;
   }
@@ -76,7 +79,7 @@ const getConfig = async (req, res) => {
 
 const updateBusinessDetails = async (req, res) => {
   try {
-    const vendorId = req.user?.id || req.body.vendorId;
+    const vendorId = req.user?.id || req.onboardingVendorId;
     const vendor = await Vendor.findById(vendorId);
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
 
@@ -161,7 +164,7 @@ const updateBusinessDetails = async (req, res) => {
 
 const updateModels = async (req, res) => {
   try {
-    const vendorId = req.user?.id || req.body.vendorId;
+    const vendorId = req.user?.id || req.onboardingVendorId;
     const { models } = req.body; // e.g. ["ONE_TIME", "PROJECT"]
     
     if (!models || models.length === 0) return res.status(400).json({ success: false, message: 'Select at least one model' });
@@ -180,7 +183,7 @@ const updateModels = async (req, res) => {
 
 const updateOneTimeCapability = async (req, res) => {
   try {
-    const vendorId = req.user?.id || req.body.vendorId;
+    const vendorId = req.user?.id || req.onboardingVendorId;
     const { serviceCoverage, dailyCapacity, serviceConfigurations } = req.body;
 
     await VendorCapability.findOneAndUpdate(
@@ -207,7 +210,7 @@ const updateOneTimeCapability = async (req, res) => {
 
 const updateProjectCapability = async (req, res) => {
   try {
-    const vendorId = req.user?.id || req.body.vendorId;
+    const vendorId = req.user?.id || req.onboardingVendorId;
     const { projectCoverage, capacity, experience, workingModel } = req.body;
 
     await VendorCapability.findOneAndUpdate(
@@ -234,7 +237,7 @@ const updateProjectCapability = async (req, res) => {
 
 const addPortfolio = async (req, res) => {
   try {
-    const vendorId = req.user?.id || req.body.vendorId;
+    const vendorId = req.user?.id || req.onboardingVendorId;
     const projects = req.body.projects || []; // Array of project objects
     
     // For simplicity, we clear and recreate, or we can insert many. Let's do a replace-all for draft flow.
@@ -256,7 +259,7 @@ const addPortfolio = async (req, res) => {
 
 const getDocumentRequirements = async (req, res) => {
   try {
-    const vendorId = req.user?.id || req.query.vendorId;
+    const vendorId = req.user?.id || req.onboardingVendorId;
     let models = String(req.query.models || '')
       .split(',')
       .map((m) => m.trim())
@@ -327,12 +330,14 @@ const syncKycCompliance = async (req, res) => {
 
 const submitApplication = async (req, res) => {
   try {
-    const { vendorId } = req.body;
+    // Resume an existing onboarding ONLY when ownership is proven by a session
+    // or a signed onboarding token. A body-supplied vendorId is never trusted —
+    // it previously allowed overwriting another vendor's application.
+    const provenVendorId = req.user?.id || req.onboardingVendorId || null;
     let vendor;
-    
-    if (req.user?.id || (vendorId && vendorId !== 'draft_mode_validation')) {
-      const id = req.user?.id || vendorId;
-      vendor = await Vendor.findById(id);
+
+    if (provenVendorId) {
+      vendor = await Vendor.findById(provenVendorId);
       if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
     } else {
       const {
@@ -684,7 +689,15 @@ const submitApplication = async (req, res) => {
       }
     }
     
-    res.status(200).json({ success: true, message: 'Application submitted successfully', vendorId: vendor._id });
+    // Scoped token so the vendor can complete KYC / bank / induction before
+    // approval, without any endpoint having to trust a body-supplied vendorId.
+    const { generateOnboardingToken } = require('../../utils/tokenService');
+    res.status(200).json({
+      success: true,
+      message: 'Application submitted successfully',
+      vendorId: vendor._id,
+      onboardingToken: generateOnboardingToken(vendor._id)
+    });
   } catch (error) {
     console.error('[submitApplication]', error);
     if (error?.code === 11000 || /E11000|dup key/i.test(String(error?.message || ''))) {
@@ -1029,7 +1042,7 @@ const activateAccount = async (req, res) => {
     });
   } catch (error) {
     try {
-      const vendorId = req.user?.id || req.body?.vendorId;
+      const vendorId = req.user?.id || req.onboardingVendorId;
       if (vendorId) {
         await Vendor.findByIdAndUpdate(vendorId, {
           $set: {

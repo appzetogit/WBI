@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../utils/txnOptions');
 const Withdrawal = require('../models/Withdrawal');
 const VendorBank = require('../models/VendorBank');
 const Vendor = require('../models/Vendor');
@@ -400,7 +401,7 @@ async function createWithdrawalRequest(vendorId, {
   const approvalMode = amt <= config.autoApproveMaxAmount ? 'auto' : 'manual';
 
   const session = await mongoose.startSession();
-  session.startTransaction();
+  session.startTransaction(TXN_OPTS);
   try {
     wallet.availableBalance -= amt;
     wallet.processingWithdrawal = (wallet.processingWithdrawal || 0) + amt;

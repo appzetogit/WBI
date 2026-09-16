@@ -229,13 +229,43 @@ const engineerService = {
   },
 
   // --- B2B Jobs ---
-  getB2BJobs: async () => {
-    const response = await api.get('/engineers/b2b-jobs');
+  getB2BJobs: async (params = {}) => {
+    const response = await api.get('/engineers/b2b-jobs', { params });
+    return response.data;
+  },
+
+  getB2BJobSummary: async () => {
+    const response = await api.get('/engineers/b2b-jobs/summary');
     return response.data;
   },
 
   getB2BJobById: async (jobId) => {
     const response = await api.get(`/engineers/b2b-jobs/${jobId}`);
+    return response.data;
+  },
+
+  acceptB2BJob: async (jobId, payload = {}) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/accept`, payload);
+    return response.data;
+  },
+
+  rejectB2BJob: async (jobId, payload) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/reject`, payload);
+    return response.data;
+  },
+
+  startB2BTravel: async (jobId, payload = {}) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/start-travel`, payload);
+    return response.data;
+  },
+
+  updateB2BLocation: async (jobId, payload) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/update-location`, payload);
+    return response.data;
+  },
+
+  arriveB2BSite: async (jobId, payload = {}) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/arrive`, payload);
     return response.data;
   },
 
@@ -246,6 +276,11 @@ const engineerService = {
 
   startB2BJob: async (jobId, payload) => {
     const response = await api.post(`/engineers/b2b-jobs/${jobId}/start`, payload);
+    return response.data;
+  },
+
+  markB2BCustomerUnavailable: async (jobId, payload) => {
+    const response = await api.post(`/engineers/b2b-jobs/${jobId}/customer-unavailable`, payload);
     return response.data;
   },
 

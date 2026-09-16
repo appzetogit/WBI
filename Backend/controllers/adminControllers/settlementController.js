@@ -543,6 +543,7 @@ module.exports = {
 
       const withdrawals = await Withdrawal.find({ status: { $in: statusFilter } })
         .populate('vendorId', 'name businessName phone wallet.earnings')
+        .populate('engineerId', 'name phone email wallet.balance wallet.pendingBalance engineerType workType')
         .sort({ createdAt: 1 })
         .skip(skip)
         .limit(parseInt(limit));
@@ -572,6 +573,25 @@ module.exports = {
 
       const withdrawal = await Withdrawal.findById(withdrawalId);
       if (!withdrawal) return res.status(404).json({ success: false, message: 'Withdrawal not found' });
+
+      // Engineer / Freelancer wallet withdrawals
+      if (withdrawal.source === 'engineer' || withdrawal.source === 'worker') {
+        if (!['pending', 'awaiting_manual_transfer', 'failed', 'approved'].includes(withdrawal.status)) {
+          return res.status(400).json({ success: false, message: `Cannot approve status ${withdrawal.status}` });
+        }
+        const engineerWithdrawSvc = require('../../services/engineerWithdrawal.service');
+        const result = await engineerWithdrawSvc.processApprovedWithdrawal(withdrawalId, {
+          adminId,
+          actorType: 'admin',
+          notes,
+          transactionReference
+        });
+        return res.status(200).json({
+          success: true,
+          message: 'Engineer withdrawal processed',
+          data: result.withdrawal
+        });
+      }
 
       // Finance Master Wallet withdrawals — escrow-aware hold already applied
       if (withdrawal.source === 'finance_wallet') {
@@ -732,6 +752,15 @@ module.exports = {
       const withdrawal = await Withdrawal.findById(withdrawalId);
       if (!withdrawal) return res.status(404).json({ success: false, message: 'Withdrawal not found' });
 
+      if (withdrawal.source === 'engineer' || withdrawal.source === 'worker') {
+        const engineerWithdrawSvc = require('../../services/engineerWithdrawal.service');
+        const updated = await engineerWithdrawSvc.rejectWithdrawal(withdrawalId, {
+          adminId,
+          reason: reason || rejectionReason || 'Rejected by admin'
+        });
+        return res.status(200).json({ success: true, message: 'Withdrawal rejected', data: updated });
+      }
+
       if (withdrawal.source === 'finance_wallet') {
         const withdrawSvc = require('../../services/vendorWithdrawal.service');
         const updated = await withdrawSvc.rejectWithdrawal(withdrawalId, {
@@ -757,7 +786,11 @@ module.exports = {
     try {
       const { withdrawalId } = req.params;
       const adminId = req.user.id;
-      const withdrawSvc = require('../../services/vendorWithdrawal.service');
+      const withdrawal = await Withdrawal.findById(withdrawalId).select('source').lean();
+      const svcPath = withdrawal && (withdrawal.source === 'engineer' || withdrawal.source === 'worker')
+        ? '../../services/engineerWithdrawal.service'
+        : '../../services/vendorWithdrawal.service';
+      const withdrawSvc = require(svcPath);
       const result = await withdrawSvc.retryWithdrawal(withdrawalId, { adminId });
       res.json({ success: true, data: result.withdrawal });
     } catch (error) {
@@ -773,7 +806,11 @@ module.exports = {
       if (!transactionReference) {
         return res.status(400).json({ success: false, message: 'UTR / transactionReference is required' });
       }
-      const withdrawSvc = require('../../services/vendorWithdrawal.service');
+      const withdrawal = await Withdrawal.findById(withdrawalId).select('source').lean();
+      const svcPath = withdrawal && (withdrawal.source === 'engineer' || withdrawal.source === 'worker')
+        ? '../../services/engineerWithdrawal.service'
+        : '../../services/vendorWithdrawal.service';
+      const withdrawSvc = require(svcPath);
       const result = await withdrawSvc.markWithdrawalPaid(withdrawalId, {
         utr: transactionReference,
         adminId,

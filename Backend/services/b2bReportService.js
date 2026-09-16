@@ -4,6 +4,7 @@ const B2BWallet = require('../models/B2BWallet');
 const B2BWalletTransaction = require('../models/B2BWalletTransaction');
 const B2BInvoice = require('../models/B2BInvoice');
 const Engineer = require('../models/Engineer');
+const JobStatusTimeline = require('../models/JobStatusTimeline');
 
 /**
  * Builds standard mongoose search query based on company constraints and filters
@@ -46,7 +47,7 @@ const buildJobQuery = (companyId, filters = {}) => {
  * Format duration in milliseconds into a standard human readable string: e.g. "1h 45m"
  */
 const formatDuration = (ms) => {
-  if (!ms || ms <= 0) return '1h 30m'; // Default fallback
+  if (!ms || ms <= 0) return 'N/A'; // No completed jobs with timestamps in range — report the absence, don't fabricate one
   const totalMinutes = Math.round(ms / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -125,6 +126,42 @@ const getReportSummaryInternal = async (companyId, query) => {
   ]);
   summary.avgRating = ratingStats[0] ? parseFloat(ratingStats[0].avgRating.toFixed(1)) : 4.5;
 
+  // SLA compliance: % of completed jobs resolved within their per-job SLA
+  // target window (B2BJob.slaTarget, in hours, defaults to 24h). Real
+  // per-job timestamps only — no assumed/fabricated value.
+  const slaStats = await B2BJob.aggregate([
+    { $match: { ...query, status: 'completed', completedAt: { $ne: null } } },
+    {
+      $project: {
+        withinSla: {
+          $lte: [
+            { $subtract: ['$completedAt', '$createdAt'] },
+            { $multiply: [{ $ifNull: ['$slaTarget', 24] }, 3600000] }
+          ]
+        }
+      }
+    },
+    { $group: { _id: null, total: { $sum: 1 }, withinSla: { $sum: { $cond: ['$withinSla', 1, 0] } } } }
+  ]);
+  const slaTotal = slaStats[0]?.total || 0;
+  summary.slaCompliance = slaTotal > 0 ? Math.round((slaStats[0].withinSla / slaTotal) * 100) : null;
+
+  // First-time fix rate: completed jobs that were never sent back to the
+  // engineer for revision (JobStatusTimeline carries a 'revision_required'
+  // entry whenever admin/QA rejects a completion and asks for rework).
+  const completedJobIds = await B2BJob.distinct('_id', { ...query, status: 'completed' });
+  if (completedJobIds.length > 0) {
+    const revisedJobIds = await JobStatusTimeline.distinct('jobId', {
+      jobId: { $in: completedJobIds },
+      status: 'revision_required'
+    });
+    summary.firstTimeFixRate = Math.round(
+      ((completedJobIds.length - revisedJobIds.length) / completedJobIds.length) * 100
+    );
+  } else {
+    summary.firstTimeFixRate = null;
+  }
+
   // Calculate Spend for this query
   const spendQuery = {
     companyId: query.companyId,
@@ -201,6 +238,18 @@ const getReportSummary = async (companyId, filters = {}) => {
     averageRating: {
       value: currentSummary.avgRating,
       changeText: calculateMomChange(currentSummary.avgRating, prevSummary.avgRating, true)
+    },
+    slaCompliance: {
+      value: currentSummary.slaCompliance,
+      changeText: currentSummary.slaCompliance != null && prevSummary.slaCompliance != null
+        ? calculateMomChange(currentSummary.slaCompliance, prevSummary.slaCompliance)
+        : 'No prior-period data'
+    },
+    firstTimeFixRate: {
+      value: currentSummary.firstTimeFixRate,
+      changeText: currentSummary.firstTimeFixRate != null && prevSummary.firstTimeFixRate != null
+        ? calculateMomChange(currentSummary.firstTimeFixRate, prevSummary.firstTimeFixRate)
+        : 'No prior-period data'
     }
   };
 };
@@ -287,9 +336,15 @@ const getServicePerformance = async (companyId, filters = {}) => {
 /**
  * Service: Fetch Engineer Performance Report
  */
+// Standard shift length assumed for utilization when no duty-roster/shift
+// system exists to derive real on-duty hours from. Configurable via env
+// since it's a business policy value, not a fabricated data point — the
+// numerator (actual job hours) is always computed from real timestamps.
+const STANDARD_SHIFT_HOURS = Number(process.env.B2B_STANDARD_SHIFT_HOURS || 8);
+
 const getEngineerPerformance = async (companyId, filters = {}) => {
   const matchQuery = buildJobQuery(companyId, filters);
-  
+
   // Ensure we aggregate only assigned jobs
   matchQuery.assignedTo = { $ne: null };
 
@@ -310,6 +365,21 @@ const getEngineerPerformance = async (companyId, filters = {}) => {
               0
             ]
           }
+        },
+        totalActiveDurationMs: {
+          $sum: {
+            $cond: [
+              {
+                $and: [
+                  { $eq: ['$status', 'completed'] },
+                  { $ne: ['$completedAt', null] },
+                  { $ne: ['$startedAt', null] }
+                ]
+              },
+              { $subtract: ['$completedAt', '$startedAt'] },
+              0
+            ]
+          }
         }
       }
     },
@@ -325,14 +395,33 @@ const getEngineerPerformance = async (companyId, filters = {}) => {
     { $sort: { assignedJobs: -1 } }
   ]);
 
-  return engineerStats.map(stat => ({
-    engineerName: stat.engineerInfo?.name || 'Assigned Specialist',
-    profilePhoto: stat.engineerInfo?.profilePhoto || null,
-    assignedJobs: stat.assignedJobs || 0,
-    completedJobs: stat.completedJobs || 0,
-    activeJobs: stat.activeJobs || 0,
-    averageRating: stat.engineerInfo?.rating || 4.5
-  }));
+  // Utilization window = the report's date filter, defaulting to the
+  // trailing 30 days when unbounded, so an all-time query doesn't produce a
+  // meaningless near-zero denominator.
+  const windowEnd = filters.endDate ? new Date(filters.endDate) : new Date();
+  const windowStart = filters.startDate
+    ? new Date(filters.startDate)
+    : new Date(windowEnd.getTime() - 30 * 24 * 3600 * 1000);
+  const windowDays = Math.max(1, Math.ceil((windowEnd - windowStart) / (24 * 3600 * 1000)));
+  const capacityHours = windowDays * STANDARD_SHIFT_HOURS;
+
+  return engineerStats.map(stat => {
+    const activeHours = (stat.totalActiveDurationMs || 0) / 3600000;
+    const utilizationPercent = capacityHours > 0
+      ? Math.min(100, Math.round((activeHours / capacityHours) * 100))
+      : 0;
+
+    return {
+      engineerName: stat.engineerInfo?.name || 'Assigned Specialist',
+      profilePhoto: stat.engineerInfo?.profilePhoto || null,
+      assignedJobs: stat.assignedJobs || 0,
+      completedJobs: stat.completedJobs || 0,
+      activeJobs: stat.activeJobs || 0,
+      averageRating: stat.engineerInfo?.rating || 4.5,
+      utilization: `${utilizationPercent}%`,
+      utilizationBasis: `${activeHours.toFixed(1)}h active ÷ ${capacityHours}h capacity (${windowDays}d × ${STANDARD_SHIFT_HOURS}h shift)`
+    };
+  });
 };
 
 /**

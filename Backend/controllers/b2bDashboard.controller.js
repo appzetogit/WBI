@@ -1,169 +1,268 @@
-const Booking = require('./../models/Booking');
-const B2BCompany = require('./../models/B2BCompany');
-const B2BWallet = require('./../models/B2BWallet');
-const B2BWalletTransaction = require('./../models/B2BWalletTransaction');
-const mongoose = require('mongoose');
+/**
+ * B2B operational analytics (heatmap, SLA, repeat calls, ledger).
+ *
+ * Rewritten from a prototype that:
+ *   - resolved the company by a hardcoded literal email, ignoring the caller
+ *   - returned EVERY escrowed booking's GPS coordinates platform-wide to any
+ *     authenticated user of any role
+ *   - reported SLA as `completedJobs * 0.92` — a fabricated constant
+ *   - injected fake repeat-call sites and fake wallet transactions whenever the
+ *     real result set was empty
+ *
+ * Every figure below is now derived from this company's own B2BJob /
+ * B2BWallet records. Empty data returns an empty result — never a fabricated one.
+ *
+ * Scope: `req.companyId` is set by `authenticate` from the JWT and is never
+ * read from the request body or query.
+ */
 
-// Helper to find the test B2B company or the current authenticated user's company
-const getCompanyContext = async (req) => {
-  // Try to find the company by email (using the test email for now)
-  const company = await B2BCompany.findOne({ email: 'b2b-enterprise@appzeto.com' });
-  return company;
+const mongoose = require('mongoose');
+const B2BJob = require('../models/B2BJob');
+const B2BWallet = require('../models/B2BWallet');
+const B2BWalletTransaction = require('../models/B2BWalletTransaction');
+
+/** Statuses that represent a finished job. */
+const COMPLETED_STATUSES = ['completed', 'closed'];
+
+const resolveCompanyId = (req) => {
+  const id = req.companyId || req.user?.companyId || req.user?.id;
+  return id ? new mongoose.Types.ObjectId(String(id)) : null;
 };
 
-// 1. Heatmap Data API
+const parseWindow = (req) => {
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  return { from, days };
+};
+
+/**
+ * GET /api/b2b-dashboard/heatmap
+ * Job density for this company only.
+ */
 exports.getB2BHeatmapData = async (req, res) => {
   try {
-    const company = await getCompanyContext(req);
-    if (!company) {
-      return res.status(404).json({ success: false, message: 'B2B Company not found' });
+    const companyId = resolveCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ success: false, message: 'Company context required' });
     }
 
-    const bookings = await Booking.find({ paymentStatus: 'escrowed', 'address.location.coordinates': { $exists: true } })
-      .select('address.location.coordinates status serviceName');
+    const { from } = parseWindow(req);
 
-    const heatmapData = bookings.map(b => ({
-      lat: b.address.location.coordinates[1],
-      lng: b.address.location.coordinates[0],
-      intensity: 1, // weight
-      status: b.status,
-      service: b.serviceName
-    }));
+    const jobs = await B2BJob.find({
+      companyId,
+      createdAt: { $gte: from },
+      'coordinates.coordinates': { $exists: true, $ne: [] }
+    })
+      .select('coordinates status service city')
+      .limit(5000)
+      .lean();
 
-    res.status(200).json({ success: true, data: heatmapData });
+    const heatmapData = jobs
+      .filter((j) => Array.isArray(j.coordinates?.coordinates) && j.coordinates.coordinates.length === 2)
+      .map((j) => ({
+        lat: j.coordinates.coordinates[1],
+        lng: j.coordinates.coordinates[0],
+        intensity: 1,
+        status: j.status,
+        service: j.service,
+        city: j.city
+      }));
+
+    return res.status(200).json({ success: true, data: heatmapData });
   } catch (error) {
-    console.error('Heatmap error:', error);
-    res.status(500).json({ success: false, message: 'Server Error' });
+    console.error('[B2B Dashboard] heatmap error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load heatmap data' });
   }
 };
 
-// 2. SLA Metrics (Gauges)
+/**
+ * GET /api/b2b-dashboard/sla
+ * Real SLA adherence: completion time measured against each job's slaTarget.
+ * Jobs without an slaTarget are excluded from the percentage rather than
+ * silently counted as compliant.
+ */
 exports.getB2BSLAMetrics = async (req, res) => {
   try {
-    const totalJobs = await Booking.countDocuments({ paymentStatus: 'escrowed' });
-    const completedJobs = await Booking.countDocuments({ paymentStatus: 'escrowed', status: 'COMPLETED' });
-    
-    const onTimeArrivals = Math.floor(completedJobs * 0.92); 
-    const slaPercentage = totalJobs === 0 ? 100 : Math.round((onTimeArrivals / totalJobs) * 100);
+    const companyId = resolveCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ success: false, message: 'Company context required' });
+    }
 
-    res.status(200).json({
+    const { from, days } = parseWindow(req);
+    const match = { companyId, createdAt: { $gte: from } };
+
+    const [totals] = await B2BJob.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalJobs: { $sum: 1 },
+          completedJobs: {
+            $sum: { $cond: [{ $in: ['$status', COMPLETED_STATUSES] }, 1, 0] }
+          },
+          // Measurable = completed, with both an SLA target and the timestamps
+          // needed to evaluate it.
+          measurable: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ['$status', COMPLETED_STATUSES] },
+                    { $gt: ['$slaTarget', 0] },
+                    { $ne: ['$completedAt', null] },
+                    { $ne: ['$assignedAt', null] }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          },
+          withinSla: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ['$status', COMPLETED_STATUSES] },
+                    { $gt: ['$slaTarget', 0] },
+                    { $ne: ['$completedAt', null] },
+                    { $ne: ['$assignedAt', null] },
+                    {
+                      $lte: [
+                        {
+                          $divide: [
+                            { $subtract: ['$completedAt', '$assignedAt'] },
+                            1000 * 60
+                          ]
+                        },
+                        '$slaTarget'
+                      ]
+                    }
+                  ]
+                },
+                1,
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    const totalJobs = totals?.totalJobs || 0;
+    const completedJobs = totals?.completedJobs || 0;
+    const measurable = totals?.measurable || 0;
+    const withinSla = totals?.withinSla || 0;
+
+    return res.status(200).json({
       success: true,
       data: {
+        windowDays: days,
         totalJobs,
         completedJobs,
-        onTimeArrivals,
-        slaPercentage
+        // Jobs the SLA percentage is actually computed from.
+        measurableJobs: measurable,
+        withinSla,
+        breachedSla: Math.max(0, measurable - withinSla),
+        // null (not 100) when nothing is measurable — the UI must show "no data"
+        // rather than an unearned perfect score.
+        slaPercentage: measurable > 0 ? Math.round((withinSla / measurable) * 100) : null
       }
     });
   } catch (error) {
-    console.error('SLA error:', error);
-    res.status(500).json({ success: false, message: 'Server Error' });
+    console.error('[B2B Dashboard] sla error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load SLA metrics' });
   }
 };
 
-// 3. Chronic Repeat Tracker (Hardware Failure)
+/**
+ * GET /api/b2b-dashboard/repeat-calls
+ * Sites that generated more than one job in the window — a real repeat-failure
+ * signal, grouped by site identity rather than free-text address where possible.
+ */
 exports.getChronicRepeatCalls = async (req, res) => {
   try {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const companyId = resolveCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ success: false, message: 'Company context required' });
+    }
 
-    const repeats = await Booking.aggregate([
-      { $match: { paymentStatus: 'escrowed', createdAt: { $gte: thirtyDaysAgo } } },
-      { $group: { 
-          _id: '$address.addressLine1', 
-          count: { $sum: 1 }, 
-          bookings: { $push: '$$ROOT' } 
-        } 
+    const { from, days } = parseWindow(req);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+
+    const repeats = await B2BJob.aggregate([
+      { $match: { companyId, createdAt: { $gte: from } } },
+      {
+        $group: {
+          _id: { $ifNull: ['$siteId', '$address'] },
+          count: { $sum: 1 },
+          lastIssueDate: { $max: '$createdAt' },
+          city: { $last: '$city' },
+          address: { $last: '$address' },
+          services: { $addToSet: '$service' }
+        }
       },
-      { $match: { count: { $gt: 1 } } } 
+      { $match: { count: { $gt: 1 } } },
+      { $sort: { count: -1, lastIssueDate: -1 } },
+      { $limit: limit }
     ]);
 
-    const formattedRepeats = repeats.map(r => ({
-      location: r._id,
+    const data = repeats.map((r) => ({
+      location: r.address || String(r._id || 'Unknown site'),
+      city: r.city || null,
       repeatCount: r.count,
-      lastIssueDate: r.bookings[r.bookings.length - 1].createdAt,
+      lastIssueDate: r.lastIssueDate,
+      services: r.services.filter(Boolean),
       riskLevel: r.count > 3 ? 'Critical' : 'High'
     }));
 
-    if (formattedRepeats.length === 0) {
-      formattedRepeats.push({
-        location: "ATM Site #442, MG Road, Bangalore",
-        repeatCount: 4,
-        lastIssueDate: new Date(),
-        riskLevel: 'Critical'
-      });
-      formattedRepeats.push({
-        location: "Server Room, Tech Park, Pune",
-        repeatCount: 2,
-        lastIssueDate: new Date(Date.now() - 86400000 * 2),
-        riskLevel: 'High'
-      });
-    }
-
-    res.status(200).json({ success: true, data: formattedRepeats });
+    // Empty means no repeat failures in this window. That is a real result.
+    return res.status(200).json({ success: true, data, windowDays: days });
   } catch (error) {
-    console.error('Repeat tracker error:', error);
-    res.status(500).json({ success: false, message: 'Server Error' });
+    console.error('[B2B Dashboard] repeat-calls error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load repeat calls' });
   }
 };
 
-// 4. Financial Ledger API
+/**
+ * GET /api/b2b-dashboard/ledger
+ * This company's wallet position and recent transactions.
+ */
 exports.getB2BFinancialLedger = async (req, res) => {
   try {
-    const company = await getCompanyContext(req);
-    if (!company) {
-      return res.status(404).json({ success: false, message: 'Company not found' });
+    const companyId = resolveCompanyId(req);
+    if (!companyId) {
+      return res.status(401).json({ success: false, message: 'Company context required' });
     }
 
-    const wallet = await B2BWallet.findOne({ companyId: company._id });
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+
+    const wallet = await B2BWallet.findOne({ companyId }).lean();
     if (!wallet) {
-      return res.status(200).json({ success: true, data: { balance: 0, escrowBalance: 0, transactions: [] } });
+      return res.status(200).json({
+        success: true,
+        data: { balance: 0, escrowBalance: 0, totalSpent: 0, transactions: [] }
+      });
     }
 
-    let transactions = await B2BWalletTransaction.find({ walletId: wallet._id })
+    const transactions = await B2BWalletTransaction.find({ companyId, walletId: wallet._id })
       .sort({ createdAt: -1 })
-      .limit(50);
-      
-    if (transactions.length === 0) {
-      transactions = [
-        {
-          _id: new mongoose.Types.ObjectId(),
-          type: 'CREDIT',
-          amount: 1500,
-          description: 'Partial Refund - Customer Dependency (Missing Parts)',
-          status: 'COMPLETED',
-          createdAt: new Date()
-        },
-        {
-          _id: new mongoose.Types.ObjectId(),
-          type: 'DEBIT',
-          amount: 5000,
-          description: 'Escrow Frozen for Project Rollout #991',
-          status: 'COMPLETED',
-          createdAt: new Date(Date.now() - 86400000)
-        },
-        {
-           _id: new mongoose.Types.ObjectId(),
-           type: 'CREDIT',
-           amount: 100000,
-           description: 'Pre-funded Wallet Load (ACH Transfer)',
-           status: 'COMPLETED',
-           createdAt: new Date(Date.now() - 86400000 * 2)
-        }
-      ];
-    }
+      .limit(limit)
+      .lean();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: {
-        balance: wallet.balance,
+        balance: wallet.balance || 0,
         escrowBalance: wallet.escrowBalance || 0,
         totalSpent: wallet.totalSpent || 0,
+        currency: wallet.currency || 'INR',
         transactions
       }
     });
   } catch (error) {
-    console.error('Ledger error:', error);
-    res.status(500).json({ success: false, message: 'Server Error' });
+    console.error('[B2B Dashboard] ledger error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load financial ledger' });
   }
 };

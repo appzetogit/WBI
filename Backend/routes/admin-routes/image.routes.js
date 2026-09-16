@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { uploadImage } = require('../../middleware/uploadMiddleware');
+const { uploadLimiter } = require('../../middleware/rateLimiter');
+
+// Public by necessity (pre-auth signup wizards); bounded by mime/size filters
+// in uploadMiddleware plus this volume limit. See upload.routes.js.
+router.use(uploadLimiter);
 
 // Upload single file to Cloudinary
 router.post('/upload', uploadImage, async (req, res) => {

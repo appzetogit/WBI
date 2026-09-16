@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { TXN_OPTS } = require('../../utils/txnOptions');
 const VendorProjectAssignment = require('../../models/VendorProjectAssignment');
 const ProjectOS = require('../../models/projectOS/ProjectOS');
 const ProjectTemplate = require('../../models/projectOS/ProjectTemplate');
@@ -164,7 +165,7 @@ exports.validateAssignment = async (req, res) => {
 // 4. Create Assignment
 exports.createAssignment = async (req, res) => {
   const session = await mongoose.startSession();
-  session.startTransaction();
+  session.startTransaction(TXN_OPTS);
   
   try {
     const vendorId = req.user.id;

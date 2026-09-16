@@ -138,9 +138,13 @@ const AssignedJobs = () => {
     return (
       <div
         key={job._id}
-        onClick={() =>
-          navigate(job.isOpsJob ? `/engineer/ops-jobs/${job._id}` : `/engineer/job/${job._id}`)
-        }
+        onClick={() => {
+          // Each job family has its own detail route and its own API. Opening a
+          // B2B job on /engineer/job/:id hits the B2C booking endpoint and 404s.
+          if (job.isOpsJob) return navigate(`/engineer/ops-jobs/${job._id}`);
+          if (job.isB2BJob || job.jobType === 'b2b') return navigate('/engineer/b2b-jobs');
+          return navigate(`/engineer/job/${job._id}`);
+        }}
         className="bg-white rounded-[1.25rem] p-4 shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-slate-100 cursor-pointer active:scale-[0.98] transition-transform"
       >
         <div className="flex gap-4">

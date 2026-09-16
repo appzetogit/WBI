@@ -16,7 +16,7 @@ const DEFAULT_CONFIG = {
   maxCapacityPerMonth: 10,
   dashboardWidgets: ['wallet', 'active_projects', 'available_engineers', 'sla_adherence'],
   sidebarSections: [
-    'Dashboard', 'Business Intake', 'Clients & Contracts',
+    'Dashboard', 'Requests', 'My Jobs', 'Business Intake', 'Clients & Contracts',
     'Project Operations', 'Workforce', 'Resources',
     'Quality & Control', 'Finance', 'Performance',
     'Compliance', 'Notifications', 'Support', 'Settings'

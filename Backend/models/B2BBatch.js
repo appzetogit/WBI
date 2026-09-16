@@ -55,6 +55,16 @@ const b2bBatchSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  /**
+   * Transparent cost preview produced by b2bPricingEngine at validation time.
+   * `lines` groups billable rows by their pricing dimensions (service, tier,
+   * geography) so a mixed-service batch shows a real itemised breakdown rather
+   * than one blended rate. Null when the legacy flat-rate fallback was used.
+   */
+  pricingBreakdown: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null
+  },
   walletBalanceAtUpload: {
     type: Number,
     default: 0
@@ -96,5 +106,7 @@ const b2bBatchSchema = new mongoose.Schema({
 });
 
 b2bBatchSchema.index({ createdAt: -1 });
+// Batch history is always listed per company, newest first.
+b2bBatchSchema.index({ companyId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('B2BBatch', b2bBatchSchema);

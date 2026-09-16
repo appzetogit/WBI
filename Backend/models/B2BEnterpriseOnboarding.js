@@ -99,6 +99,18 @@ const b2bEnterpriseOnboardingSchema = new mongoose.Schema(
       rejectionReason: { type: String, default: null },
       holdReason: { type: String, default: null }
     },
+    stepCompletion: {
+      type: Map,
+      of: new mongoose.Schema(
+        {
+          completed: { type: Boolean, default: false },
+          completedAt: { type: Date, default: null },
+          validationErrors: { type: [String], default: [] }
+        },
+        { _id: false }
+      ),
+      default: () => new Map()
+    },
     timeline: [timelineEventSchema],
     submittedAt: { type: Date, default: null },
     activatedAt: { type: Date, default: null },

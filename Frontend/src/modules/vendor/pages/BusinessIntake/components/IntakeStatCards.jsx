@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
 import { Briefcase, UserCircle, Building2, FileText, CheckCircle2 } from 'lucide-react';
-import useBusinessIntakeCounts from '../../../hooks/useBusinessIntakeCounts';
+import { useVendorCounts } from '../../../context/VendorCountsContext';
 import useVendorBasePath from '../../../hooks/useVendorBasePath';
 import StatCard from './StatCard';
 
 const IntakeStatCards = () => {
-  const { counts, loading } = useBusinessIntakeCounts();
+  const { businessIntake: { counts, loading } } = useVendorCounts();
   const { basePath } = useVendorBasePath();
   const b = `${basePath}/business-intake`;
 
