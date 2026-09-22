@@ -14,6 +14,21 @@ const JobStatusLog = require('../../models/JobStatusLog');
 // travelling, or had arrived showed no current job on the live map at all.
 const ACTIVE_JOB_STATUSES = ['accepted', 'travelling', 'arrived', 'in_progress'];
 
+const ADMIN_ROLES = ['ADMIN', 'super_admin', 'admin'];
+/**
+ * Job filter limiting a lookup to the caller's company. Engineers can work for
+ * several companies; a B2B user must only ever see their own company's jobs.
+ * Admins see every company (or the one they asked for).
+ */
+const jobScope = (req, adminCompanyId = null) => {
+  if (ADMIN_ROLES.includes(req.userRole)) {
+    return adminCompanyId && mongoose.Types.ObjectId.isValid(adminCompanyId)
+      ? { companyId: new mongoose.Types.ObjectId(String(adminCompanyId)) }
+      : {};
+  }
+  return { companyId: new mongoose.Types.ObjectId(String(req.companyId || req.user.companyId || req.user.id)) };
+};
+
 // Real road-network routing (OSRM). Uses a self-hosted instance when
 // OSRM_BASE_URL is configured, otherwise the public demo server — no API
 // key required. Falls back to straight-line interpolation only if the
@@ -227,6 +242,7 @@ exports.getEngineersList = async (req, res) => {
 
     // Fetch active B2B job for each engineer
     const activeJobs = await B2BJob.find({
+      ...jobScope(req, companyId),
       assignedTo: { $in: engineerIds },
       status: { $in: ACTIVE_JOB_STATUSES }
     }).lean();
@@ -255,7 +271,7 @@ exports.getEngineersList = async (req, res) => {
         name: eng.name,
         phone: eng.phone,
         email: eng.email,
-        rating: eng.rating || 4.5,
+        rating: eng.rating ?? null,
         profilePhoto: eng.profilePhoto || `https://ui-avatars.com/api/?name=${encodeURIComponent(eng.name)}&background=10AFA5&color=fff`,
         status: currentStatus,
         battery: session ? session.battery : 85,
@@ -339,6 +355,7 @@ exports.getEngineerDetails = async (req, res) => {
 
     const session = await EngineerLocationSession.findOne({ engineerId }).lean();
     const currentJob = await B2BJob.findOne({
+      ...jobScope(req),
       assignedTo: engineerId,
       status: { $in: ACTIVE_JOB_STATUSES }
     }).lean();
@@ -347,6 +364,7 @@ exports.getEngineerDetails = async (req, res) => {
     const startOfToday = new Date();
     startOfToday.setHours(0,0,0,0);
     const todayJobsCount = await B2BJob.countDocuments({
+      ...jobScope(req),
       assignedTo: engineerId,
       createdAt: { $gte: startOfToday }
     });
@@ -356,7 +374,7 @@ exports.getEngineerDetails = async (req, res) => {
       name: engineer.name,
       phone: engineer.phone,
       email: engineer.email,
-      rating: engineer.rating || 4.5,
+      rating: engineer.rating ?? null,
       profilePhoto: engineer.profilePhoto || `https://ui-avatars.com/api/?name=${encodeURIComponent(engineer.name)}&background=10AFA5&color=fff`,
       status: session ? (session.isOnline ? session.status : 'offline') : 'offline',
       battery: session ? session.battery : 90,
@@ -454,6 +472,7 @@ exports.getEngineerTimeline = async (req, res) => {
     // Find current or most recent job (active statuses plus completed, so the
     // timeline stays viewable right after a job wraps up)
     const activeJob = await B2BJob.findOne({
+      ...jobScope(req),
       assignedTo: engineerId,
       status: { $in: [...ACTIVE_JOB_STATUSES, 'completed'] }
     })
@@ -538,16 +557,23 @@ exports.getJobRoute = async (req, res) => {
 };
 
 /**
- * POST Force refresh simulation / triggers
+ * POST Recalculate ETAs for the caller's active jobs
  */
 exports.refreshTracking = async (req, res) => {
   try {
-    // This can trigger an ETA recalculation across all active tracking sessions.
-    // For demo/sim, we ensure all offline sessions update timestamps or mock statuses.
-    const sessions = await EngineerLocationSession.find({ isOnline: true }).lean();
+    // Recalculate ETAs for the caller's active jobs from the engineers' last
+    // known positions. A company only ever touches its own jobs.
+    const scope = jobScope(req);
+    let sessionFilter = { isOnline: true };
+    if (scope.companyId) {
+      const ids = await getCompanyEngineerIds(scope.companyId);
+      sessionFilter = { ...sessionFilter, engineerId: { $in: ids } };
+    }
+    const sessions = await EngineerLocationSession.find(sessionFilter).lean();
     
     for (const sess of sessions) {
       const activeJob = await B2BJob.findOne({
+        ...scope,
         assignedTo: sess.engineerId,
         status: { $in: ACTIVE_JOB_STATUSES }
       });

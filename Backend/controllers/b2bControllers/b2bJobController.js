@@ -9,6 +9,9 @@ const EngineerRating = require('../../models/EngineerRating');
 const QuoteApproval = require('../../models/QuoteApproval');
 const B2BCompany = require('../../models/B2BCompany');
 
+/** The signed-in actor, whatever the auth middleware called the field. */
+const actorId = (req) => req.user?._id || req.user?.id || null;
+
 /**
  * GET Stats (KPIs)
  */
@@ -93,8 +96,20 @@ const getStats = async (req, res) => {
       }
     ];
 
+    // Panel views (Pending, Dispatched, …) counted in the same pass.
+    // $facet cannot nest, so they sit beside the legacy counters, prefixed.
+    const { viewCountFacets, VIEW_KEYS, VIEW_LABELS } = require('../../services/b2bJobViews');
+    for (const [key, stages] of Object.entries(viewCountFacets())) {
+      statsPipeline[1].$facet[`view_${key}`] = stages;
+    }
+
     const result = await B2BJob.aggregate(statsPipeline);
     const data = result[0] || {};
+    const views = VIEW_KEYS.map((key) => ({
+      key,
+      label: VIEW_LABELS[key],
+      count: data[`view_${key}`]?.[0]?.count || 0
+    }));
 
     const extractCount = (arr) => (arr && arr.length > 0 ? arr[0].count : 0);
     const extractTotal = (arr) => (arr && arr.length > 0 ? arr[0].total : 0);
@@ -146,7 +161,7 @@ const getStats = async (req, res) => {
       { name: 'Failed/Cancelled', value: stats.failed + stats.cancelled + stats.rejected, color: '#ef4444' }
     ];
 
-    return res.status(200).json({ success: true, stats, chartData });
+    return res.status(200).json({ success: true, stats, chartData, views });
   } catch (error) {
     console.error('[MyJobs getStats]', error);
     return res.status(500).json({ success: false, message: 'Server error fetching stats' });
@@ -242,58 +257,73 @@ const getRecentActivity = async (req, res) => {
 /**
  * GET Jobs (List with pagination and filters)
  */
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const SORTABLE_FIELDS = ['createdAt', 'updatedAt', 'preferredDate', 'priority', 'jobId', 'customerName', 'city', 'service', 'charge', 'slaDueAt'];
+
+/**
+ * The company's job filter from query params — shared by the list and the
+ * CSV export so an export is always exactly what the screen showed.
+ */
+const buildJobsFilter = (companyId, q = {}) => {
+  const { viewFilter } = require('../../services/b2bJobViews');
+  const and = [];
+
+  const view = viewFilter(q.view);
+  if (view) and.push(view);
+
+  const search = typeof q.search === 'string' ? q.search.trim().slice(0, 100) : '';
+  if (search) {
+    const rx = { $regex: escapeRegex(search), $options: 'i' };
+    and.push({
+      $or: [
+        { jobId: rx }, { customerName: rx }, { phone: rx }, { assignedToName: rx },
+        { assignedVendorName: rx }, { service: rx }, { address: rx }, { customerRef: rx }
+      ]
+    });
+  }
+
+  const filter = { companyId };
+  // Legacy status filter — comma-separated statuses (e.g. failed,cancelled,rejected)
+  if (q.status && q.status !== 'all') {
+    const statuses = String(q.status).split(',').map((s) => s.trim().toLowerCase().replace(/\s+/g, '_')).filter(Boolean);
+    if (statuses.length === 1) filter.status = statuses[0];
+    else if (statuses.length > 1) filter.status = { $in: statuses };
+  }
+  if (q.service && q.service !== 'all') filter.service = String(q.service);
+  if (q.city && q.city !== 'all') filter.city = String(q.city);
+  if (q.priority && q.priority !== 'all') filter.priority = String(q.priority);
+  if (q.paymentStatus && q.paymentStatus !== 'all') filter.paymentStatus = String(q.paymentStatus);
+  if (q.batchId && q.batchId !== 'all' && mongoose.Types.ObjectId.isValid(q.batchId)) filter.batchId = q.batchId;
+  if (q.allocationStage && q.allocationStage !== 'all') filter.allocationStage = String(q.allocationStage);
+  if (q.assignmentType && q.assignmentType !== 'all') filter.assignmentType = String(q.assignmentType);
+
+  if (q.startDate || q.endDate) {
+    filter.createdAt = {};
+    if (q.startDate && !isNaN(Date.parse(q.startDate))) filter.createdAt.$gte = new Date(q.startDate);
+    if (q.endDate && !isNaN(Date.parse(q.endDate))) {
+      filter.createdAt.$lte = new Date(new Date(q.endDate).setHours(23, 59, 59, 999));
+    }
+    if (!Object.keys(filter.createdAt).length) delete filter.createdAt;
+  }
+
+  if (and.length) filter.$and = and;
+  return filter;
+};
+
 const getJobs = async (req, res) => {
   try {
     const companyId = req.companyId || req.user.companyId || req.user.id;
-    const { 
-      page = 1, limit = 10, search, status, service, city, priority, 
-      paymentStatus, startDate, endDate, batchId, sort = 'createdAt', order = 'desc' 
-    } = req.query;
+    const filter = buildJobsFilter(companyId, req.query);
 
-    const filter = { companyId };
-
-    // Text search on multiple fields
-    if (search) {
-      const searchRegex = { $regex: search, $options: 'i' };
-      filter.$or = [
-        { jobId: searchRegex },
-        { customerName: searchRegex },
-        { phone: searchRegex },
-        { assignedToName: searchRegex },
-        { service: searchRegex },
-        { address: searchRegex }
-      ];
-    }
-
-    // Direct filters — support comma-separated statuses (e.g. failed,cancelled,rejected)
-    if (status && status !== 'all') {
-      const statuses = String(status).split(',').map((s) => s.trim().toLowerCase().replace(/\s+/g, '_')).filter(Boolean);
-      if (statuses.length === 1) filter.status = statuses[0];
-      else if (statuses.length > 1) filter.status = { $in: statuses };
-    }
-    if (service && service !== 'all') filter.service = service;
-    if (city && city !== 'all') filter.city = city;
-    if (priority && priority !== 'all') filter.priority = priority;
-    if (paymentStatus && paymentStatus !== 'all') filter.paymentStatus = paymentStatus;
-    if (batchId && batchId !== 'all') filter.batchId = batchId;
-    if (req.query.allocationStage && req.query.allocationStage !== 'all') {
-      filter.allocationStage = req.query.allocationStage;
-    }
-
-    // Date range
-    if (startDate && endDate) {
-      filter.createdAt = {
-        $gte: new Date(startDate),
-        $lte: new Date(new Date(endDate).setHours(23,59,59,999))
-      };
-    }
-
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 200);
     const skip = (pageNum - 1) * limitNum;
-    
-    const sortParams = { [sort]: order === 'desc' ? -1 : 1 };
 
+    const sortField = SORTABLE_FIELDS.includes(req.query.sort) ? req.query.sort : 'createdAt';
+    const sortParams = { [sortField]: req.query.order === 'asc' ? 1 : -1, _id: -1 };
+
+    const { viewOfJob } = require('../../services/b2bJobViews');
     const [jobs, total] = await Promise.all([
       B2BJob.find(filter)
         .populate('batchId', 'batchId fileName')
@@ -307,7 +337,11 @@ const getJobs = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: jobs,
+      data: jobs.map((j) => ({
+        ...j,
+        view: viewOfJob(j),
+        slaBreached: Array.isArray(j.sla?.breaches) && j.sla.breaches.length > 0
+      })),
       pagination: {
         total,
         page: pageNum,
@@ -317,35 +351,52 @@ const getJobs = async (req, res) => {
     });
 
   } catch (error) {
+    if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
     console.error('[MyJobs getJobs]', error);
     return res.status(500).json({ success: false, message: 'Server error fetching jobs' });
   }
 };
 
+const csvCell = (v) => {
+  let s = v === null || v === undefined ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // spreadsheet formula injection
+  return `"${s.replace(/"/g, '""')}"`;
+};
+
 /**
- * GET Export Jobs (CSV)
+ * GET Export Jobs (CSV) — same filters as the list, including the view.
  */
 const exportJobs = async (req, res) => {
   try {
     const companyId = req.companyId || req.user.companyId || req.user.id;
-    const filter = { companyId };
-    
-    // Apply same filters as GET (simplified for brevity)
-    if (req.query.status && req.query.status !== 'all') filter.status = req.query.status;
+    const filter = buildJobsFilter(companyId, req.query);
+    const { viewOfJob, VIEW_LABELS } = require('../../services/b2bJobViews');
 
-    const jobs = await B2BJob.find(filter).lean();
-    
-    // Build CSV
-    let csv = 'Job ID,Customer Name,Phone,Service,City,Priority,Status,Payment Status,Charge,Created Date\n';
-    jobs.forEach(j => {
-      csv += `${j.jobId},"${j.customerName}",${j.phone},"${j.service}","${j.city}",${j.priority},${j.status},${j.paymentStatus},${j.charge},${j.createdAt}\n`;
-    });
+    const EXPORT_CAP = 50000;
+    const jobs = await B2BJob.find(filter).sort({ createdAt: -1 }).limit(EXPORT_CAP).lean();
 
-    res.header('Content-Type', 'text/csv');
+    const header = ['Job ID', 'Customer Ref', 'Customer Name', 'Phone', 'Service', 'Address', 'City', 'Pincode',
+      'Priority', 'View', 'Lifecycle Status', 'Status', 'Assignment', 'Vendor', 'Engineer',
+      'Payment Status', 'Wallet Status', 'Amount', 'SLA Breaches', 'Created At', 'Updated At'];
+    const lines = [header.map(csvCell).join(',')];
+    for (const j of jobs) {
+      lines.push([
+        j.jobId, j.customerRef, j.customerName, j.phone, j.service, j.address, j.city, j.pincode,
+        j.priority, VIEW_LABELS[viewOfJob(j)], j.lifecycleStatus, j.status, j.assignmentType,
+        j.assignedVendorName, j.assignedToName, j.paymentStatus, j.walletStatus,
+        j.pricing?.totalAmount || j.charge || 0,
+        (j.sla?.breaches || []).map((b) => b.metric).join(' | '),
+        j.createdAt ? new Date(j.createdAt).toISOString() : '',
+        j.updatedAt ? new Date(j.updatedAt).toISOString() : ''
+      ].map(csvCell).join(','));
+    }
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.attachment(`WBI_Jobs_Export_${Date.now()}.csv`);
-    return res.send(csv);
+    return res.send('﻿' + lines.join('\n'));
 
   } catch (error) {
+    if (error.status === 400) return res.status(400).json({ success: false, message: error.message });
     console.error('[MyJobs exportJobs]', error);
     return res.status(500).json({ success: false, message: 'Failed to export' });
   }
@@ -370,8 +421,13 @@ const getJobDetails = async (req, res) => {
 };
 
 /**
- * PATCH Update Job
+ * PATCH Update Job — company-editable job details only.
+ * Status, assignment, money and routing fields are never writable here: they
+ * change only through the lifecycle/assignment services.
  */
+const B2B_EDITABLE_FIELDS = ['customerName', 'phone', 'email', 'preferredDate', 'preferredTime', 'priority', 'deviceId', 'siteId'];
+const B2B_EDITABLE_BEFORE_ASSIGNMENT = ['address', 'city', 'state', 'pincode'];
+
 const updateJob = async (req, res) => {
   try {
     const companyId = req.companyId || req.user.companyId || req.user.id;
@@ -385,57 +441,98 @@ const updateJob = async (req, res) => {
       });
     }
 
-    const job = await B2BJob.findOneAndUpdate(
-      { _id: req.params.id, companyId },
-      { $set: req.body },
-      { new: true }
-    );
-    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
-    
-    // Log status change if status was updated
-    if (req.body.status) {
-      await B2BJobStatusLog.create({
-        jobId: job._id,
-        status: req.body.status,
-        updatedBy: req.user.id
-      });
-      // Emit socket event globally
-      const io = req.app.get('io');
-      if (io) io.emit('job_updated', { jobId: job._id, status: req.body.status });
+    const { lifecycleOf } = require('../../services/jobLifecycle.service');
+    const { LIFECYCLE: S, TERMINAL_STATES } = require('../../services/jobStateMachine');
+    const state = lifecycleOf(existing);
+    if (TERMINAL_STATES.includes(state)) {
+      return res.status(409).json({ success: false, message: `Job is ${state} and can no longer be edited` });
     }
 
-    return res.status(200).json({ success: true, data: job });
+    const body = req.body || {};
+    const allowed = [...B2B_EDITABLE_FIELDS];
+    const unassigned = !existing.assignedTo && [S.CREATED, S.VALIDATED, S.ROUTED, S.PENDING_ASSIGNMENT, S.UNASSIGNED, S.ON_HOLD].includes(state);
+    if (unassigned) allowed.push(...B2B_EDITABLE_BEFORE_ASSIGNMENT);
+
+    const rejected = Object.keys(body).filter((k) => !allowed.includes(k));
+    if (rejected.length) {
+      return res.status(400).json({
+        success: false,
+        message: `These fields cannot be changed here: ${rejected.join(', ')}` +
+          (rejected.includes('status') ? '. Use cancel / approve-work to change a job\'s status.' : '')
+      });
+    }
+
+    const update = {};
+    for (const key of allowed) {
+      if (body[key] !== undefined) update[key] = body[key];
+    }
+    if (update.priority && !['Low', 'Medium', 'High'].includes(update.priority)) {
+      return res.status(400).json({ success: false, message: 'priority must be Low, Medium or High' });
+    }
+    if (update.pincode !== undefined && update.pincode !== '' && !/^[1-9][0-9]{5}$/.test(String(update.pincode))) {
+      return res.status(400).json({ success: false, message: 'pincode must be a valid 6-digit pincode' });
+    }
+
+    Object.assign(existing, update);
+    await existing.save();
+
+    const { recordJobEvent } = require('../../services/jobLifecycle.service');
+    await recordJobEvent({
+      jobId: existing._id,
+      event: 'JOB_DETAILS_UPDATED',
+      actor: { id: req.user.id, role: 'company' },
+      remark: `Updated: ${Object.keys(update).join(', ') || 'nothing'}`,
+      meta: { fields: Object.keys(update) }
+    });
+
+    return res.status(200).json({ success: true, data: existing });
   } catch (error) {
+    console.error('[b2b updateJob]', error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
 /**
- * DELETE Cancel Job
+ * DELETE Cancel Job — allowed only before the engineer is on the way
+ * (state machine: CANCELLED is reachable from ACCEPTED and earlier).
  */
 const cancelJob = async (req, res) => {
   try {
     const companyId = req.companyId || req.user.companyId || req.user.id;
-    const job = await B2BJob.findOne({ _id: req.params.id, companyId });
+    const job = await B2BJob.findOne({ _id: req.params.id, companyId }).lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    if (['completed', 'closed', 'cancelled'].includes(job.status)) {
-      return res
-        .status(400)
-        .json({ success: false, message: `Job is already ${job.status} and cannot be cancelled` });
-    }
-    if (['in_progress'].includes(job.status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Work has already started. Raise a support ticket to stop this job.'
+    const { transitionJob } = require('../../services/jobLifecycle.service');
+    const { LIFECYCLE: S } = require('../../services/jobStateMachine');
+    const actor = { id: req.user.id, role: 'company' };
+    const reason = String(req.body?.reason || 'Cancelled by company').slice(0, 300);
+    try {
+      await transitionJob({
+        jobId: job._id,
+        to: S.CANCELLED,
+        actor,
+        reason,
+        event: 'JOB_CANCELLED',
+        patch: {
+          allocationStage: 'not_started',
+          allocationReason: reason,
+          allocationUpdatedAt: new Date()
+        },
+        extraRooms: (job.notifiedVendors || []).map((v) => `vendor:${v}`)
       });
+    } catch (err) {
+      if (err.code === 'INVALID_TRANSITION') {
+        return res.status(409).json({
+          success: false,
+          code: err.code,
+          message: `This job is ${err.from} and can no longer be cancelled. Raise a support ticket to stop it.`
+        });
+      }
+      throw err;
     }
 
-    job.status = 'cancelled';
-    job.allocationStage = 'not_started';
-    job.allocationReason = 'Cancelled by company';
-    job.allocationUpdatedAt = new Date();
-    await job.save();
+    const { closeAssignmentForJob } = require('../../services/jobAssignment.service');
+    await closeAssignmentForJob({ jobId: job._id, outcome: 'cancelled', actor, reason }).catch(() => {});
 
     // Stop the allocation engine and return any escrowed funds to the wallet.
     const Opportunity = require('../../models/Opportunity');
@@ -470,9 +567,6 @@ const cancelJob = async (req, res) => {
       updatedBy: req.user.id
     });
 
-    const io = req.app.get('io');
-    if (io) io.emit('job_cancelled', { jobId: job._id });
-
     return res.status(200).json({
       success: true,
       message: refund?.ok
@@ -480,10 +574,10 @@ const cancelJob = async (req, res) => {
         : 'Job cancelled successfully'
     });
   } catch (error) {
+    console.error('[b2b cancelJob]', error);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
 /**
  * POST Retry allocation for a job that stalled or was escalated to admin.
  */
@@ -504,9 +598,6 @@ const rematchJob = async (req, res) => {
       return res.status(result.status || 400).json({ success: false, message: result.message });
     }
 
-    const io = req.app.get('io');
-    if (io) io.emit('job_updated', { jobId: job._id, status: 'pending' });
-
     return res.status(200).json({
       success: true,
       message: 'Matching restarted — engineers and vendors are being contacted again',
@@ -523,7 +614,12 @@ const rematchJob = async (req, res) => {
  */
 const getJobTimeline = async (req, res) => {
   try {
-    const logs = await B2BJobStatusLog.find({ jobId: req.params.id }).sort({ timestamp: -1 });
+    // Only the owning company may read a job's history.
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id) || !(await B2BJob.exists({ _id: req.params.id, companyId }))) {
+      return res.status(404).json({ success: false, message: 'Job not found' });
+    }
+    const logs = await B2BJobStatusLog.find({ jobId: req.params.id }).sort({ timestamp: -1 }).limit(500);
     return res.status(200).json({ success: true, data: logs });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
@@ -535,9 +631,12 @@ const getJobTimeline = async (req, res) => {
  */
 const reassignEngineer = async (req, res) => {
   try {
-    const { jobId, engineerId } = req.body;
+    const { jobId, engineerId, reason } = req.body || {};
     const companyId = req.companyId || req.user.companyId || req.user.id;
-    const job = await B2BJob.findOne({ _id: jobId, companyId });
+    if (!mongoose.Types.ObjectId.isValid(jobId) || !mongoose.Types.ObjectId.isValid(engineerId)) {
+      return res.status(400).json({ success: false, message: 'Valid jobId and engineerId are required' });
+    }
+    const job = await B2BJob.findOne({ _id: jobId, companyId }).lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
     if (job.requiresNewJob || job.reopenBlocked) {
@@ -546,60 +645,126 @@ const reassignEngineer = async (req, res) => {
         message: 'This job is permanently closed. Create a fresh job ticket instead of reassigning.'
       });
     }
+    // A vendor that holds a job chooses its own engineers; the company picks
+    // the vendor (routing), not the vendor's staff.
+    if (job.assignedVendorId) {
+      return res.status(403).json({
+        success: false,
+        message: 'A vendor is handling this job and assigns its own engineers. Contact support to change the vendor.'
+      });
+    }
 
-    const engineer = await Engineer.findById(engineerId);
-    if (!engineer) return res.status(404).json({ success: false, message: 'Engineer not found' });
+    const actor = { id: req.user.id, role: 'company' };
+    const svc = require('../../services/jobAssignment.service');
+    const result = job.assignedTo
+      ? await svc.reassignEngineer({ jobId: job._id, newEngineerId: engineerId, actor, reason: reason || 'Reassigned by company' })
+      : await svc.assignEngineer({ jobId: job._id, engineerId, actor, reason: reason || 'Assigned by company', routingMode: 'manual' });
 
-    job.assignedTo = engineer._id;
-    job.assignedToName = engineer.name || `${engineer.firstName || ''} ${engineer.lastName || ''}`.trim();
-    job.status = 'assigned';
-    // Issue fresh start OTP on reassign
-    const otp = (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true')
-      ? '123456'
-      : Math.floor(100000 + Math.random() * 900000).toString();
-    job.startOtp = otp;
-    job.startOtpSentAt = new Date();
-    job.startOtpVerifiedAt = null;
-    job.startedAt = null;
-    await job.save();
-
-    await B2BJobStatusLog.create({
-      jobId: job._id,
-      status: 'assigned',
-      updatedBy: req.user.id
-    });
-
-    const io = req.app.get('io');
-    if (io) io.emit('engineer_assigned', { jobId: job._id, engineerId: engineer._id });
-
-    return res.status(200).json({ success: true, message: 'Engineer reassigned', data: job });
+    await B2BJobStatusLog.create({ jobId: job._id, status: 'assigned', updatedBy: req.user.id });
+    return res.status(200).json({ success: true, message: 'Engineer reassigned', data: result.job, eligibility: result.eligibility });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    const { sendJobError } = require('../../services/jobScope.service');
+    return sendJobError(res, error, 'Failed to reassign engineer');
   }
 };
 
 /**
- * GET Live Tracking Placeholder
+ * GET Live Tracking — the assigned engineer's last reported position, the
+ * site, and the straight-line distance / ETA between them. Nothing is
+ * estimated when there is no position: the fields are null and say why.
  */
+const LOCATION_STALE_MINUTES = 10;
+const CITY_SPEED_KMH = 25;
+
+const haversineKm = (lat1, lon1, lat2, lon2) => {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
 const getLiveTracking = async (req, res) => {
-  // In production, this would query a Redis cache or a Location Tracking collection.
-  // For now, we return mock live data assuming the engineer is moving towards the job location.
   try {
-    const job = await B2BJob.findById(req.params.id);
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid job id' });
+    }
+    const job = await B2BJob.findOne({ _id: req.params.id, companyId })
+      .select('jobId address city coordinates assignedTo assignedToName lifecycleStatus status trackingStatus eta')
+      .populate('assignedTo', 'name firstName lastName phone profilePhoto profilePic')
+      .lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    // Mock response
+    const coords = job.coordinates?.coordinates;
+    const destination = Array.isArray(coords) && coords.length === 2 && (coords[0] || coords[1])
+      ? { lat: coords[1], lng: coords[0], address: job.address, city: job.city }
+      : null;
+
+    let engineerLocation = null;
+    let reason = null;
+    if (!job.assignedTo) {
+      reason = 'No engineer is assigned yet.';
+    } else {
+      const EngineerLocationSession = require('../../models/EngineerLocationSession');
+      const session = await EngineerLocationSession.findOne({ engineerId: job.assignedTo._id }).lean();
+      const c = session?.currentLocation?.coordinates;
+      if (Array.isArray(c) && c.length === 2) {
+        const updatedAt = session.lastUpdatedAt || session.updatedAt || null;
+        const ageMinutes = updatedAt ? Math.round((Date.now() - new Date(updatedAt).getTime()) / 60000) : null;
+        engineerLocation = {
+          lat: c[1],
+          lng: c[0],
+          updatedAt,
+          ageMinutes,
+          stale: ageMinutes === null || ageMinutes > LOCATION_STALE_MINUTES,
+          online: Boolean(session.isOnline),
+          heading: session.heading ?? null,
+          speed: session.speed ?? null
+        };
+      } else {
+        reason = 'The engineer has not shared a location yet.';
+      }
+    }
+
+    let distanceKm = null;
+    let etaMinutes = null;
+    if (engineerLocation && destination) {
+      distanceKm = Math.round(haversineKm(engineerLocation.lat, engineerLocation.lng, destination.lat, destination.lng) * 10) / 10;
+      etaMinutes = distanceKm <= 0.05 ? 0 : Math.ceil((distanceKm / CITY_SPEED_KMH) * 60);
+    } else if (engineerLocation && !destination) {
+      reason = 'The job site has no map coordinates.';
+    }
+
+    const { viewOfJob } = require('../../services/b2bJobViews');
+    const eng = job.assignedTo;
     return res.status(200).json({
       success: true,
       data: {
-        eta: '15 mins',
-        distance: '4.2 km',
-        engineerLocation: { lat: 19.0760, lng: 72.8777 },
-        destination: job.coordinates?.coordinates || [72.8777, 19.0760] // lng, lat
+        jobId: job.jobId,
+        view: viewOfJob(job),
+        lifecycleStatus: job.lifecycleStatus,
+        engineer: eng ? {
+          _id: eng._id,
+          name: eng.name || [eng.firstName, eng.lastName].filter(Boolean).join(' ') || job.assignedToName,
+          phone: eng.phone || null,
+          photo: eng.profilePhoto || eng.profilePic || null
+        } : null,
+        engineerLocation,
+        destination,
+        distanceKm,
+        etaMinutes,
+        // Straight-line distance at average city speed; road routing lives on the Live Map.
+        etaBasis: distanceKm !== null ? `straight-line distance at ${CITY_SPEED_KMH} km/h` : null,
+        // Legacy display strings for older clients.
+        eta: etaMinutes !== null ? `${etaMinutes} mins` : null,
+        distance: distanceKm !== null ? `${distanceKm} km` : null,
+        reason
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Server error' });
+    console.error('[MyJobs getLiveTracking]', error);
+    return res.status(500).json({ success: false, message: 'Failed to load live tracking' });
   }
 };
 
@@ -608,7 +773,12 @@ const getLiveTracking = async (req, res) => {
  */
 const getJobLogs = async (req, res) => {
   try {
-    const logs = await B2BJobStatusLog.find({ jobId: req.params.id }).sort({ timestamp: -1 });
+    // Only the owning company may read a job's history.
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    if (!mongoose.Types.ObjectId.isValid(req.params.id) || !(await B2BJob.exists({ _id: req.params.id, companyId }))) {
+      return res.status(404).json({ success: false, message: 'Job not found' });
+    }
+    const logs = await B2BJobStatusLog.find({ jobId: req.params.id }).sort({ timestamp: -1 }).limit(500);
     return res.status(200).json({ success: true, data: logs });
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Server error' });
@@ -730,21 +900,44 @@ const approveQuote = async (req, res) => {
       job.currentWave = 0;
       await job.save();
 
-      // 4. Deduct extra if proposed > original, or refund if less
+      // 4. Move the difference through the ledger: hold more when the quote
+      //    went up, hand the difference back when it went down.
       if (amountDiff !== 0) {
-        wallet.balance -= amountDiff;
-        await wallet.save();
-
-        await B2BWalletTransaction.create({
-          companyId,
-          walletId: wallet._id,
-          transactionId: `QA-${Date.now()}`,
-          type: 'job_deduction',
-          amount: -amountDiff,
-          totalAmount: -amountDiff,
-          status: 'success',
-          remark: `Quote adjustment for Job ${job.jobId} (${amountDiff > 0 ? '+' : ''}${amountDiff})`
-        });
+        const walletLedger = require('../../services/b2bWalletLedger.service');
+        const note = `Quote adjustment for job ${job.jobId} (${amountDiff > 0 ? '+' : ''}${amountDiff})`;
+        try {
+          if (amountDiff > 0) {
+            await walletLedger.reserve({
+              companyId,
+              amount: amountDiff,
+              reservationId: `JOB-${job._id}`,
+              jobId: job._id,
+              idempotencyKey: `quote-adjust:${quote._id}`,
+              remark: note,
+              actor: { actorId: actorId(req) || null, role: 'company' }
+            });
+          } else {
+            await walletLedger.release({
+              companyId,
+              amount: Math.abs(amountDiff),
+              reservationId: `JOB-${job._id}`,
+              jobId: job._id,
+              idempotencyKey: `quote-adjust:${quote._id}`,
+              remark: note,
+              actor: { actorId: actorId(req) || null, role: 'company' }
+            });
+          }
+        } catch (walletErr) {
+          if (walletErr.name === 'WalletError') {
+            return res.status(walletErr.status || 400).json({
+              success: false,
+              message: walletErr.message,
+              code: walletErr.code,
+              ...walletErr.details
+            });
+          }
+          throw walletErr;
+        }
       }
 
       try {

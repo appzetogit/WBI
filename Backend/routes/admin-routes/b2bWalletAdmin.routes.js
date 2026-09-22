@@ -7,7 +7,9 @@ const {
   getB2BWalletByCompany,
   updateDeductionRule,
   createAdjustment,
-  processRefund
+  processRefund,
+  reconcileWallet,
+  reverseTransaction
 } = require('../../controllers/adminControllers/b2bWalletAdminController');
 
 // All endpoints are admin-protected
@@ -18,5 +20,7 @@ router.get('/:companyId', getB2BWalletByCompany);
 router.patch('/:companyId/deduction-rule', updateDeductionRule);
 router.post('/:companyId/adjustment', createAdjustment);
 router.post('/:companyId/refund', processRefund);
+router.get('/:companyId/reconcile', reconcileWallet);
+router.post('/transactions/:transactionId/reverse', reverseTransaction);
 
 module.exports = router;

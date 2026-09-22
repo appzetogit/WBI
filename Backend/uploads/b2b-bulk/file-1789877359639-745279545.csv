@@ -1,0 +1,6 @@
+Customer Name,Phone,Email,Address,City,State,Pincode,Latitude,Longitude,Service,Sub Service,Priority,Preferred Date,Preferred Time
+Flow P Store,9876541100,flowp@example.test,"Unit 1, Palasia",Indore,Madhya Pradesh,452001,22.7196,75.8577,AC Repair,,Medium,27/09/2026,10:00-12:00
+Flow Q Store,9876541101,flowq@example.test,"Unit 2, Palasia",Indore,Madhya Pradesh,452002,22.7216,75.85969999999999,AC Repair,,Medium,27/09/2026,10:00-12:00
+Flow R Store,9876541102,flowr@example.test,"Unit 3, Palasia",Indore,Madhya Pradesh,452003,22.7236,75.8617,AC Repair,,Medium,27/09/2026,10:00-12:00
+Flow S Store,9876541103,flows@example.test,"Unit 4, Palasia",Indore,Madhya Pradesh,452004,22.7256,75.8637,AC Repair,,Medium,27/09/2026,10:00-12:00
+Flow T Store,9876541104,flowt@example.test,"Unit 5, Palasia",Indore,Madhya Pradesh,452005,22.7276,75.86569999999999,AC Repair,,Medium,27/09/2026,10:00-12:00

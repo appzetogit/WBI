@@ -7,6 +7,8 @@ import {
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { AreaChart, Area, ResponsiveContainer, XAxis, Tooltip } from 'recharts';
+
+const AVATAR = "data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect width=%2240%22 height=%2240%22 fill=%22%23E6F4F2%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%2310AFA5%22/%3E%3Cpath d=%22M6 36c2-8 8-11 14-11s12 3 14 11%22 fill=%22%2310AFA5%22/%3E%3C/svg%3E";
 import api from '../../../../services/api';
 import { useSocket } from '../../../../context/SocketContext';
 import EngineerDetailsDrawer from './components/EngineerDetailsDrawer';
@@ -50,8 +52,8 @@ const Engineers = () => {
   useEffect(() => {
     if (!socket) return;
     const refetchData = () => {
-      queryClient.invalidateQueries(['b2bEngineersList']);
-      queryClient.invalidateQueries(['b2bEngineersStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bEngineersList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bEngineersStats'] });
     };
 
     socket.on('b2b:engineerStatusChanged', refetchData);
@@ -76,6 +78,16 @@ const Engineers = () => {
   });
 
   const stats = statsRes?.stats || {};
+  const filterOptions = statsRes?.filters || { skills: [], cities: [] };
+  const performance = statsRes?.performance || null;
+
+  // Engineers holding one of this company's jobs right now, for the side panel.
+  const { data: onJobRes } = useQuery({
+    queryKey: ['b2bEngineersOnJob'],
+    queryFn: async () => (await api.get('/b2b/engineers', { params: { status: 'busy', limit: 5 } })).data?.data || [],
+    refetchInterval: 30000
+  });
+  const onJobEngineers = (onJobRes || []).filter((e) => e.currentJob);
 
   // Fetch Engineers List
   const { data: engineersRes, isLoading } = useQuery({
@@ -147,11 +159,8 @@ const Engineers = () => {
     }
   };
 
-  // Mock Performance Data for Right Panel Chart
-  const perfChartData = [
-    { day: 'Mon', jobs: 12 }, { day: 'Tue', jobs: 19 }, { day: 'Wed', jobs: 15 },
-    { day: 'Thu', jobs: 22 }, { day: 'Fri', jobs: 28 }, { day: 'Sat', jobs: 14 }, { day: 'Sun', jobs: 8 }
-  ];
+  const perfChartData = performance?.daily || [];
+  const pctBar = (v) => (v === null || v === undefined ? 0 : Math.max(0, Math.min(100, v)));
 
   return (
     <div className="flex flex-col xl:flex-row gap-6 animate-fade-in pb-10">
@@ -165,7 +174,7 @@ const Engineers = () => {
             <p className="text-sm text-gray-500 mt-1">Monitor and manage all engineers assigned to your jobs in real-time.</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => queryClient.invalidateQueries(['b2bEngineersList'])} className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-sm text-sm">
+            <button onClick={() => queryClient.invalidateQueries({ queryKey: ['b2bEngineersList'] })} className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-sm text-sm">
               <FiRefreshCw className="w-4 h-4" /> Refresh
             </button>
             <button onClick={exportEngineers} className="bg-[#10AFA5] border border-[#10AFA5] text-white hover:bg-[#0e968e] px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all shadow-sm text-sm">
@@ -177,7 +186,7 @@ const Engineers = () => {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           {[
-            { label: 'Total Engineers', value: stats.totalEngineers || 0, sub: `↑ 12 this month`, icon: <FiUser />, color: 'text-[#10AFA5]', bg: 'bg-[#E6F4F2]' },
+            { label: 'Total Engineers', value: stats.totalEngineers || 0, sub: performance ? `${performance.newEngineersThisMonth} new this month` : '—', icon: <FiUser />, color: 'text-brand', bg: 'bg-[#E6F4F2]' },
             { label: 'Available', value: stats.available || 0, sub: `${stats.totalEngineers ? Math.round((stats.available/stats.totalEngineers)*100) : 0}% of total`, icon: <FiUser />, color: 'text-green-600', bg: 'bg-green-50' },
             { label: 'Busy', value: stats.busy || 0, sub: `${stats.totalEngineers ? Math.round((stats.busy/stats.totalEngineers)*100) : 0}% of total`, icon: <FiClock />, color: 'text-orange-500', bg: 'bg-orange-50' },
             { label: 'On Job', value: stats.onJob || 0, sub: `${stats.totalEngineers ? Math.round((stats.onJob/stats.totalEngineers)*100) : 0}% of total`, icon: <FiMapPin />, color: 'text-blue-500', bg: 'bg-blue-50' },
@@ -211,19 +220,21 @@ const Engineers = () => {
             </div>
             {[
               { label: 'Status', key: 'status', options: ['All Status', 'Available', 'Busy', 'Offline', 'On Leave'] },
-              { label: 'Skill', key: 'skill', options: ['All Skills', 'AC Repair', 'Electrical', 'Plumbing', 'Cleaning'] },
-              { label: 'City', key: 'city', options: ['All Cities', 'Mumbai', 'Delhi', 'Pune'] },
-              { label: 'Rating', key: 'rating', options: ['All Ratings', '4', '4.5'] }
+              { label: 'Skill', key: 'skill', options: ['All Skills', ...filterOptions.skills] },
+              { label: 'City', key: 'city', options: ['All Cities', ...filterOptions.cities] },
+              { label: 'Rating', key: 'rating', options: ['All Ratings', '3', '4', '4.5'], labels: { 3: '3.0 and above', 4: '4.0 and above', 4.5: '4.5 and above' } }
             ].map((f, i) => (
               <div key={i} className="w-[120px] md:w-[140px]">
                 <label className="block text-[11px] font-bold text-gray-500 mb-1">{f.label}</label>
-                <select value={filters[f.key]} onChange={(e) => handleFilterChange(f.key, e.target.value)} className="w-full h-9 px-3 border border-gray-200 text-sm font-medium rounded-lg outline-none focus:ring-1 focus:ring-[#10AFA5] bg-white text-gray-700">
-                  {f.options.map(opt => <option key={opt} value={opt.toLowerCase().includes('all') ? 'all' : opt}>{opt}</option>)}
+                <select value={filters[f.key]} onChange={(e) => handleFilterChange(f.key, e.target.value)} className="w-full h-9 px-3 border border-gray-200 text-sm font-medium rounded-lg outline-none focus:ring-1 focus:ring-brand bg-white text-gray-700">
+                  {f.options.map((opt, idx) => (
+                    <option key={opt} value={idx === 0 ? 'all' : opt}>{f.labels?.[opt] || opt}</option>
+                  ))}
                 </select>
               </div>
             ))}
             <div className="flex gap-2">
-              <button onClick={() => queryClient.invalidateQueries(['b2bEngineersList'])} className="h-9 px-4 bg-[#10AFA5] text-white rounded-lg text-sm font-bold shadow-sm hover:bg-[#0e968e]">Apply Filters</button>
+              <button onClick={() => queryClient.invalidateQueries({ queryKey: ['b2bEngineersList'] })} className="h-9 px-4 bg-[#10AFA5] text-white rounded-lg text-sm font-bold shadow-sm hover:bg-[#0e968e]">Apply Filters</button>
               <button onClick={resetFilters} className="h-9 px-4 border border-gray-200 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-50 flex items-center gap-1.5"><FiRefreshCw className="w-3.5 h-3.5"/> Reset</button>
             </div>
           </div>
@@ -268,7 +279,7 @@ const Engineers = () => {
                     <tr key={eng._id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="py-4 pl-6 pr-4">
                         <div className="flex items-center gap-3">
-                          <img src={eng.profilePhoto || 'https://via.placeholder.com/40'} alt="Eng" className="w-10 h-10 rounded-full border border-gray-200 object-cover" />
+                          <img src={eng.profilePhoto || 'data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect width=%2240%22 height=%2240%22 fill=%22%23E6F4F2%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%2310AFA5%22/%3E%3Cpath d=%22M6 36c2-8 8-11 14-11s12 3 14 11%22 fill=%22%2310AFA5%22/%3E%3C/svg%3E'} alt="Eng" className="w-10 h-10 rounded-full border border-gray-200 object-cover" />
                           <div>
                             <p className="text-sm font-bold text-gray-900">{eng.name}</p>
                             <p className="text-[10px] text-gray-500 font-semibold mt-0.5">ID: ENG-{eng._id.slice(-4).toUpperCase()}</p>
@@ -307,7 +318,7 @@ const Engineers = () => {
                         <p className="text-[10px] text-gray-500 mt-0.5 pl-4">{eng.status === 'in_progress' ? 'On Job' : 'Available'}</p>
                       </td>
                       <td className="py-4 px-4">
-                        <p className="text-sm font-bold text-gray-900 flex items-center gap-1"><FiStar className="text-yellow-500 fill-current"/> {eng.rating?.toFixed(1) || '0.0'}</p>
+                        <p className="text-sm font-bold text-gray-900 flex items-center gap-1"><FiStar className="text-yellow-500 fill-current"/> {eng.rating != null ? Number(eng.rating).toFixed(1) : '—'}</p>
                         <p className="text-[10px] text-gray-500 font-semibold mt-0.5 pl-5">({eng.completedJobs || 0})</p>
                       </td>
                       <td className="py-4 px-4 text-center">
@@ -338,8 +349,10 @@ const Engineers = () => {
                               <>
                                 <div className="fixed inset-0 z-10" onClick={() => setActiveMenu(null)}></div>
                                 <div className="absolute right-0 top-8 w-36 bg-white rounded-lg shadow-xl border border-gray-100 z-20 py-1 overflow-hidden">
-                                  <button className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5] flex items-center gap-2"><FiPhone/> Call</button>
-                                  <button className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5] flex items-center gap-2"><FiMessageCircle/> Chat</button>
+                                  <button onClick={() => { setSelectedEngineer(eng._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-brand flex items-center gap-2"><FiEye/> View Profile</button>
+                                  {eng.phone && (
+                                    <a href={`tel:${eng.phone}`} onClick={() => setActiveMenu(null)} className="w-full text-left px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 hover:text-brand flex items-center gap-2"><FiPhone/> Call</a>
+                                  )}
                                 </div>
                               </>
                             )}
@@ -365,77 +378,76 @@ const Engineers = () => {
         </div>
       </div>
 
-      {/* Right Sidebar Panel */}
+      {/* Right Sidebar Panel — live data only */}
       <div className="w-full xl:w-80 space-y-6 shrink-0">
-        
-        {/* Live Tracking Map Card */}
+
         <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2"><FiNavigation className="text-[#10AFA5]"/> Live Tracking</h3>
-            <button onClick={() => navigate('/b2b/live-tracking')} className="text-[10px] font-bold text-[#10AFA5] hover:underline">View All</button>
+            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2"><FiNavigation className="text-brand"/> On a job now</h3>
+            <button onClick={() => navigate('/b2b/live/map')} className="text-[10px] font-bold text-brand hover:underline">Open live map</button>
           </div>
-          <div className="w-full h-40 bg-gray-100 rounded-lg overflow-hidden relative mb-4">
-            <div className="absolute inset-0 bg-[url('https://maps.googleapis.com/maps/api/staticmap?center=19.0760,72.8777&zoom=11&size=400x200&sensor=false')] bg-cover opacity-70"/>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-6 h-6 bg-[#10AFA5] rounded-full border-2 border-white shadow-lg flex items-center justify-center">
-                <div className="w-2 h-2 bg-white rounded-full animate-ping"/>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <img src="https://via.placeholder.com/30" className="w-8 h-8 rounded-full border border-gray-200" alt="Eng" />
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-center">
-                <p className="text-xs font-bold text-gray-900 truncate">Rahul Sharma</p>
-                <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">JOB-12499</span>
-              </div>
-              <p className="text-[10px] text-gray-500 font-semibold mt-0.5 truncate">En Route to Customer</p>
-              <div className="flex justify-between mt-2 text-[10px] font-bold text-gray-400">
-                <span>ETA: 15 mins</span>
-                <span>6.5 km</span>
-              </div>
-            </div>
-          </div>
-          <button onClick={() => setTrackingEngineer('mock')} className="w-full mt-4 py-2 border border-[#10AFA5] text-[#10AFA5] text-xs font-bold rounded-lg hover:bg-[#F0FDFA] transition-colors">Track on Map »</button>
+          {onJobEngineers.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">No engineer is on one of your jobs right now.</p>
+          ) : (
+            <ul className="space-y-3">
+              {onJobEngineers.map((eng) => (
+                <li key={eng._id} className="flex items-start gap-3">
+                  <img src={eng.profilePhoto || AVATAR} className="w-8 h-8 rounded-full border border-gray-200 object-cover" alt="" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center gap-2">
+                      <p className="text-xs font-bold text-gray-900 truncate">{eng.name}</p>
+                      <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">{eng.currentJob.jobId}</span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 font-semibold mt-0.5 truncate">
+                      {eng.status === 'on_the_way' ? 'En route' : eng.status === 'in_progress' ? 'On site' : 'Dispatched'} · {eng.currentJob.service} · {eng.currentJob.city}
+                    </p>
+                    <button onClick={() => setTrackingEngineer(eng._id)} className="text-[10px] font-bold text-brand hover:underline mt-1">Track</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
-        {/* Engineer Performance */}
         <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-sm font-bold text-gray-900">Performance <span className="text-gray-400 font-semibold">(This Month)</span></h3>
-          </div>
+          <h3 className="text-sm font-bold text-gray-900 mb-4">Performance <span className="text-gray-400 font-semibold">(this month, your jobs)</span></h3>
           <div className="space-y-4">
             <div>
-              <p className="text-[10px] font-bold text-gray-500 mb-1">Jobs Completed</p>
+              <p className="text-[10px] font-bold text-gray-500 mb-1">Jobs resolved</p>
               <div className="flex justify-between items-end">
-                <p className="text-xl font-black text-gray-900">256</p>
-                <div className="w-24 h-8">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={perfChartData}><Area type="monotone" dataKey="jobs" stroke="#10AFA5" fill="#E6F4F2" strokeWidth={2}/></AreaChart>
-                  </ResponsiveContainer>
-                </div>
+                <p className="text-xl font-black text-gray-900">{performance ? performance.completedThisMonth.toLocaleString('en-IN') : '—'}</p>
+                {perfChartData.some((d) => d.jobs > 0) && (
+                  <div className="w-28 h-10" title="Resolved per day, last 7 days">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={perfChartData}>
+                        <XAxis dataKey="day" hide />
+                        <Tooltip contentStyle={{ fontSize: '10px', borderRadius: '8px' }} />
+                        <Area type="monotone" dataKey="jobs" stroke="#10AFA5" fill="#E6F4F2" strokeWidth={2}/>
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
             </div>
             <div className="border-t border-gray-100 pt-3">
-              <p className="text-[10px] font-bold text-gray-500 mb-1">Avg. Rating</p>
-              <div className="flex justify-between items-end">
-                <p className="text-xl font-black text-gray-900">4.6</p>
-                <div className="w-24 h-8">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={perfChartData}><Area type="monotone" dataKey="jobs" stroke="#3b82f6" fill="#eff6ff" strokeWidth={2}/></AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+              <p className="text-[10px] font-bold text-gray-500 mb-1">Avg. rating</p>
+              <p className="text-xl font-black text-gray-900">{stats.averageRating ? Number(stats.averageRating).toFixed(1) : '—'}</p>
             </div>
             <div className="border-t border-gray-100 pt-3 space-y-3">
-              <div>
-                <div className="flex justify-between text-[11px] font-bold text-gray-700 mb-1"><span>Acceptance Rate</span><span>92%</span></div>
-                <div className="w-full bg-gray-100 rounded-full h-1"><div className="bg-[#10AFA5] h-1 rounded-full w-[92%]"/></div>
-              </div>
-              <div>
-                <div className="flex justify-between text-[11px] font-bold text-gray-700 mb-1"><span>On-time Completion</span><span>89%</span></div>
-                <div className="w-full bg-gray-100 rounded-full h-1"><div className="bg-blue-500 h-1 rounded-full w-[89%]"/></div>
-              </div>
+              {[
+                { label: 'Acceptance rate', value: performance?.acceptanceRate, bar: 'bg-brand', hint: 'Assignments accepted, of those accepted, rejected or left to expire' },
+                { label: 'On-time resolution', value: performance?.onTimeRate, bar: 'bg-blue-500', hint: 'Resolved within the SLA resolution time' }
+              ].map((m) => (
+                <div key={m.label} title={m.hint}>
+                  <div className="flex justify-between text-[11px] font-bold text-gray-700 mb-1">
+                    <span>{m.label}</span>
+                    <span>{m.value === null || m.value === undefined ? 'No data' : `${m.value}%`}</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1">
+                    <div className={`${m.bar} h-1 rounded-full`} style={{ width: `${pctBar(m.value)}%` }} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -444,7 +456,7 @@ const Engineers = () => {
 
       {/* Drawers / Modals */}
       {selectedEngineer && <EngineerDetailsDrawer engineerId={selectedEngineer} onClose={() => setSelectedEngineer(null)} />}
-      {trackingEngineer && <EngineerTrackingModal engineerId={trackingEngineer === 'mock' ? engineers[0]?._id : trackingEngineer} onClose={() => setTrackingEngineer(null)} />}
+      {trackingEngineer && <EngineerTrackingModal engineerId={trackingEngineer} onClose={() => setTrackingEngineer(null)} />}
     </div>
   );
 };

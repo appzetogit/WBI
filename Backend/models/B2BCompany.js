@@ -83,6 +83,49 @@ const b2bCompanySchema = new mongoose.Schema({
   },
   rejectionReason: { type: String, default: null },
   isActive: { type: Boolean, default: true },
+  /**
+   * Operational account status, derived from onboarding + admin action. It is
+   * what every API gate reads; `verificationStatus`/`isActive` stay as the
+   * onboarding detail behind it.
+   */
+  accountStatus: {
+    type: String,
+    enum: ['PENDING', 'APPROVED', 'ACTIVE', 'SUSPENDED', 'REJECTED', 'INACTIVE'],
+    default: 'PENDING',
+    index: true
+  },
+  statusReason: { type: String, default: null },
+  statusChangedAt: { type: Date, default: null },
+  /** LIVE companies handle real money; DEMO companies only simulated payments. */
+  billingMode: {
+    type: String,
+    enum: ['LIVE', 'DEMO'],
+    default: 'LIVE',
+    index: true
+  },
+  /** Service keys this company may raise jobs for; empty = all active services. */
+  allowedServices: [{ type: String, uppercase: true, trim: true }],
+  /** Where it may raise them; empty = anywhere the platform covers. */
+  allowedLocations: [{
+    type: { type: String, enum: ['city', 'pincode', 'state', 'zone'], default: 'city' },
+    value: { type: String, trim: true }
+  }],
+  /** Named pricing profile used when no contract override applies. */
+  pricingProfile: { type: String, default: null, trim: true },
+  /** Named SLA profile; its thresholds are stamped onto each job. */
+  slaProfile: { type: String, default: null, trim: true },
+  activeContractId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'B2BContract',
+    default: null
+  },
+  contactPerson: {
+    name: { type: String, default: '', trim: true },
+    designation: { type: String, default: '', trim: true },
+    email: { type: String, default: '', lowercase: true, trim: true },
+    phone: { type: String, default: '', trim: true }
+  },
+  /** Mirror of B2BWallet.balance, written only by the wallet ledger service. */
   walletBalance: { type: Number, default: 0 },
   deletedAt: { type: Date, default: null },
   /** Live CGPE GST verification snapshot */
@@ -151,5 +194,6 @@ b2bCompanySchema.methods.comparePassword = async function (candidatePassword) {
 
 // Ensure indexes are set
 b2bCompanySchema.index({ verificationStatus: 1 });
+b2bCompanySchema.index({ accountStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model('B2BCompany', b2bCompanySchema);

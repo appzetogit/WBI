@@ -16,6 +16,10 @@ const auditLogSchema = new mongoose.Schema({
   targetType: { type: String }, // E.g., 'BankAccount', 'Withdrawal'
   
   changes: { type: mongoose.Schema.Types.Mixed }, // What was changed (e.g., amount, old vs new values)
+  oldValue: { type: mongoose.Schema.Types.Mixed }, // State before the action
+  newValue: { type: mongoose.Schema.Types.Mixed }, // State after the action
+  reason: { type: String }, // Why the actor did it, when they had to state one
+  deviceId: { type: String },
   
   ipAddress: { type: String },
   userAgent: { type: String },
@@ -27,5 +31,6 @@ const auditLogSchema = new mongoose.Schema({
 // Indexing for faster queries when admins review logs
 auditLogSchema.index({ actionType: 1, createdAt: -1 });
 auditLogSchema.index({ actorId: 1, createdAt: -1 });
+auditLogSchema.index({ targetType: 1, targetId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

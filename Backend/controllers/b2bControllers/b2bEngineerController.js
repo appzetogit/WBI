@@ -4,6 +4,11 @@ const B2BJob = require('../../models/B2BJob');
 const B2BEngineerAssignment = require('../../models/B2BEngineerAssignment');
 const B2BJobStatusLog = require('../../models/B2BJobStatusLog');
 const { WORKER_STATUS } = require('../../utils/constants');
+const { viewFilter } = require('../../services/b2bJobViews');
+
+/** A job an engineer is holding right now (dispatched, en route or on site). */
+const activeJobClause = () => viewFilter('active');
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Helper to get authoritative B2B companyId from request
 const getCompanyId = (req) => req.companyId || req.user.companyId || req.user.id;
@@ -35,7 +40,7 @@ const getStats = async (req, res) => {
     const activeJobs = await B2BJob.find({
       companyId,
       assignedTo: { $in: engineerIds },
-      status: { $in: ['in_progress', 'engineer_on_way', 'assigned'] }
+      ...activeJobClause()
     }).distinct('assignedTo');
     const onJob = activeJobs.length;
 
@@ -59,7 +64,83 @@ const getStats = async (req, res) => {
       averageRating
     };
 
-    return res.status(200).json({ success: true, stats });
+    // Filter options come from the engineers actually on this company's jobs.
+    const [skills, cities] = await Promise.all([
+      Engineer.distinct('serviceCategories', { _id: { $in: engineerIds } }),
+      Engineer.distinct('address.city', { _id: { $in: engineerIds } })
+    ]);
+
+    // This month's performance on this company's jobs — real figures only.
+    const cOid = new mongoose.Types.ObjectId(String(companyId));
+    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const weekStart = new Date();
+    weekStart.setHours(0, 0, 0, 0);
+    weekStart.setDate(weekStart.getDate() - 6);
+    const resolved = viewFilter('resolved');
+
+    const [monthAgg, dailyAgg, assignmentAgg, newThisMonth] = await Promise.all([
+      B2BJob.aggregate([
+        { $match: { companyId: cOid, assignedTo: { $ne: null }, updatedAt: { $gte: monthStart }, ...resolved } },
+        {
+          $group: {
+            _id: null,
+            completed: { $sum: 1 },
+            withSla: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$sla.resolutionDueAt', null] }, null] }, 1, 0] } },
+            resolutionBreached: {
+              $sum: {
+                $cond: [{
+                  $gt: [{ $size: { $filter: { input: { $ifNull: ['$sla.breaches', []] }, cond: { $eq: ['$$this.metric', 'resolution'] } } } }, 0]
+                }, 1, 0]
+              }
+            }
+          }
+        }
+      ]),
+      B2BJob.aggregate([
+        { $match: { companyId: cOid, assignedTo: { $ne: null }, updatedAt: { $gte: weekStart }, ...resolved } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$updatedAt', timezone: 'Asia/Kolkata' } }, jobs: { $sum: 1 } } }
+      ]),
+      B2BJob.aggregate([
+        { $match: { companyId: cOid } },
+        { $project: { _id: 1 } },
+        { $lookup: { from: 'jobassignments', localField: '_id', foreignField: 'jobId', as: 'a' } },
+        { $unwind: '$a' },
+        { $match: { 'a.assignedAt': { $gte: monthStart } } },
+        { $group: { _id: '$a.status', count: { $sum: 1 } } }
+      ]),
+      B2BEngineerAssignment.distinct('engineerId', { companyId, createdAt: { $gte: monthStart } })
+    ]);
+
+    const daily = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      daily.push({
+        day: d.toLocaleDateString('en-IN', { weekday: 'short' }),
+        jobs: dailyAgg.find((r) => r._id === key)?.jobs || 0
+      });
+    }
+    const byStatus = Object.fromEntries(assignmentAgg.map((r) => [r._id, r.count]));
+    const accepted = (byStatus.accepted || 0) + (byStatus.completed || 0);
+    const decided = accepted + (byStatus.rejected || 0) + (byStatus.expired || 0);
+    const m = monthAgg[0] || {};
+
+    return res.status(200).json({
+      success: true,
+      stats,
+      filters: {
+        skills: skills.filter(Boolean).sort(),
+        cities: cities.filter(Boolean).sort()
+      },
+      performance: {
+        completedThisMonth: m.completed || 0,
+        daily,
+        acceptanceRate: decided ? Math.round((accepted / decided) * 1000) / 10 : null,
+        onTimeRate: m.withSla ? Math.round(((m.withSla - m.resolutionBreached) / m.withSla) * 1000) / 10 : null,
+        newEngineersThisMonth: newThisMonth.length
+      }
+    });
   } catch (error) {
     console.error('[MyEngineers getStats]', error);
     return res.status(500).json({ success: false, message: 'Server error fetching stats' });
@@ -81,7 +162,7 @@ const getEngineers = async (req, res) => {
     const filter = { _id: { $in: engineerIds } };
 
     if (search) {
-      const searchRegex = { $regex: search, $options: 'i' };
+      const searchRegex = { $regex: escapeRegex(String(search).slice(0, 100)), $options: 'i' };
       filter.$or = [
         { name: searchRegex },
         { phone: searchRegex },
@@ -103,12 +184,12 @@ const getEngineers = async (req, res) => {
     }
     
     if (skill && skill !== 'all') filter.serviceCategories = { $in: [skill] };
-    if (city && city !== 'all') filter['address.city'] = { $regex: city, $options: 'i' };
+    if (city && city !== 'all') filter['address.city'] = { $regex: `^${escapeRegex(city)}$`, $options: 'i' };
     if (rating && rating !== 'all') filter.rating = { $gte: parseFloat(rating) };
-    if (experience && experience !== 'all') filter.experienceLevel = { $regex: experience, $options: 'i' };
+    if (experience && experience !== 'all') filter.experienceLevel = { $regex: escapeRegex(experience), $options: 'i' };
 
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
     const skip = (pageNum - 1) * limitNum;
 
     const [engineers, total] = await Promise.all([
@@ -126,8 +207,8 @@ const getEngineers = async (req, res) => {
       const currentJob = await B2BJob.findOne({
         companyId,
         assignedTo: eng._id,
-        status: { $in: ['assigned', 'searching_engineer', 'in_progress', 'engineer_on_way'] }
-      }).select('jobId service city status').lean();
+        ...activeJobClause()
+      }).select('jobId service city status lifecycleStatus').lean();
 
       // Map DB status to frontend expected status
       let frontendStatus = 'offline';
@@ -135,7 +216,7 @@ const getEngineers = async (req, res) => {
         frontendStatus = 'available';
       } else if (eng.status === 'BUSY') {
         if (currentJob) {
-          if (currentJob.status === 'engineer_on_way') frontendStatus = 'on_the_way';
+          if (currentJob.lifecycleStatus === 'EN_ROUTE' || currentJob.status === 'travelling') frontendStatus = 'on_the_way';
           else if (currentJob.status === 'in_progress') frontendStatus = 'in_progress';
           else frontendStatus = 'assigned';
         } else {
@@ -192,8 +273,8 @@ const getEngineerDetails = async (req, res) => {
     const currentJob = await B2BJob.findOne({
       companyId,
       assignedTo: engId,
-      status: { $in: ['assigned', 'in_progress'] }
-    }).select('jobId service status city address charge').lean();
+      ...activeJobClause()
+    }).select('jobId service status lifecycleStatus city address charge').lean();
 
     // Fetch jobs completed for this company
     const completedForCompany = await B2BJob.countDocuments({
@@ -224,7 +305,7 @@ const getCurrentJob = async (req, res) => {
     const currentJob = await B2BJob.findOne({
       companyId,
       assignedTo: req.params.engineerId,
-      status: { $in: ['assigned', 'in_progress'] }
+      ...activeJobClause()
     }).lean();
     return res.status(200).json({ success: true, data: currentJob });
   } catch (error) {
@@ -250,20 +331,33 @@ const getPerformance = async (req, res) => {
     currentMonthStart.setDate(1);
     currentMonthStart.setHours(0,0,0,0);
 
-    const jobs = await B2BJob.find({
-      companyId,
-      assignedTo: engId
-    }).lean();
+    const { viewOfJob } = require('../../services/b2bJobViews');
+    const JobAssignment = require('../../models/JobAssignment');
 
-    const completed = jobs.filter(j => j.status === 'completed');
-    const failed = jobs.filter(j => j.status === 'failed' || j.status === 'cancelled');
-    const completedThisMonth = completed.filter(j => new Date(j.createdAt) >= currentMonthStart);
+    const jobs = await B2BJob.find({ companyId, assignedTo: engId })
+      .select('_id status lifecycleStatus assignedTo updatedAt sla')
+      .lean();
 
-    // Mock SLAs for UI
-    const acceptanceRate = '92%';
-    const completionRate = '89%';
-    const avgResponseTime = '12 mins';
-    
+    const views = jobs.map((j) => viewOfJob(j));
+    const completed = jobs.filter((_, i) => views[i] === 'resolved');
+    const failed = jobs.filter((_, i) => views[i] === 'failed' || views[i] === 'cancelled');
+    const completedThisMonth = completed.filter((j) => new Date(j.updatedAt) >= currentMonthStart);
+
+    // Acceptance and response time from this engineer's assignment rows on this company's jobs.
+    const allCompanyJobIds = await B2BJob.distinct('_id', { companyId });
+    const assignments = await JobAssignment.find({ engineerId: engId, jobId: { $in: allCompanyJobIds } })
+      .select('status assignedAt acceptedAt')
+      .lean();
+    const accepted = assignments.filter((a) => a.acceptedAt || ['accepted', 'completed'].includes(a.status));
+    const decided = assignments.filter((a) => a.acceptedAt || ['accepted', 'completed', 'rejected', 'expired'].includes(a.status));
+    const responseMins = accepted
+      .filter((a) => a.acceptedAt && a.assignedAt)
+      .map((a) => (new Date(a.acceptedAt) - new Date(a.assignedAt)) / 60000);
+
+    const withSla = completed.filter((j) => j.sla?.resolutionDueAt);
+    const onTime = withSla.filter((j) => !(j.sla?.breaches || []).some((b) => b.metric === 'resolution'));
+    const pct = (n, d) => (d ? `${Math.round((n / d) * 1000) / 10}%` : 'N/A');
+
     return res.status(200).json({
       success: true,
       data: {
@@ -271,9 +365,12 @@ const getPerformance = async (req, res) => {
         completed: completed.length,
         completedThisMonth: completedThisMonth.length,
         failed: failed.length,
-        acceptanceRate,
-        completionRate,
-        avgResponseTime
+        acceptanceRate: pct(accepted.length, decided.length),
+        // Resolved within the SLA resolution time, of resolved jobs that had one.
+        completionRate: pct(onTime.length, withSla.length),
+        avgResponseTime: responseMins.length
+          ? `${Math.round(responseMins.reduce((a, b) => a + b, 0) / responseMins.length)} mins`
+          : 'N/A'
       }
     });
   } catch (error) {

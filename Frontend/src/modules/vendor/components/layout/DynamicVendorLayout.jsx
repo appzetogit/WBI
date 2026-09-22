@@ -52,7 +52,12 @@ const HeaderBar = ({ onOpenMobileNav }) => {
   const initials = vendorName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'V';
   const serviceLabel = primaryService?.categoryName || primaryService?.categoryCode || '';
 
-  const sectionTitle = isRequests
+  const opsSection = [
+    ['jobs', 'Jobs'], ['assignments', 'Assignments'], ['services', 'Services'], ['parts', 'Parts'], ['bookings', 'Bookings'],
+    ['payments', 'Payments'], ['settlements', 'Settlements'], ['analytics', 'Analytics'], ['documents', 'Documents']
+  ].find(([seg]) => new RegExp(`/${seg}(/|$)`).test(p))?.[1];
+
+  const sectionTitle = opsSection || (isRequests
     ? 'Requests & Opportunities'
     : isMyJobs
     ? 'My Jobs & Execution'
@@ -84,7 +89,7 @@ const HeaderBar = ({ onOpenMobileNav }) => {
     ? 'Settings'
     : isDashboard
     ? (serviceLabel ? `${serviceLabel} Dashboard` : 'Dashboard')
-    : null;
+    : null);
 
   useEffect(() => {
     setProfileOpen(false);

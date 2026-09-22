@@ -28,8 +28,11 @@ const EarningDetailsModal = ({ isOpen, onClose, earning }) => {
   const gross = earning.grossAmount || 0;
   const platformFee = earning.platformFee || 0;
   const vendorPayable = earning.vendorPayable || 0;
-  const engineerPayout = earning.engineerPayout || Math.round(vendorPayable * 0.7);
-  const vendorNetMargin = vendorPayable - engineerPayout;
+  // Engineer share is shown only when the ledger recorded one — never estimated.
+  const engineerPayout = Number.isFinite(Number(earning.engineerPayout)) && earning.engineerPayout !== null
+    ? Number(earning.engineerPayout)
+    : null;
+  const vendorNetMargin = engineerPayout === null ? null : vendorPayable - engineerPayout;
 
   const handleNavigateToJob = () => {
     onClose();
@@ -119,14 +122,14 @@ const EarningDetailsModal = ({ isOpen, onClose, earning }) => {
 
               {/* Engineer Share */}
               <div className="flex items-center justify-between text-xs pl-3 border-l-2 border-indigo-400 py-0.5">
-                <span className="text-indigo-700 font-medium">↳ Field Engineer Share (70% standard)</span>
-                <span className="font-bold text-indigo-600">{formatINR(engineerPayout)}</span>
+                <span className="text-indigo-700 font-medium">↳ Field Engineer Share</span>
+                <span className="font-bold text-indigo-600">{engineerPayout === null ? 'Not recorded' : formatINR(engineerPayout)}</span>
               </div>
 
               {/* Net Vendor Retained Margin */}
               <div className="flex items-center justify-between text-xs pl-3 border-l-2 border-teal-500 py-0.5 bg-teal-50/50 rounded-r-lg">
-                <span className="text-teal-900 font-bold">↳ Net Vendor Retained Margin (30%)</span>
-                <span className="font-black text-teal-700">{formatINR(vendorNetMargin)}</span>
+                <span className="text-teal-900 font-bold">↳ Net Vendor Retained Margin</span>
+                <span className="font-black text-teal-700">{vendorNetMargin === null ? '—' : formatINR(vendorNetMargin)}</span>
               </div>
             </div>
           </div>

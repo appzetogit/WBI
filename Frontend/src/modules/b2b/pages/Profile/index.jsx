@@ -109,7 +109,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Notification preferences saved');
       setActiveModal(null);
     },
@@ -122,7 +122,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Company profile updated successfully!');
       setActiveModal(null);
     },
@@ -137,7 +137,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Contact person updated successfully!');
       setActiveModal(null);
     },
@@ -152,7 +152,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Addresses updated successfully!');
       setActiveModal(null);
     },
@@ -167,7 +167,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Bank details saved successfully!');
       setActiveModal(null);
     },
@@ -182,7 +182,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Penny Drop Verification Successful!');
     },
     onError: (err) => {
@@ -211,7 +211,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bSessions']);
+      queryClient.invalidateQueries({ queryKey: ['b2bSessions'] });
       toast.success('Successfully logged out of all other sessions');
     },
     onError: (err) => {
@@ -225,7 +225,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Branch added successfully!');
       branchForm.reset();
     },
@@ -240,7 +240,7 @@ const Profile = () => {
       return res.data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['b2bProfile']);
+      queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
       toast.success('Branch deleted successfully');
     },
     onError: () => {
@@ -262,7 +262,7 @@ const Profile = () => {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       if (res.data.success) {
-        queryClient.invalidateQueries(['b2bProfile']);
+        queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
         toast.success('Company logo updated successfully!');
       }
     } catch (err) {
@@ -294,7 +294,7 @@ const Profile = () => {
         });
       }
       if (res.data.success) {
-        queryClient.invalidateQueries(['b2bProfile']);
+        queryClient.invalidateQueries({ queryKey: ['b2bProfile'] });
         toast.success('Document uploaded successfully!');
       }
     } catch (err) {

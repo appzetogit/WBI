@@ -10,6 +10,7 @@ try {
 }
 const B2BBatch = require('../../models/B2BBatch');
 const B2BBatchErrors = require('../../models/B2BBatchErrors');
+const B2BBulkUploadRow = require('../../models/B2BBulkUploadRow');
 const B2BJob = require('../../models/B2BJob');
 const B2BCompany = require('../../models/B2BCompany');
 const B2BWallet = require('../../models/B2BWallet');
@@ -18,6 +19,7 @@ const UploadReport = require('../../models/UploadReport');
 const AuditLog = require('../../models/AuditLog');
 
 const b2bBulkJobService = require('../../services/b2bBulkJobService');
+const walletLedger = require('../../services/b2bWalletLedger.service');
 const { bulkJobQueue } = require('../../services/b2bBulkJobQueueService');
 
 /**
@@ -93,6 +95,112 @@ const downloadSample = (req, res) => {
 };
 
 /**
+ * GET the upload template's contract: columns, accepted header spellings,
+ * limits and the services this company may raise jobs for.
+ */
+const getTemplateSpec = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const { getB2BConfig } = require('../../services/b2bPlatformConfig.service');
+    const ServiceConfig = require('../../models/ServiceConfig');
+    const [cfg, company, services] = await Promise.all([
+      getB2BConfig(),
+      B2BCompany.findById(companyId).select('allowedServices').lean(),
+      ServiceConfig.find({ isActive: { $ne: false } }).select('categoryName categoryCode').sort({ categoryName: 1 }).lean()
+    ]);
+    const allowedKeys = (company?.allowedServices || []).map((s) => String(s).toUpperCase());
+    const catalog = services
+      .filter((s) => !allowedKeys.length || allowedKeys.includes(String(s.categoryCode).toUpperCase()))
+      .map((s) => ({ name: s.categoryName, key: s.categoryCode }));
+
+    const bulk = cfg.bulkUpload || {};
+    return res.status(200).json({
+      success: true,
+      data: {
+        columns: b2bBulkJobService.templateSpec(),
+        limits: {
+          maxRows: bulk.maxRows || 1000,
+          maxFileSizeMb: bulk.maxFileSizeMb || 10,
+          allowedExtensions: bulk.allowedExtensions?.length ? bulk.allowedExtensions : ['.xlsx', '.xls', '.csv'],
+          rejectUnknownColumns: Boolean(bulk.rejectUnknownColumns),
+          duplicateCheckEnabled: bulk.duplicateCheckEnabled !== false,
+          duplicateWindowDays: bulk.duplicateWindowDays ?? 7
+        },
+        priorities: ['Low', 'Medium', 'High'],
+        services: catalog,
+        servicesRestricted: allowedKeys.length > 0
+      }
+    });
+  } catch (error) {
+    console.error('[B2B Template Spec Error]:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load template specification' });
+  }
+};
+
+/**
+ * GET validation problems across every upload of the company (or one batch).
+ */
+const getValidationErrors = async (req, res) => {
+  try {
+    const companyId = new mongoose.Types.ObjectId(String(req.companyId || req.user.companyId || req.user.id));
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 200);
+
+    const PROBLEM_STATUSES = ['INVALID', 'DUPLICATE', 'FAILED'];
+    const filter = { companyId };
+    const status = String(req.query.status || '').toUpperCase();
+    filter.status = PROBLEM_STATUSES.includes(status) ? status : { $in: PROBLEM_STATUSES };
+    if (req.query.batchId && mongoose.Types.ObjectId.isValid(req.query.batchId)) {
+      filter.batchId = new mongoose.Types.ObjectId(req.query.batchId);
+    }
+    if (req.query.field) filter['validationErrors.field'] = String(req.query.field);
+
+    const [rows, total, byStatus, byField] = await Promise.all([
+      B2BBulkUploadRow.find(filter)
+        .select('batchId uploadId rowNumber status validationErrors duplicateOf normalized.customerName normalized.city normalized.serviceType createdAt')
+        .sort({ createdAt: -1, rowNumber: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      B2BBulkUploadRow.countDocuments(filter),
+      B2BBulkUploadRow.aggregate([
+        { $match: { companyId, status: { $in: PROBLEM_STATUSES }, ...(filter.batchId ? { batchId: filter.batchId } : {}) } },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ]),
+      B2BBulkUploadRow.aggregate([
+        { $match: { companyId, status: { $in: PROBLEM_STATUSES }, ...(filter.batchId ? { batchId: filter.batchId } : {}) } },
+        { $unwind: '$validationErrors' },
+        { $group: { _id: '$validationErrors.field', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 15 }
+      ])
+    ]);
+
+    const batchIds = [...new Set(rows.map((r) => String(r.batchId)))];
+    const batches = batchIds.length
+      ? await B2BBatch.find({ _id: { $in: batchIds }, companyId }).select('batchId fileName createdAt').lean()
+      : [];
+    const batchMap = new Map(batches.map((b) => [String(b._id), b]));
+
+    return res.status(200).json({
+      success: true,
+      data: rows.map((r) => ({
+        ...r,
+        batch: batchMap.get(String(r.batchId)) || null
+      })),
+      summary: {
+        byStatus: Object.fromEntries(byStatus.map((s) => [s._id, s.count])),
+        byField: byField.map((f) => ({ field: f._id || 'row', count: f.count }))
+      },
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
+    });
+  } catch (error) {
+    console.error('[B2B Validation Errors]:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load validation errors' });
+  }
+};
+
+/**
  * POST Excel/CSV File Upload
  */
 const uploadFile = async (req, res) => {
@@ -101,11 +209,21 @@ const uploadFile = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Only .xlsx, .xls, .csv allowed' });
     }
 
+    // Limits come from the platform settings, not code.
+    const { getB2BConfig } = require('../../services/b2bPlatformConfig.service');
+    const bulkCfg = (await getB2BConfig()).bulkUpload || {};
     const ext = path.extname(req.file.originalname || '').toLowerCase();
-    const allowed = ['.xlsx', '.xls', '.csv'];
+    const allowed = (bulkCfg.allowedExtensions && bulkCfg.allowedExtensions.length)
+      ? bulkCfg.allowedExtensions.map((e) => String(e).toLowerCase())
+      : ['.xlsx', '.xls', '.csv'];
     if (!allowed.includes(ext)) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ success: false, message: 'Only .xlsx, .xls, .csv allowed' });
+      return res.status(400).json({ success: false, message: `Only ${allowed.join(', ')} files are accepted` });
+    }
+    const maxBytes = (Number(bulkCfg.maxFileSizeMb) || 10) * 1024 * 1024;
+    if (req.file.size > maxBytes) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(413).json({ success: false, message: `File is larger than the ${bulkCfg.maxFileSizeMb || 10} MB upload limit` });
     }
 
     // isApprovedB2B middleware already verified company status — use authoritative companyId from auth
@@ -266,13 +384,115 @@ const getBatchDetails = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Batch not found or unauthorized access' });
     }
 
+    // What the company approves before anything is dispatched: the counts, the
+    // price, and whether the wallet can cover it.
+    const balance = await walletLedger.getBalance(companyId);
+    const required = parseFloat(Number(batch.estimatedCost || 0).toFixed(2));
+    const statusCounts = await B2BBulkUploadRow.aggregate([
+      { $match: { batchId: batch._id } },
+      { $group: { _id: '$status', count: { $sum: 1 } } }
+    ]);
+    const counts = statusCounts.reduce((acc, r) => ({ ...acc, [r._id]: r.count }), {});
+
     return res.status(200).json({
       success: true,
-      batch
+      batch,
+      preview: {
+        totalRows: batch.totalRows,
+        validRows: batch.validRows,
+        invalidRows: batch.invalidRows,
+        duplicateRows: batch.duplicates,
+        createdJobs: batch.createdJobsCount,
+        failedJobs: batch.failedJobs,
+        rowStatusCounts: counts,
+        unknownColumns: batch.unknownColumns || [],
+        totalCost: required,
+        perJobCharge: batch.perJobCharge,
+        pricingBreakdown: batch.pricingBreakdown,
+        paymentStatus: batch.paymentStatus,
+        processingStatus: batch.processingStatus,
+        wallet: {
+          available: balance.available,
+          reserved: balance.reserved,
+          creditLimit: balance.creditLimit,
+          shortfall: parseFloat(Math.max(0, required - balance.spendable).toFixed(2))
+        }
+      }
     });
   } catch (error) {
     console.error('[B2B Details Error]:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch batch metrics' });
+  }
+};
+
+/**
+ * GET Routing breakdown for a batch — where every created job went, live:
+ * per vendor, freelancers, unassigned (with reasons) and still routing.
+ */
+const getRoutingSummary = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId })
+      .select('batchId status totalRows validRows invalidRows duplicates createdJobsCount routingPreview')
+      .lean();
+    if (!batch) {
+      return res.status(404).json({ success: false, message: 'Batch not found or unauthorized access' });
+    }
+
+    const B2BJob = require('../../models/B2BJob');
+    const Vendor = require('../../models/Vendor');
+    const { deriveLifecycleFromLegacy, LIFECYCLE: S } = require('../../services/jobStateMachine');
+    const jobs = await B2BJob.find({ batchId: batch._id })
+      .select('jobId assignedVendorId assignedTo lifecycleStatus status allocationStage allocationReason notifiedVendors')
+      .lean();
+
+    const vendorIds = [...new Set(jobs.map((j) => j.assignedVendorId).filter(Boolean).map(String))];
+    const vendors = await Vendor.find({ _id: { $in: vendorIds } }).select('businessName name').lean();
+    const vendorName = new Map(vendors.map((v) => [String(v._id), v.businessName || v.name || 'Vendor']));
+
+    const byVendor = new Map();
+    const unassigned = [];
+    let freelancers = 0;
+    let routing = 0;
+    let awaitingVendor = 0;
+    let cancelled = 0;
+    let fundingPending = 0;
+    for (const j of jobs) {
+      const state = j.lifecycleStatus || deriveLifecycleFromLegacy(j);
+      if ([S.CANCELLED].includes(state)) cancelled += 1;
+      else if (j.assignedVendorId) {
+        const k = String(j.assignedVendorId);
+        byVendor.set(k, (byVendor.get(k) || 0) + 1);
+      } else if (j.assignedTo) freelancers += 1;
+      else if (state === S.UNASSIGNED || state === S.ON_HOLD) unassigned.push({ jobId: String(j._id), jobCode: j.jobId, reason: j.unassignedReason || j.allocationReason || 'No eligible vendor or engineer' });
+      else if (j.status === 'pending_wallet') fundingPending += 1;
+      else if ((j.notifiedVendors || []).length) awaitingVendor += 1;
+      else routing += 1;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        batchId: batch.batchId,
+        status: batch.status,
+        rows: { total: batch.totalRows, valid: batch.validRows, invalid: batch.invalidRows, duplicates: batch.duplicates },
+        created: batch.createdJobsCount,
+        failed: Math.max(0, (batch.validRows || 0) - (batch.createdJobsCount || 0)),
+        routingPreview: batch.routingPreview || null,
+        routing: {
+          vendors: [...byVendor.entries()].map(([vendorId, count]) => ({ vendorId, name: vendorName.get(vendorId) || 'Vendor', count })),
+          freelancers,
+          awaitingVendorAcceptance: awaitingVendor,
+          stillRouting: routing,
+          fundingPending,
+          cancelled,
+          unassigned: { count: unassigned.length, jobs: unassigned.slice(0, 100) }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('[B2B Routing Summary Error]:', error);
+    res.status(500).json({ success: false, message: 'Failed to load routing summary' });
   }
 };
 
@@ -317,6 +537,63 @@ const getBatchErrors = async (req, res) => {
 };
 
 /**
+ * GET the rows of an upload — what was read, what was wrong with it, what it
+ * was priced at, and which job it became.
+ */
+const getBatchRows = async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const batch = await B2BBatch.findOne({ _id: req.params.batchId, companyId }).select('_id batchId');
+    if (!batch) {
+      return res.status(404).json({ success: false, message: 'Batch not found' });
+    }
+
+    const { status, page = 1, limit = 50 } = req.query;
+    const filter = { batchId: batch._id };
+    if (status) filter.status = String(status).toUpperCase();
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const perPage = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
+
+    const [rows, total] = await Promise.all([
+      B2BBulkUploadRow.find(filter)
+        .sort({ rowNumber: 1 })
+        .skip((pageNum - 1) * perPage)
+        .limit(perPage)
+        .lean(),
+      B2BBulkUploadRow.countDocuments(filter)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: rows.map((r) => ({
+        rowNumber: r.rowNumber,
+        status: r.status,
+        customerName: r.normalized?.customerName || '',
+        contactNumber: r.normalized?.contactNumber || '',
+        city: r.normalized?.city || '',
+        pincode: r.normalized?.pincode || '',
+        serviceType: r.normalized?.serviceType || '',
+        serviceKey: r.normalized?.serviceKey || '',
+        requiredSkill: r.normalized?.requiredSkill || '',
+        priority: r.normalized?.priority || '',
+        preferredDate: r.normalized?.preferredDate || null,
+        price: r.pricing?.totalAmount || 0,
+        pricingSource: r.pricing?.source || null,
+        errors: r.validationErrors || [],
+        duplicateOf: r.duplicateOf || null,
+        jobCode: r.jobCode || null,
+        failureReason: r.failureReason || null
+      })),
+      pagination: { page: pageNum, limit: perPage, total, pages: Math.ceil(total / perPage) }
+    });
+  } catch (error) {
+    console.error('[B2B Batch Rows Error]:', error);
+    res.status(500).json({ success: false, message: 'Failed to load upload rows' });
+  }
+};
+
+/**
  * GET Download Error Report Excel
  */
 const downloadErrorReport = async (req, res) => {
@@ -328,24 +605,48 @@ const downloadErrorReport = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Batch not found' });
     }
 
-    const errors = await B2BBatchErrors.find({ batchId: batch._id }).sort({ rowNumber: 1 });
+    // Prefer the persisted rows: they carry field, value and suggested fix.
+    const rows = await B2BBulkUploadRow.find({
+      batchId: batch._id,
+      status: { $in: ['INVALID', 'DUPLICATE', 'FAILED'] }
+    }).sort({ rowNumber: 1 }).lean();
 
-    const errorRows = errors.map(err => ({
-      'Row Number': err.rowNumber,
-      'Customer Name': err.rowData.customerName || 'N/A',
-      'Phone': err.rowData.phone || 'N/A',
-      'Address': err.rowData.address || 'N/A',
-      'City': err.rowData.city || 'N/A',
-      'Pincode': err.rowData.pincode || 'N/A',
-      'Service Name': err.rowData.service || 'N/A',
-      'Validation Failure Reason(s)': (err.errorList || []).join(' | ')
-    }));
+    let errorRows;
+    if (rows.length) {
+      errorRows = [];
+      for (const row of rows) {
+        const problems = (row.validationErrors || []).length
+          ? row.validationErrors
+          : [{ field: '', value: '', error: row.failureReason || 'Could not be created', suggestedFix: '' }];
+        for (const problem of problems) {
+          errorRows.push({
+            'Row Number': row.rowNumber,
+            'Customer Name': row.normalized?.customerName || '',
+            'Field': problem.field || '',
+            'Invalid Value': problem.value || '',
+            'Error': problem.error || '',
+            'Suggested Fix': problem.suggestedFix || ''
+          });
+        }
+      }
+    } else {
+      // Batches uploaded before rows were persisted.
+      const errors = await B2BBatchErrors.find({ batchId: batch._id }).sort({ rowNumber: 1 });
+      errorRows = errors.map((err) => ({
+        'Row Number': err.rowNumber,
+        'Customer Name': err.rowData.customerName || '',
+        'Field': '',
+        'Invalid Value': '',
+        'Error': (err.errorList || []).join(' | '),
+        'Suggested Fix': ''
+      }));
+    }
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(errorRows);
 
     // Auto-fit column widths
-    const maxCols = [12, 20, 15, 35, 15, 12, 20, 50];
+    const maxCols = [12, 24, 20, 24, 60, 50];
     ws['!cols'] = maxCols.map(w => ({ wch: w }));
 
     XLSX.utils.book_append_sheet(wb, ws, 'Validation Failures');
@@ -392,12 +693,37 @@ const confirmUpload = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Company not found. Please re-login.' });
     }
 
-    // Verify Wallet Balance — jobs held in pending_wallet when insufficient (activation gated)
-    const wallet = await B2BWallet.findOne({ companyId });
-    const isInsufficient = !wallet || wallet.balance < batch.estimatedCost;
-    const shortfall = isInsufficient
-      ? parseFloat((((batch.estimatedCost || 0) - (wallet?.balance || 0))).toFixed(2))
-      : 0;
+    // Money gate: an upload that cannot be paid for creates NOTHING. The
+    // company is told what is missing and how to top up, and the batch waits.
+    const balance = await walletLedger.getBalance(companyId);
+    const required = parseFloat(Number(batch.estimatedCost || 0).toFixed(2));
+    const shortfall = parseFloat(Math.max(0, required - balance.spendable).toFixed(2));
+
+    if (shortfall > 0) {
+      const details = await walletLedger.shortfallDetails(companyId, required);
+      batch.paymentStatus = 'INSUFFICIENT';
+      batch.processingStatus = 'AWAITING_PAYMENT';
+      batch.totalCost = required;
+      await batch.save();
+
+      return res.status(402).json({
+        success: false,
+        code: 'INSUFFICIENT_FUNDS',
+        message: `Top up ₹${shortfall} to dispatch this upload. No jobs have been created.`,
+        createdCount: 0,
+        walletGate: {
+          walletBalance: details.available,
+          reservedBalance: balance.reserved,
+          creditLimit: details.creditLimit,
+          pendingBatchCost: required,
+          required: details.required,
+          available: details.available,
+          shortfall: details.shortfall,
+          canActivate: false
+        },
+        topUpMethods: details.topUpMethods
+      });
+    }
 
     // Duplicate confirmation check (checks if batch is already confirmed recently)
     const duplicateBatch = await B2BBatch.findOne({
@@ -425,17 +751,17 @@ const confirmUpload = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: isInsufficient
-        ? `Job creation started. Activation blocked: wallet short by ₹${shortfall}. Jobs will stay in pending_wallet until top-up.`
-        : 'Job creation started in background matching queue.',
+      message: 'Payment reserved. Job creation started in the background matching queue.',
       status: 'processing',
-      isInsufficient,
-      activationBlocked: isInsufficient,
+      isInsufficient: false,
+      activationBlocked: false,
       walletGate: {
-        walletBalance: wallet?.balance || 0,
-        pendingBatchCost: batch.estimatedCost || 0,
-        shortfall,
-        canActivate: !isInsufficient
+        walletBalance: balance.available,
+        reservedBalance: balance.reserved,
+        creditLimit: balance.creditLimit,
+        pendingBatchCost: required,
+        shortfall: 0,
+        canActivate: true
       }
     });
   } catch (error) {
@@ -552,11 +878,15 @@ const retryBatch = async (req, res) => {
 };
 
 module.exports = {
+  getBatchRows,
   getStats,
   downloadSample,
+  getTemplateSpec,
+  getValidationErrors,
   uploadFile,
   getHistory,
   getBatchDetails,
+  getRoutingSummary,
   getBatchErrors,
   downloadErrorReport,
   confirmUpload,

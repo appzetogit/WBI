@@ -701,7 +701,7 @@ const B2BLiveTracking = () => {
                     </span>
                     <span className="flex items-center gap-0.5 text-xs text-amber-500 font-bold">
                       <FiStar className="fill-current text-amber-500" />
-                      {selectedEngineer.rating}
+                      {selectedEngineer.rating != null ? Number(selectedEngineer.rating).toFixed(1) : 'Not rated'}
                     </span>
                   </div>
                 </div>

@@ -118,7 +118,7 @@ const generateReportPdf = (company, summary, servicePerformance, engineerPerform
     { label: 'Pending Jobs', val: summary.pendingJobs.value, change: summary.pendingJobs.changeText },
     { label: 'Cancelled Jobs', val: summary.cancelledJobs.value, change: summary.cancelledJobs.changeText },
     { label: 'Total Spend (INR)', val: `₹${summary.totalSpend.value.toLocaleString('en-IN')}`, change: summary.totalSpend.changeText },
-    { label: 'Average Rating', val: `${summary.averageRating.value} / 5`, change: summary.averageRating.changeText },
+    { label: 'Average Rating', val: summary.averageRating.value != null ? `${summary.averageRating.value} / 5` : 'N/A', change: summary.averageRating.changeText },
     { label: 'SLA Compliance', val: summary.slaCompliance.value != null ? `${summary.slaCompliance.value}%` : 'N/A', change: summary.slaCompliance.changeText },
     { label: 'First-Time Fix Rate', val: summary.firstTimeFixRate.value != null ? `${summary.firstTimeFixRate.value}%` : 'N/A', change: summary.firstTimeFixRate.changeText }
   ];

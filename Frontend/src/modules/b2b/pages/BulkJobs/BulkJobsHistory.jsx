@@ -42,8 +42,8 @@ const BulkJobsHistory = () => {
   useEffect(() => {
     if (!socket) return;
     const handleRefetch = () => {
-      queryClient.invalidateQueries(['b2bHistoryList']);
-      queryClient.invalidateQueries(['b2bBulkStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bHistoryList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkStats'] });
     };
 
     socket.on('b2b:batchCreated', handleRefetch);
@@ -103,8 +103,8 @@ const BulkJobsHistory = () => {
     mutationFn: (batchId) => api.delete(`/b2b/bulk-jobs/${batchId}`),
     onSuccess: () => {
       toast.success('Batch deleted successfully');
-      queryClient.invalidateQueries(['b2bHistoryList']);
-      queryClient.invalidateQueries(['b2bBulkStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bHistoryList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkStats'] });
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Failed to delete')
   });
@@ -113,8 +113,8 @@ const BulkJobsHistory = () => {
     mutationFn: (batchId) => api.post(`/b2b/bulk-jobs/${batchId}/retry`),
     onSuccess: () => {
       toast.success('Batch queued for retry');
-      queryClient.invalidateQueries(['b2bHistoryList']);
-      queryClient.invalidateQueries(['b2bBulkStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bHistoryList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkStats'] });
     },
     onError: (err) => toast.error(err.response?.data?.message || 'Failed to retry')
   });
@@ -210,7 +210,7 @@ const BulkJobsHistory = () => {
               {stat.trend && stat.trend !== '-' ? (
                 <p className={`text-[10px] font-semibold ${stat.trendColor}`}>{stat.trend}</p>
               ) : stat.action ? (
-                <Link to="/b2b/wallet" className={`text-[10px] font-semibold ${stat.actionColor} hover:underline flex items-center gap-1`}>
+                <Link to="/b2b/billing/add-funds" className={`text-[10px] font-semibold ${stat.actionColor} hover:underline flex items-center gap-1`}>
                   <FiUploadCloud className="w-3 h-3" /> {stat.action}
                 </Link>
               ) : (

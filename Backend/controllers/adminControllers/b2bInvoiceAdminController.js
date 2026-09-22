@@ -43,8 +43,9 @@ const getB2BInvoicesAdmin = async (req, res) => {
       query.companyId = new mongoose.Types.ObjectId(companyId);
     }
 
-    if (search.trim()) {
-      query.invoiceNumber = { $regex: search.trim(), $options: 'i' };
+    if (String(search).trim()) {
+      const rx = String(search).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.invoiceNumber = { $regex: rx, $options: 'i' };
     }
 
     if (status.trim()) {
@@ -134,7 +135,17 @@ const getB2BInvoiceByIdAdmin = async (req, res) => {
  */
 const generateMonthlyInvoice = async (req, res) => {
   try {
-    const { companyId, month, year } = req.body;
+    const { companyId } = req.body;
+    // JSON bodies may carry numbers as strings; "8" + 1 would be "81".
+    const month = req.body.month === undefined || req.body.month === '' ? undefined : Number(req.body.month);
+    const year = Number(req.body.year);
+
+    if (month !== undefined && (!Number.isInteger(month) || month < 0 || month > 11)) {
+      return res.status(400).json({ success: false, message: 'month must be 0-11' });
+    }
+    if (req.body.year !== undefined && (!Number.isInteger(year) || year < 2000 || year > 2100)) {
+      return res.status(400).json({ success: false, message: 'year is invalid' });
+    }
 
     if (!companyId || month === undefined || !year) {
       return res.status(400).json({
@@ -165,7 +176,8 @@ const generateMonthlyInvoice = async (req, res) => {
     // Find all completed B2B jobs for this company completed within the billing period where invoiceId is null
     const jobs = await B2BJob.find({
       companyId: company._id,
-      status: 'completed',
+      // Closed jobs mirror their legacy status as completed or closed.
+      status: { $in: ['completed', 'closed'] },
       completedAt: { $gte: billingPeriodStart, $lte: billingPeriodEnd },
       invoiceId: null
     });
@@ -256,15 +268,38 @@ const generateMonthlyInvoice = async (req, res) => {
       { $set: { invoiceId: invoice._id } }
     );
 
-    // Generate PDF using pdfkit and upload to Cloudinary
-    const pdfUrl = await generateAndUploadInvoicePdf(invoice);
-    invoice.invoicePdfUrl = pdfUrl;
-    invoice.fileUrl = pdfUrl;
-    await invoice.save();
+    // Generate the PDF and upload it. The invoice and its job links are
+    // already saved, so a PDF failure must not report the whole generation as
+    // failed (a retry would then find no un-invoiced jobs). Say so instead;
+    // changing the invoice's status later regenerates the PDF.
+    let pdfWarning = null;
+    try {
+      const pdfUrl = await generateAndUploadInvoicePdf(invoice);
+      if (pdfUrl) {
+        invoice.invoicePdfUrl = pdfUrl;
+        invoice.fileUrl = pdfUrl;
+        await invoice.save();
+      }
+    } catch (pdfErr) {
+      console.error('[Admin Invoice Controller] Monthly invoice PDF failed:', pdfErr.message || pdfErr);
+      pdfWarning = 'Invoice created, but its PDF could not be generated. It will be regenerated on the next status change.';
+    }
+
+    const { logAudit } = require('../../utils/auditLogger');
+    await logAudit({
+      actionType: 'B2B_INVOICE_GENERATED',
+      actorId: req.user?._id || req.user?.id || null,
+      actorRole: 'admin',
+      targetType: 'B2BInvoice',
+      targetId: invoice._id,
+      newValue: { companyId: company._id, invoiceNumber, billingPeriod: startStr, totalJobs, totalAmount, status },
+      req
+    });
 
     return res.status(201).json({
       success: true,
-      message: 'Monthly invoice generated successfully',
+      message: pdfWarning || 'Monthly invoice generated successfully',
+      pdfWarning,
       data: invoice
     });
   } catch (error) {
@@ -300,6 +335,16 @@ const updateB2BInvoiceStatus = async (req, res) => {
       });
     }
 
+    const STATUSES = ['draft', 'generated', 'paid', 'pending', 'overdue', 'cancelled', 'Settled'];
+    const PAYMENT_STATUSES = ['unpaid', 'paid', 'partial', 'failed'];
+    if (status && !STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: `status must be one of ${STATUSES.join(', ')}` });
+    }
+    if (paymentStatus && !PAYMENT_STATUSES.includes(paymentStatus)) {
+      return res.status(400).json({ success: false, message: `paymentStatus must be one of ${PAYMENT_STATUSES.join(', ')}` });
+    }
+    const before = { status: invoice.status, paymentStatus: invoice.paymentStatus, paidAmount: invoice.paidAmount };
+
     if (status) invoice.status = status;
     if (paymentStatus) {
       invoice.paymentStatus = paymentStatus;
@@ -317,15 +362,38 @@ const updateB2BInvoiceStatus = async (req, res) => {
 
     await invoice.save();
 
-    // Re-generate the PDF invoice to sync status updates
-    const pdfUrl = await generateAndUploadInvoicePdf(invoice);
-    invoice.invoicePdfUrl = pdfUrl;
-    invoice.fileUrl = pdfUrl;
-    await invoice.save();
+    const { logAudit } = require('../../utils/auditLogger');
+    await logAudit({
+      actionType: 'B2B_INVOICE_STATUS_CHANGED',
+      actorId: req.user?._id || req.user?.id || null,
+      actorRole: 'admin',
+      targetType: 'B2BInvoice',
+      targetId: invoice._id,
+      oldValue: before,
+      newValue: { status: invoice.status, paymentStatus: invoice.paymentStatus, paidAmount: invoice.paidAmount, transactionId: invoice.transactionId },
+      reason: String(req.body?.reason || ''),
+      req
+    });
+
+    // Re-generate the PDF so it shows the new status. The status change is
+    // already saved; a PDF failure is reported, not turned into a 500.
+    let pdfWarning = null;
+    try {
+      const pdfUrl = await generateAndUploadInvoicePdf(invoice);
+      if (pdfUrl) {
+        invoice.invoicePdfUrl = pdfUrl;
+        invoice.fileUrl = pdfUrl;
+        await invoice.save();
+      }
+    } catch (pdfErr) {
+      console.error('[Admin Invoice Controller] PDF regeneration failed:', pdfErr.message);
+      pdfWarning = 'Status saved, but the PDF could not be regenerated. Download will show the previous PDF.';
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'Invoice status updated successfully',
+      message: pdfWarning || 'Invoice status updated successfully',
+      pdfWarning,
       data: invoice
     });
   } catch (error) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { 
@@ -14,14 +14,20 @@ import { useSocket } from '../../../../context/SocketContext';
 import JobDetailsDrawer from './components/JobDetailsDrawer';
 import LiveTrackingModal from './components/LiveTrackingModal';
 import SkeletonLoader from '../../../../components/common/SkeletonLoader';
+import { RouteTabs, VIEW_LABEL, VIEW_TONE, Badge } from '../../components/ui';
+import useB2BSession from '../../hooks/useB2BSession';
 
-const Jobs = () => {
+const JOB_TABS = ['all', 'pending', 'dispatched', 'en_route', 'in_progress', 'resolved', 'cancelled', 'failed', 'sla_breached'];
+const TRACKABLE_VIEWS = ['dispatched', 'en_route', 'in_progress'];
+
+const Jobs = ({ liveMode = false }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const socket = useSocket();
-
-  // Filters State
-  const [activeTab, setActiveTab] = useState('all');
+  const { can } = useB2BSession();
+  const params = useParams();
+  // The view comes from the URL (/b2b/jobs/:view); Live Operations pins "active".
+  const activeTab = liveMode ? 'active' : (JOB_TABS.includes(params.view) ? params.view : 'all');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [filters, setFilters] = useState({
@@ -44,6 +50,9 @@ const Jobs = () => {
   const [trackingJob, setTrackingJob] = useState(null);
   const [activeMenu, setActiveMenu] = useState(null);
 
+  // A new view starts on its first page.
+  useEffect(() => { setCurrentPage(1); }, [activeTab]);
+
   // Debounce Search
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -57,8 +66,8 @@ const Jobs = () => {
   useEffect(() => {
     if (!socket) return;
     const refetchJobs = () => {
-      queryClient.invalidateQueries(['b2bJobsList']);
-      queryClient.invalidateQueries(['b2bJobsStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsStats'] });
     };
 
     socket.on('job_updated', refetchJobs);
@@ -85,6 +94,7 @@ const Jobs = () => {
   });
 
   const stats = statsRes?.stats || {};
+  const viewCounts = Object.fromEntries((statsRes?.views || []).map((v) => [v.key, v.count]));
   const chartData = statsRes?.chartData || [];
   const trends = stats.trends || {};
 
@@ -128,43 +138,30 @@ const Jobs = () => {
   const { data: jobsRes, isLoading, isError: jobsError, error: jobsErr, refetch: refetchJobs } = useQuery({
     queryKey: ['b2bJobsList', currentPage, itemsPerPage, activeTab, filters, debouncedSearch],
     queryFn: async () => {
-      let effectiveStatus = filters.status;
-      if (activeTab !== 'all') {
-        if (activeTab === 'failed/cancelled') {
-          effectiveStatus = 'failed,cancelled,rejected';
-        } else if (activeTab === 'pending') {
-          effectiveStatus = 'pending,searching_engineer,pending_wallet';
-        } else if (activeTab === 'in progress') {
-          effectiveStatus = 'in_progress';
-        } else if (activeTab === 'on hold') {
-          effectiveStatus = 'on_hold';
-        } else if (activeTab === 'completed') {
-          effectiveStatus = 'completed,closed';
-        } else if (activeTab === 'escalated') {
-          effectiveStatus = 'escalated';
-        } else {
-          effectiveStatus = activeTab.replace(/\s+/g, '_').toLowerCase();
-        }
-      }
-
-      const params = {
-        page: currentPage,
-        limit: itemsPerPage,
-        search: debouncedSearch || undefined,
-        status: effectiveStatus !== 'all' ? effectiveStatus : undefined,
-        service: filters.service !== 'all' ? filters.service : undefined,
-        city: filters.city !== 'all' ? filters.city : undefined,
-        priority: filters.priority !== 'all' ? filters.priority : undefined,
-        paymentStatus: filters.paymentStatus !== 'all' ? filters.paymentStatus : undefined,
-        batchId: filters.batchId !== 'all' ? filters.batchId : undefined,
-        startDate: filters.startDate || undefined,
-        endDate: filters.endDate || undefined
-      };
-
-      const res = await api.get('/b2b/jobs', { params });
+      const res = await api.get('/b2b/jobs', { params: buildParams() });
       return res.data;
-    }
+    },
+    refetchInterval: liveMode ? 15000 : false,
+    placeholderData: (prev) => prev
   });
+
+  // One place builds the query, so an export is exactly what is on screen.
+  function buildParams() {
+    return {
+      page: currentPage,
+      limit: itemsPerPage,
+      view: activeTab !== 'all' ? activeTab : undefined,
+      search: debouncedSearch || undefined,
+      status: filters.status !== 'all' ? filters.status : undefined,
+      service: filters.service !== 'all' ? filters.service : undefined,
+      city: filters.city !== 'all' ? filters.city : undefined,
+      priority: filters.priority !== 'all' ? filters.priority : undefined,
+      paymentStatus: filters.paymentStatus !== 'all' ? filters.paymentStatus : undefined,
+      batchId: filters.batchId !== 'all' ? filters.batchId : undefined,
+      startDate: filters.startDate || undefined,
+      endDate: filters.endDate || undefined
+    };
+  }
 
   const jobs = jobsRes?.data || [];
   const pagination = jobsRes?.pagination || { page: 1, totalPages: 1, total: 0 };
@@ -190,13 +187,13 @@ const Jobs = () => {
       paymentStatus: 'all', batchId: 'all', startDate: '', endDate: ''
     });
     setSearchQuery('');
-    setActiveTab('all');
     setCurrentPage(1);
   };
 
   const exportJobs = async () => {
     try {
-      const res = await api.get('/b2b/jobs/export', { responseType: 'blob', params: { status: filters.status !== 'all' ? filters.status : undefined } });
+      const { page: _page, limit: _limit, ...exportParams } = buildParams();
+      const res = await api.get('/b2b/jobs/export', { responseType: 'blob', params: exportParams });
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -214,9 +211,9 @@ const Jobs = () => {
     mutationFn: (id) => api.delete(`/b2b/jobs/${id}`),
     onSuccess: (res) => {
       toast.success(res?.data?.message || 'Job cancelled successfully');
-      queryClient.invalidateQueries(['b2bJobsList']);
-      queryClient.invalidateQueries(['b2bJobsStats']);
-      queryClient.invalidateQueries(['b2bWallet']);
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsStats'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bWallet'] });
     },
     onError: (err) => toast.error(err?.response?.data?.message || 'Failed to cancel job')
   });
@@ -225,9 +222,9 @@ const Jobs = () => {
     mutationFn: (id) => api.post(`/b2b/jobs/${id}/rematch`),
     onSuccess: (res) => {
       toast.success(res?.data?.message || 'Matching restarted');
-      queryClient.invalidateQueries(['b2bJobsList']);
-      queryClient.invalidateQueries(['b2bJobsStats']);
-      queryClient.invalidateQueries(['b2bJobsRecentActivity']);
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsStats'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bJobsRecentActivity'] });
     },
     onError: (err) => toast.error(err?.response?.data?.message || 'Could not restart matching')
   });
@@ -312,8 +309,12 @@ const Jobs = () => {
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">My Jobs</h1>
-            <p className="text-sm text-gray-500 mt-1">Manage, Track and Monitor all uploaded jobs in real-time.</p>
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">{VIEW_LABEL[activeTab]}</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {liveMode
+                ? 'Jobs an engineer is holding right now: dispatched, travelling or on site. Refreshes every 15 seconds.'
+                : 'Manage, track and monitor your jobs in real time.'}
+            </p>
           </div>
           <button 
             onClick={exportJobs}
@@ -422,7 +423,7 @@ const Jobs = () => {
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => queryClient.invalidateQueries(['b2bJobsList'])} className="h-10 px-4 border border-[#10AFA5] text-[#10AFA5] flex items-center gap-2 rounded-lg text-sm font-medium hover:bg-[#F0FDFA]">
+              <button onClick={() => queryClient.invalidateQueries({ queryKey: ['b2bJobsList'] })} className="h-10 px-4 border border-[#10AFA5] text-[#10AFA5] flex items-center gap-2 rounded-lg text-sm font-medium hover:bg-[#F0FDFA]">
                 <FiFilter className="w-4 h-4" /> Filter
               </button>
               <button onClick={resetFilters} className="h-10 px-4 border border-gray-200 text-gray-600 flex items-center gap-2 rounded-lg text-sm font-medium hover:bg-gray-50">
@@ -433,7 +434,7 @@ const Jobs = () => {
         </div>
 
         {/* Jobs that stopped moving need an explicit nudge, not a silent queue */}
-        {(stats.escalated || 0) > 0 && activeTab !== 'escalated' && (
+        {(stats.escalated || 0) > 0 && filters.status !== 'escalated' && !liveMode && (
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
               <FiAlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
@@ -448,7 +449,7 @@ const Jobs = () => {
               </div>
             </div>
             <button
-              onClick={() => { setActiveTab('escalated'); setCurrentPage(1); }}
+              onClick={() => handleFilterChange('status', 'escalated')}
               className="shrink-0 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold px-4 py-2 rounded-lg"
             >
               Review escalated jobs
@@ -457,19 +458,16 @@ const Jobs = () => {
         )}
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 gap-6 px-2 overflow-x-auto no-scrollbar">
-          {['all', 'pending', 'assigned', 'in progress', 'on hold', 'completed', 'escalated', 'failed/cancelled'].map(tab => (
-            <button
-              key={tab}
-              onClick={() => { setActiveTab(tab); setCurrentPage(1); }}
-              className={`py-3 text-sm font-bold capitalize border-b-2 transition-colors whitespace-nowrap ${
-                activeTab === tab ? 'border-[#10AFA5] text-[#10AFA5]' : 'border-transparent text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              {tab} Jobs
-            </button>
-          ))}
-        </div>
+        {!liveMode && (
+          <RouteTabs
+            tabs={JOB_TABS.map((key) => ({
+              to: key === 'all' ? '/b2b/jobs' : `/b2b/jobs/${key}`,
+              end: true,
+              label: VIEW_LABEL[key],
+              count: viewCounts[key]
+            }))}
+          />
+        )}
 
         {/* Jobs Table */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-visible">
@@ -543,7 +541,7 @@ const Jobs = () => {
                       <td className="py-4 px-4">
                         {job.assignedTo ? (
                           <div className="flex items-center gap-2">
-                            <img src={job.assignedTo.profilePic || 'https://via.placeholder.com/30'} alt="Eng" className="w-7 h-7 rounded-full border border-gray-200" />
+                            <img src={job.assignedTo.profilePic || 'data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect width=%2240%22 height=%2240%22 fill=%22%23E6F4F2%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%2310AFA5%22/%3E%3Cpath d=%22M6 36c2-8 8-11 14-11s12 3 14 11%22 fill=%22%2310AFA5%22/%3E%3C/svg%3E'} alt="Eng" className="w-7 h-7 rounded-full border border-gray-200" />
                             <div>
                               <p className="font-semibold text-gray-800 text-xs">{job.assignedTo.firstName}</p>
                               <p className="text-[10px] text-yellow-500 flex items-center gap-0.5">⭐ {job.assignedTo.averageRating != null ? Number(job.assignedTo.averageRating).toFixed(1) : '—'}</p>
@@ -571,9 +569,13 @@ const Jobs = () => {
                         })()}
                       </td>
                       <td className="py-4 px-4">
-                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold capitalize ${getStatusStyle(job.status)}`}>
-                          {formatStatusLabel(job.status)}
-                        </span>
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge tone={VIEW_TONE[job.view] || 'gray'}>{VIEW_LABEL[job.view] || formatStatusLabel(job.status)}</Badge>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize ${getStatusStyle(job.status)}`}>
+                            {formatStatusLabel(job.status)}
+                          </span>
+                          {job.slaBreached && <Badge tone="red">SLA breached</Badge>}
+                        </div>
                       </td>
                       <td className="py-4 px-4">
                         <span className={`text-[11px] font-bold ${
@@ -597,12 +599,12 @@ const Jobs = () => {
                           <button onClick={() => setSelectedJob(job._id)} className="w-7 h-7 rounded border border-gray-200 flex items-center justify-center text-gray-500 hover:text-[#10AFA5] hover:bg-[#F0FDFA]">
                             <FiEye className="w-3.5 h-3.5" />
                           </button>
-                          {['assigned', 'engineer_on_way', 'in_progress'].includes(job.status) && (
+                          {TRACKABLE_VIEWS.includes(job.view) && can('tracking.read') && (
                             <button onClick={() => setTrackingJob(job._id)} className="w-7 h-7 rounded border border-gray-200 flex items-center justify-center text-gray-500 hover:text-blue-500 hover:bg-blue-50" title="Track Live">
                               <FiNavigation className="w-3.5 h-3.5" />
                             </button>
                           )}
-                          {canRematch(job) && (
+                          {canRematch(job) && can('jobs.manage') && (
                             <button
                               onClick={() => rematchMutation.mutate(job._id)}
                               disabled={rematchMutation.isPending}
@@ -621,12 +623,21 @@ const Jobs = () => {
                                 <div className="fixed inset-0 z-10" onClick={() => setActiveMenu(null)}></div>
                                 <div className="absolute right-0 top-8 w-40 bg-white rounded-lg shadow-xl border border-gray-100 z-20 py-1 overflow-hidden">
                                   <button onClick={() => { setSelectedJob(job._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">View Details</button>
-                                  <button className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">Download Report</button>
-                                  <button className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">Support Ticket</button>
-                                  {canRematch(job) && (
+                                  {can('support.manage') && (
+                                    <button
+                                      onClick={() => {
+                                        setActiveMenu(null);
+                                        navigate(`/b2b/support?jobId=${job._id}&jobCode=${encodeURIComponent(job.jobId || '')}`);
+                                      }}
+                                      className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-brand"
+                                    >
+                                      Raise Support Ticket
+                                    </button>
+                                  )}
+                                  {canRematch(job) && can('jobs.manage') && (
                                     <button onClick={() => { rematchMutation.mutate(job._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 hover:text-[#10AFA5]">Retry Matching</button>
                                   )}
-                                  {['pending', 'searching_engineer', 'assigned', 'escalated', 'failed', 'on_hold'].includes(job.status) && (
+                                  {can('jobs.manage') && ['pending', 'searching_engineer', 'assigned', 'escalated', 'failed', 'on_hold'].includes(job.status) && (
                                     <button onClick={() => { if(window.confirm('Cancel this job?')) cancelJobMutation.mutate(job._id); setActiveMenu(null); }} className="w-full text-left px-4 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 flex items-center gap-2">
                                       Cancel Job
                                     </button>
@@ -709,7 +720,7 @@ const Jobs = () => {
               <FiDownload className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Download Report</span>
             </button>
-            <button onClick={() => navigate('/b2b/wallet')} className="bg-green-50 hover:bg-green-100 text-green-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
+            <button onClick={() => navigate('/b2b/billing/add-funds')} className="bg-green-50 hover:bg-green-100 text-green-600 p-3 rounded-xl flex flex-col items-center justify-center gap-2 transition-colors">
               <FiBriefcase className="w-6 h-6" />
               <span className="text-xs font-bold text-center leading-tight">Wallet & Payments</span>
             </button>
@@ -726,7 +737,7 @@ const Jobs = () => {
             <h3 className="font-bold text-gray-900">Recent Job Activities</h3>
             <button
               type="button"
-              onClick={() => queryClient.invalidateQueries(['b2bJobsRecentActivity'])}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['b2bJobsRecentActivity'] })}
               className="text-[#10AFA5] text-xs font-bold hover:underline"
             >
               Refresh

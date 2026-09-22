@@ -12,6 +12,7 @@ import { formatCurrency } from '../../utils/adminHelpers';
 import CustomerGrowthAreaChart from '../../components/dashboard/CustomerGrowthAreaChart';
 import TopServices from '../../components/dashboard/TopServices';
 import RecentBookings from '../../components/dashboard/RecentBookings';
+import PlatformOverviewSection from '../../components/dashboard/PlatformOverviewSection';
 import {
   getDashboardStats,
   getRevenueAnalytics,
@@ -81,6 +82,7 @@ const AdminDashboard = () => {
   });
   const [timelineData, setTimelineData] = useState([]);
   const [recentBookingsList, setRecentBookingsList] = useState([]);
+  const [resolvedRange, setResolvedRange] = useState({ startDate: null, endDate: null });
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalVendors: 0,
@@ -128,6 +130,7 @@ const AdminDashboard = () => {
 
         const startIso = startDate.toISOString();
         const endIso = endDate.toISOString();
+        setResolvedRange({ startDate: startIso, endDate: endIso });
 
         // 2. Concurrently fetch stats, revenue analytics, and booking trends
         const [statsRes, revRes, trendsRes] = await Promise.all([
@@ -367,6 +370,10 @@ const AdminDashboard = () => {
           );
         })}
       </div>
+
+      {resolvedRange.startDate && (
+        <PlatformOverviewSection startDate={resolvedRange.startDate} endDate={resolvedRange.endDate} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <RevenueLineChart data={timelineData} />

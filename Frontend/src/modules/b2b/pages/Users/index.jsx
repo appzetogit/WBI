@@ -162,8 +162,8 @@ const Users = () => {
         // Log to verify
         console.log('Invite Link generated:', data.inviteLink);
       }
-      queryClient.invalidateQueries(['b2bUsersList']);
-      queryClient.invalidateQueries(['b2bUsersSummary']);
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersSummary'] });
       closeDrawer();
     },
     onError: (err) => {
@@ -178,7 +178,7 @@ const Users = () => {
     },
     onSuccess: () => {
       toast.success('User details updated successfully');
-      queryClient.invalidateQueries(['b2bUsersList']);
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersList'] });
       closeDrawer();
     },
     onError: (err) => {
@@ -193,8 +193,8 @@ const Users = () => {
     },
     onSuccess: (data) => {
       toast.success(data.message || 'User status updated successfully');
-      queryClient.invalidateQueries(['b2bUsersList']);
-      queryClient.invalidateQueries(['b2bUsersSummary']);
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersSummary'] });
       setActiveMenuId(null);
     },
     onError: (err) => {
@@ -223,8 +223,8 @@ const Users = () => {
     },
     onSuccess: () => {
       toast.success('User deleted successfully');
-      queryClient.invalidateQueries(['b2bUsersList']);
-      queryClient.invalidateQueries(['b2bUsersSummary']);
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersList'] });
+      queryClient.invalidateQueries({ queryKey: ['b2bUsersSummary'] });
       setActiveMenuId(null);
     },
     onError: (err) => {

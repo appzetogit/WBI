@@ -109,6 +109,11 @@ const authenticate = async (req, res, next) => {
             ...b2bUser, 
             id: b2bUser._id.toString(), 
             companyId: b2bUser.companyId.toString(),
+            // What the API enforces; the free-text `role` is only a label.
+            accessRole: b2bUser.accessRole || 'B2B_OPERATIONS',
+            isCompanyLogin: false,
+            companyStatus: company.accountStatus || null,
+            companyName: company.companyName,
             verificationStatus: company.verificationStatus 
           };
         } else {
@@ -119,6 +124,10 @@ const authenticate = async (req, res, next) => {
               id: company._id.toString(), 
               companyId: company._id.toString(),
               role: 'Company Admin',
+              // The company's own credentials carry full access to its own data.
+              accessRole: 'B2B_ADMIN',
+              isCompanyLogin: true,
+              companyStatus: company.accountStatus || null,
               verificationStatus: company.verificationStatus, // ← FIXED: explicitly set for isApprovedB2B
               isActive: company.isActive,
               permissions: [

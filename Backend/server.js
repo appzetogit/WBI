@@ -428,6 +428,7 @@ app.use('/api/b2b/onboarding', require('./routes/b2b-routes/enterpriseOnboarding
 app.use('/api/b2b/company-profile', require('./routes/b2b-routes/profile.routes'));
 app.use('/api/b2b/bulk-jobs', require('./routes/b2b-routes/bulkJobs.routes'));
 app.use('/api/b2b/jobs', require('./routes/b2b-routes/jobs.routes'));
+app.use('/api/b2b/assignments', require('./routes/b2b-routes/assignments.routes'));
 app.use('/api/b2b/engineers', require('./routes/b2b-routes/engineers.routes'));
 app.use('/api/b2b/live-tracking', require('./routes/b2b-routes/liveTracking.routes'));
 app.use('/api/b2b/invoices', require('./routes/b2b-routes/invoices.routes'));
@@ -445,6 +446,8 @@ app.use('/api/admin/b2b-wallets', require('./routes/admin-routes/b2bWalletAdmin.
 app.use('/api/admin/b2b/invoices', require('./routes/admin-routes/b2bInvoiceAdmin.routes'));
 app.use('/api/admin/b2b/reports', require('./routes/admin-routes/b2bReportAdmin.routes'));
 app.use('/api/admin/b2b/pricing-rules', require('./routes/admin-routes/b2bPricingAdmin.routes'));
+app.use('/api/admin/b2b/contracts', require('./routes/admin-routes/b2bContractAdmin.routes'));
+app.use('/api/admin/b2b/settings', require('./routes/admin-routes/b2bPlatformConfig.routes'));
 app.use('/api/admin/b2b/jobs', require('./routes/admin-routes/b2bJobEscalation.routes'));
 app.use('/api/admin/b2b/support', require('./routes/admin-routes/b2bSupportAdmin.routes'));
 app.use('/api/admin/vendor-support', require('./routes/admin-routes/adminVendorSupport.routes'));
@@ -545,6 +548,12 @@ app.use('/api', require('./routes/admin-routes/upload.routes')); // Generic uplo
 // WARNING: This mounts at /api/vendors, meaning routes inside are relative to that.
 // e.g., router.post('/withdrawal') becomes /api/vendors/withdrawal
 app.use('/api/vendors', require('./routes/vendor-routes/vendorWallet.routes'));
+
+// Vendor management: central job entity, role-scoped (mounted after every
+// other /api/vendors router so existing paths always win).
+app.use('/api/vendors', require('./routes/vendor-routes/vendorManagement.routes'));
+app.use('/api/jobs', require('./routes/jobs/jobs.routes'));
+app.use('/api/routing', require('./routes/jobs/routing.routes'));
 
 // Booking routes
 app.use('/api/bookings', require('./routes/booking-routes/userBooking.routes'));
@@ -717,6 +726,10 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const { startUrgencyScheduler } = require('./services/urgencyScheduler');
         startUrgencyScheduler();
         console.log('[Server] Urgency Scheduler initialized');
+
+        // B2B assignment expiry + SLA breach sweeper
+        const { startB2BTimeoutScheduler } = require('./services/b2bJobTimeouts.service');
+        startB2BTimeoutScheduler().catch((err) => console.error('[Server] B2B timeout scheduler failed:', err.message));
 
         // Initialize Daily B2B MIS Email Cron (fires at 11:59 PM IST)
         const { startMISCronScheduler } = require('./services/misCronScheduler');

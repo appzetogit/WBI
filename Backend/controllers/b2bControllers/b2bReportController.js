@@ -183,7 +183,7 @@ const exportExcel = async (req, res) => {
       { 'Metric': 'Pending Jobs', 'Value': summary.pendingJobs.value, 'Growth (MoM)': summary.pendingJobs.changeText },
       { 'Metric': 'Cancelled Jobs', 'Value': summary.cancelledJobs.value, 'Growth (MoM)': summary.cancelledJobs.changeText },
       { 'Metric': 'Total Spend (INR)', 'Value': summary.totalSpend.value, 'Growth (MoM)': summary.totalSpend.changeText },
-      { 'Metric': 'Average Rating', 'Value': summary.averageRating.value, 'Growth (MoM)': summary.averageRating.changeText },
+      { 'Metric': 'Average Rating', 'Value': summary.averageRating.value ?? 'N/A', 'Growth (MoM)': summary.averageRating.changeText },
       { 'Metric': 'SLA Compliance', 'Value': summary.slaCompliance.value != null ? `${summary.slaCompliance.value}%` : 'N/A', 'Growth (MoM)': summary.slaCompliance.changeText },
       { 'Metric': 'First-Time Fix Rate', 'Value': summary.firstTimeFixRate.value != null ? `${summary.firstTimeFixRate.value}%` : 'N/A', 'Growth (MoM)': summary.firstTimeFixRate.changeText }
     ];
@@ -207,7 +207,7 @@ const exportExcel = async (req, res) => {
       'Assigned Jobs': e.assignedJobs,
       'Completed Jobs': e.completedJobs,
       'Active Jobs': e.activeJobs,
-      'Average Rating': e.averageRating,
+      'Average Rating': e.averageRating ?? 'N/A',
       'Utilization': e.utilization
     })));
     XLSX.utils.book_append_sheet(wb, wsEngineer, 'Engineer Performance');
@@ -224,6 +224,33 @@ const exportExcel = async (req, res) => {
     });
     const wsExpense = XLSX.utils.json_to_sheet(expenseData);
     XLSX.utils.book_append_sheet(wb, wsExpense, 'Expense Summary');
+
+    // 5. SLA Sheet
+    const { getSlaReport, getFinancialReport } = require('../../services/b2bOpsReportService');
+    const [sla, financial] = await Promise.all([
+      getSlaReport(companyId, filters),
+      getFinancialReport(companyId, filters)
+    ]);
+    const slaRows = [
+      { 'Metric': 'Jobs with SLA', 'Tracked': sla.summary.jobsWithSla, 'Breaches': sla.summary.breachedJobs, 'Attainment %': sla.summary.attainment ?? 'N/A', 'Avg Delay (min)': '', 'Max Delay (min)': '' },
+      ...sla.metrics.map((m) => ({
+        'Metric': m.metric, 'Tracked': m.tracked, 'Breaches': m.breaches, 'Attainment %': m.attainment ?? 'N/A',
+        'Avg Delay (min)': m.avgDelayMinutes ?? '', 'Max Delay (min)': m.maxDelayMinutes ?? ''
+      }))
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(slaRows), 'SLA');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sla.recentBreaches.map((b) => ({
+      'Job ID': b.jobId, 'Customer': b.customerName, 'Service': b.service, 'City': b.city, 'Metric': b.metric,
+      'Due At': b.dueAt ? new Date(b.dueAt).toISOString() : '', 'Breached At': b.breachedAt ? new Date(b.breachedAt).toISOString() : '',
+      'Delay (min)': b.delayMinutes
+    }))), 'SLA Breaches');
+
+    // 6. Financial Sheet (ledger)
+    const finRows = [
+      ...Object.entries(financial.summary).map(([k, v]) => ({ 'Item': k, 'Value': v ?? '' })),
+      ...financial.byService.map((r) => ({ 'Item': `Spend · ${r.name}`, 'Value': r.amount }))
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(finRows), 'Financial');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
@@ -280,7 +307,36 @@ const exportPdf = async (req, res) => {
   }
 };
 
+/** Shared wrapper for the ops reports: validate dates, scope to the company. */
+const opsReport = (fnName) => async (req, res) => {
+  try {
+    const companyId = req.companyId || req.user.companyId || req.user.id;
+    const { startDate, endDate, service, engineer, city } = req.query;
+    const dateVal = validateDateFilters(startDate, endDate);
+    if (!dateVal.valid) {
+      return res.status(400).json({ success: false, message: dateVal.message });
+    }
+    const filters = { startDate, endDate, service, engineer, city };
+    const cacheKey = `b2b:reports:${fnName}:${companyId}:${JSON.stringify(filters)}`;
+    const cached = await cacheHelper.getCache(cacheKey);
+    if (cached) return res.status(200).json({ success: true, data: cached, cached: true });
+
+    const svc = require('../../services/b2bOpsReportService');
+    const data = await svc[fnName](companyId, filters);
+    await cacheHelper.setCache(cacheKey, data, 30);
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error(`[B2B Report Controller] ${fnName} error:`, error);
+    return res.status(500).json({ success: false, message: 'Failed to build report' });
+  }
+};
+
+const getSla = opsReport('getSlaReport');
+const getFinancial = opsReport('getFinancialReport');
+
 module.exports = {
+  getSla,
+  getFinancial,
   getSummary,
   getServices,
   getEngineers,

@@ -3,7 +3,6 @@ const B2BWalletTransaction = require('../models/B2BWalletTransaction');
 const B2BDeductionRule = require('../models/B2BDeductionRule');
 const B2BInvoice = require('../models/B2BInvoice');
 const B2BJob = require('../models/B2BJob');
-const B2BCompany = require('../models/B2BCompany');
 const JobHistory = require('../models/JobHistory');
 const { holdB2BJobEscrow } = require('./escrowReleaseEngine.service');
 
@@ -201,25 +200,7 @@ const deductWalletForCompletedJob = async (companyId, jobId, app = null) => {
       return { success: true, hold, escrow: true };
     }
 
-    if (wallet.balance >= totalDeduction) {
-      // Fallback should not happen if hold works; keep for safety
-      wallet.balance = parseFloat((wallet.balance - totalDeduction).toFixed(2));
-      wallet.escrowBalance = parseFloat(((wallet.escrowBalance || 0) + totalDeduction).toFixed(2));
-      wallet.lastUpdatedAt = new Date();
-      await wallet.save();
-      await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
-
-      job.charge = totalDeduction;
-      job.paymentStatus = 'escrow_locked';
-      await job.save();
-
-      emitEvent('b2b:walletUpdated', `b2b:${companyId}`, {
-        balance: wallet.balance,
-        escrowBalance: wallet.escrowBalance
-      });
-      return { success: true, wallet, escrow: true };
-    }
-
+    // A memo of what could not be charged; it holds no money and moves no balance.
     wallet.pendingDeductions = parseFloat((wallet.pendingDeductions + totalDeduction).toFixed(2));
     wallet.lastUpdatedAt = new Date();
     await wallet.save();

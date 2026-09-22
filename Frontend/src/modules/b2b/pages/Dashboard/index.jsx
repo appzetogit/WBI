@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { 
+import { VIEW_LABEL } from '../../components/ui';
+import {
   FiPhoneCall, FiActivity, FiBriefcase, FiAlertCircle, 
   FiCheckCircle, FiClock, FiDollarSign, FiTrendingUp,
   FiMapPin, FiTool, FiAlertTriangle, FiUserCheck, FiMessageSquare,
@@ -11,11 +12,26 @@ import api from '../../../../services/api';
 import toast from 'react-hot-toast';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
+const DASHBOARD_VIEWS = [
+  { key: 'pending', cls: 'text-amber-600' },
+  { key: 'dispatched', cls: 'text-violet-600' },
+  { key: 'en_route', cls: 'text-blue-600' },
+  { key: 'in_progress', cls: 'text-blue-700' },
+  { key: 'resolved', cls: 'text-green-600' },
+  { key: 'failed', cls: 'text-red-600' },
+  { key: 'sla_breached', cls: 'text-red-700' }
+];
+
+const EmptyNote = ({ children }) => (
+  <p className="text-xs text-gray-400 font-medium py-6 text-center">{children}</p>
+);
+
 // Helper for Circular Gauge SVG
 const CircularProgress = ({ percentage, color = '#10AFA5', size = 80, strokeWidth = 8 }) => {
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
-  const offset = circumference - (percentage / 100) * circumference;
+  const hasValue = percentage !== null && percentage !== undefined;
+  const offset = circumference - ((hasValue ? percentage : 0) / 100) * circumference;
   
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
@@ -40,7 +56,7 @@ const CircularProgress = ({ percentage, color = '#10AFA5', size = 80, strokeWidt
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
       />
       <text x="50%" y="50%" dy=".3em" textAnchor="middle" className="font-black text-sm fill-gray-800">
-        {percentage}%
+        {hasValue ? `${percentage}%` : '—'}
       </text>
     </svg>
   );
@@ -104,6 +120,16 @@ const B2BCommandCenter = () => {
     queryFn: async () => (await api.get('/b2b/dashboard/workforce-quality')).data.data
   });
 
+  // Live job pipeline — same counts as the sidebar and the Jobs views.
+  const queryClient = useQueryClient();
+  const { data: jobStats, isLoading: loadViews } = useQuery({
+    queryKey: ['b2bJobsStats'],
+    queryFn: async () => (await api.get('/b2b/jobs/stats')).data,
+    refetchInterval: 30000,
+    enabled: execError?.response?.status !== 403
+  });
+  const viewCounts = Object.fromEntries((jobStats?.views || []).map((v) => [v.key, v.count]));
+
   return (
     <div className="space-y-6 font-sans antialiased text-gray-700 bg-gray-50/50 p-2 sm:p-4 min-h-screen relative pb-24">
       
@@ -114,7 +140,7 @@ const B2BCommandCenter = () => {
           <p className="text-sm text-gray-500 font-medium">Operational Intelligence & Telemetry</p>
         </div>
         <div className="px-4 py-2 bg-white border border-gray-200 rounded-xl shadow-sm text-xs font-bold text-gray-600">
-          Viewing: <span className="text-[#10AFA5]">Last 30 Days</span>
+          Viewing: <span className="text-brand">This month</span>
         </div>
       </div>
 
@@ -161,7 +187,7 @@ const B2BCommandCenter = () => {
           </div>
           <div className="flex gap-2 shrink-0">
             {execMetrics.walletGate.activationBlocked ? (
-              <Link to="/b2b/wallet" className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
+              <Link to="/b2b/billing/add-funds" className="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700">
                 Top up wallet
               </Link>
             ) : (
@@ -170,11 +196,11 @@ const B2BCommandCenter = () => {
                 onClick={async () => {
                   try {
                     const res = await api.post('/b2b/wallet/activate-pending');
-                    if (res.data.success) {
-                      window.location.reload();
-                    }
+                    toast.success(res.data?.message || 'Jobs activated');
+                    queryClient.invalidateQueries({ queryKey: ['execMetrics'] });
+                    queryClient.invalidateQueries({ queryKey: ['b2bJobsStats'] });
                   } catch (e) {
-                    console.error(e);
+                    toast.error(e.response?.data?.message || 'Activation failed');
                   }
                 }}
                 className="px-4 py-2 rounded-xl bg-[#10AFA5] text-white text-xs font-bold hover:bg-[#0d9a91]"
@@ -196,10 +222,14 @@ const B2BCommandCenter = () => {
           </div>
           {loadExec ? <div className="h-10 w-24 bg-gray-100 animate-pulse rounded"></div> : (
             <div>
-              <p className="text-3xl font-black text-gray-900">{execMetrics?.callsCompleted.value.toLocaleString()}</p>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-xs font-bold text-gray-500">{execMetrics?.callsCompleted.label}</span>
-                <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{execMetrics?.callsCompleted.trend}</span>
+              <p className="text-3xl font-black text-gray-900">{(execMetrics?.callsCompleted?.value ?? 0).toLocaleString('en-IN')}</p>
+              <div className="flex justify-between items-center mt-2 gap-2">
+                <span className="text-xs font-bold text-gray-500">{execMetrics?.callsCompleted?.label}</span>
+                {execMetrics?.callsCompleted?.trend && (
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${String(execMetrics.callsCompleted.trend).startsWith('-') ? 'text-red-600 bg-red-50' : 'text-green-600 bg-green-50'}`}>
+                    {execMetrics.callsCompleted.trend}
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -214,15 +244,24 @@ const B2BCommandCenter = () => {
             </div>
             {loadExec ? <div className="h-6 w-20 bg-gray-100 animate-pulse mt-4 rounded"></div> : (
               <>
-                <p className="text-xs font-bold text-gray-500 mb-1">{execMetrics?.slaCompliance.label}</p>
-                <div className="flex items-center gap-3 text-xs font-bold mt-2">
-                  <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{execMetrics?.slaCompliance.met} Met</span>
-                  <span className="text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{execMetrics?.slaCompliance.breached} Breached</span>
-                </div>
+                <p className="text-xs font-bold text-gray-500 mb-1">{execMetrics?.slaCompliance?.label}</p>
+                {execMetrics?.slaCompliance?.tracked ? (
+                  <div className="flex items-center gap-3 text-xs font-bold mt-2">
+                    <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">{execMetrics.slaCompliance.met} Met</span>
+                    <Link to="/b2b/jobs/sla_breached" className="text-red-500 bg-red-50 px-2 py-0.5 rounded-full hover:underline">
+                      {execMetrics.slaCompliance.breached} Breached
+                    </Link>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-2">No SLA-tracked jobs resolved this month yet.</p>
+                )}
+                {execMetrics?.slaCompliance?.trend && (
+                  <p className="text-[10px] font-semibold text-gray-400 mt-1">{execMetrics.slaCompliance.trend}</p>
+                )}
               </>
             )}
           </div>
-          {execMetrics && <CircularProgress percentage={execMetrics.slaCompliance.rate} color="#10B981" />}
+          {execMetrics && <CircularProgress percentage={execMetrics.slaCompliance?.rate} color="#10B981" />}
         </div>
 
         {/* KPI 3: Wallet Utilization */}
@@ -233,15 +272,43 @@ const B2BCommandCenter = () => {
           </div>
           {loadExec ? <div className="h-10 w-24 bg-gray-100 animate-pulse rounded"></div> : (
             <div>
-              <p className="text-3xl font-black text-gray-900">₹{execMetrics?.walletUtilization.currentBalance.toLocaleString()}</p>
+              <p className="text-3xl font-black text-gray-900">₹{Number(execMetrics?.walletUtilization?.currentBalance || 0).toLocaleString('en-IN')}</p>
+              <p className="text-[11px] text-gray-400 font-semibold mt-1">
+                ₹{Number(execMetrics?.walletUtilization?.reserved || 0).toLocaleString('en-IN')} reserved · ₹{Number(execMetrics?.walletUtilization?.spentThisPeriod || 0).toLocaleString('en-IN')} spent in 30 days
+              </p>
               <div className="flex justify-between items-center mt-2">
-                <span className="text-xs font-bold text-gray-500">Runway: <span className="text-purple-600">{execMetrics?.walletUtilization.daysUntilTopup} Days left</span></span>
-                <Link to="/b2b/wallet" className="text-xs font-bold bg-gray-900 text-white px-3 py-1 rounded-full hover:bg-black transition-colors">Top Up</Link>
+                <span className="text-xs font-bold text-gray-500">
+                  Runway:{' '}
+                  <span className="text-purple-600">
+                    {execMetrics?.walletUtilization?.daysUntilTopup === null || execMetrics?.walletUtilization?.daysUntilTopup === undefined
+                      ? 'No recent spend'
+                      : `${execMetrics.walletUtilization.daysUntilTopup} days left`}
+                  </span>
+                </span>
+                <Link to="/b2b/billing/add-funds" className="text-xs font-bold bg-gray-900 text-white px-3 py-1 rounded-full hover:bg-black transition-colors">Top Up</Link>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Live job pipeline */}
+      {execError?.response?.status !== 403 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          {DASHBOARD_VIEWS.map((v) => (
+            <Link
+              key={v.key}
+              to={`/b2b/jobs/${v.key}`}
+              className="bg-white rounded-2xl border border-gray-100 p-4 shadow-sm hover:border-brand/40 transition-colors"
+            >
+              <p className="text-[11px] font-bold text-gray-500">{VIEW_LABEL[v.key]}</p>
+              <p className={`text-2xl font-black mt-1 tabular-nums ${v.cls}`}>
+                {loadViews ? <span className="inline-block h-6 w-10 bg-gray-100 rounded animate-pulse" /> : (viewCounts[v.key] ?? 0).toLocaleString('en-IN')}
+              </p>
+            </Link>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
@@ -257,8 +324,9 @@ const B2BCommandCenter = () => {
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Location Heatmap</h4>
               {loadGeo ? <div className="h-32 bg-gray-50 animate-pulse rounded"></div> : (
                 <div className="space-y-3">
-                  {geoAnalytics?.locationHeatmap.map((loc, i) => (
-                    <div key={i} className="flex items-center justify-between">
+                  {!geoAnalytics?.locationHeatmap?.length && <EmptyNote>No jobs yet.</EmptyNote>}
+                  {geoAnalytics?.locationHeatmap?.map((loc, i) => (
+                    <div key={i} className="flex items-center justify-between" title={`${loc.breachRate ?? 0}% of jobs breached SLA`}>
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-gray-400 w-4">{i+1}.</span>
                         <span className="text-sm font-bold text-gray-700">{loc.city}</span>
@@ -276,7 +344,7 @@ const B2BCommandCenter = () => {
             {/* Task Breakdown Pie */}
             <div className="flex flex-col items-center justify-center">
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 w-full text-left">Nature of Tasks</h4>
-              {loadGeo ? <div className="h-32 bg-gray-50 animate-pulse rounded w-full"></div> : (
+              {loadGeo ? <div className="h-32 bg-gray-50 animate-pulse rounded w-full"></div> : !geoAnalytics?.taskBreakdown?.length ? <EmptyNote>No jobs yet.</EmptyNote> : (
                 <div className="w-full h-40 relative">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -288,7 +356,7 @@ const B2BCommandCenter = () => {
                         paddingAngle={2}
                         dataKey="value"
                       >
-                        {geoAnalytics?.taskBreakdown.map((entry, index) => (
+                        {geoAnalytics?.taskBreakdown?.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
@@ -299,7 +367,7 @@ const B2BCommandCenter = () => {
               )}
               {/* Legend */}
               <div className="w-full flex flex-wrap gap-2 justify-center mt-2">
-                {geoAnalytics?.taskBreakdown.map((t, i) => (
+                {geoAnalytics?.taskBreakdown?.map((t, i) => (
                   <div key={i} className="flex items-center gap-1">
                     <span className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color }}></span>
                     <span className="text-[10px] font-bold text-gray-500">{t.name}</span>
@@ -319,7 +387,8 @@ const B2BCommandCenter = () => {
             <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Repeated Call Flagging (&lt;30 Days)</h4>
             {loadHardware ? <div className="h-40 bg-gray-50 animate-pulse rounded"></div> : (
               <div className="space-y-3">
-                {hardwareHealth?.repeatedCalls.map((hw, i) => (
+                {!hardwareHealth?.repeatedCalls?.length && <EmptyNote>No device has needed a repeat visit in the last 30 days.</EmptyNote>}
+                {hardwareHealth?.repeatedCalls?.map((hw, i) => (
                   <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border border-gray-100 rounded-xl hover:bg-gray-50 transition-colors">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
@@ -364,7 +433,8 @@ const B2BCommandCenter = () => {
             {/* Reason Codes Summary */}
             {loadFinance ? <div className="h-16 bg-gray-50 animate-pulse rounded mb-4"></div> : (
               <div className="flex flex-wrap gap-2 mb-5">
-                {financeLogs?.reasonCodes.map((rc, i) => (
+                {!financeLogs?.reasonCodes?.length && <EmptyNote>No deductions recorded.</EmptyNote>}
+                {financeLogs?.reasonCodes?.map((rc, i) => (
                   <div key={i} className="px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg flex-1 min-w-[140px]">
                     <p className="text-[10px] font-bold text-gray-500 line-clamp-1">{rc.reason}</p>
                     <p className="text-sm font-black text-gray-800">₹{rc.amount} <span className="text-xs text-red-500 font-bold ml-1">({rc.count} drops)</span></p>
@@ -385,7 +455,10 @@ const B2BCommandCenter = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {financeLogs?.deductionLedger.map((row, i) => (
+                  {!loadFinance && !financeLogs?.deductionLedger?.length && (
+                    <tr><td colSpan={4} className="p-4 text-center text-gray-400">No deductions.</td></tr>
+                  )}
+                  {financeLogs?.deductionLedger?.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50/50">
                       <td className="p-3 font-bold text-[#10AFA5]">{row.jobId}</td>
                       <td className="p-3 font-medium text-gray-700">{row.reason}</td>
@@ -409,10 +482,12 @@ const B2BCommandCenter = () => {
             {/* Engineer Rating Aggregator */}
             <div>
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Engineer Rating Matrix</h4>
-              {loadWorkforce ? <div className="h-32 bg-gray-50 animate-pulse rounded"></div> : (
+              {loadWorkforce ? <div className="h-32 bg-gray-50 animate-pulse rounded"></div> : !workforceQuality?.engineerRatings?.ratingsCount ? (
+                <EmptyNote>No engineer ratings submitted yet. Rate an engineer from a resolved job.</EmptyNote>
+              ) : (
                 <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="text-3xl font-black text-gray-900">{workforceQuality?.engineerRatings.overallAverage}</div>
+                    <div className="text-3xl font-black text-gray-900">{workforceQuality.engineerRatings.overallAverage ?? '—'}</div>
                     <div className="text-xs font-bold text-gray-500 uppercase">Overall Avg<br/>Out of 5.0</div>
                   </div>
                   <div className="space-y-2">
@@ -425,7 +500,7 @@ const B2BCommandCenter = () => {
                       <div key={i} className="flex items-center justify-between text-xs font-bold">
                         <span className="text-gray-600">{metric.label}</span>
                         <span className={`px-2 py-0.5 rounded ${metric.val >= 4.5 ? 'bg-green-100 text-green-700' : metric.val >= 4.0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {metric.val}
+                          {metric.val ?? '—'}
                         </span>
                       </div>
                     ))}
@@ -437,8 +512,8 @@ const B2BCommandCenter = () => {
             {/* Skill Gap Failures */}
             <div className="flex flex-col">
               <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Skill Gap Aborts</h4>
-              <p className="text-[10px] font-bold text-red-500 mb-2">Total aborted due to lack of expertise: {workforceQuality?.skillGaps.totalAborted}</p>
-              {loadWorkforce ? <div className="flex-1 bg-gray-50 animate-pulse rounded"></div> : (
+              <p className="text-[10px] font-bold text-red-500 mb-2">Total aborted due to lack of expertise: {workforceQuality?.skillGaps?.totalAborted ?? 0}</p>
+              {loadWorkforce ? <div className="flex-1 bg-gray-50 animate-pulse rounded"></div> : !workforceQuality?.skillGaps?.categories?.length ? <EmptyNote>No aborted jobs.</EmptyNote> : (
                 <div className="flex-1 w-full min-h-[150px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={workforceQuality?.skillGaps.categories} layout="vertical" margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
@@ -543,7 +618,7 @@ const B2BCommandCenter = () => {
               )}
               {chatMessages.length === 1 && (
                 <div className="flex flex-wrap gap-2 mt-2">
-                  <button onClick={() => handleSendChat("Where is engineer for Ticket #4092?")} className="text-[10px] font-bold bg-white border border-[#10AFA5] text-[#10AFA5] px-2.5 py-1 rounded-full hover:bg-teal-50">Where is engineer for Ticket #4092?</button>
+                  <button onClick={() => handleSendChat("Show my pending jobs")} className="text-[10px] font-bold bg-white border border-brand text-brand px-2.5 py-1 rounded-full hover:bg-teal-50">Show my pending jobs</button>
                   <button onClick={() => handleSendChat("Dispute Deduction")} className="text-[10px] font-bold bg-white border border-[#10AFA5] text-[#10AFA5] px-2.5 py-1 rounded-full hover:bg-teal-50">Dispute Deduction</button>
                   <button onClick={() => handleSendChat("What is my wallet balance?")} className="text-[10px] font-bold bg-white border border-[#10AFA5] text-[#10AFA5] px-2.5 py-1 rounded-full hover:bg-teal-50">Check Wallet Balance</button>
                 </div>
@@ -567,8 +642,6 @@ const B2BCommandCenter = () => {
           className="w-14 h-14 bg-gray-900 text-white rounded-full shadow-xl flex items-center justify-center hover:scale-105 transition-transform hover:bg-black relative"
         >
           {chatOpen ? <FiX size={24} /> : <FiMessageSquare size={24} />}
-          {!chatOpen && <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-red-500 border-2 border-white rounded-full animate-ping"></span>}
-          {!chatOpen && <span className="absolute top-0 right-0 w-3.5 h-3.5 bg-red-500 border-2 border-white rounded-full"></span>}
         </button>
       </div>
 

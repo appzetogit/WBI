@@ -17,6 +17,8 @@ import useResourcesCounts from '../hooks/useResourcesCounts';
 import useQualityCounts from '../hooks/useQualityCounts';
 import useFinanceCounts from '../hooks/useFinanceCounts';
 import useGlobalCounts from '../hooks/useGlobalCounts';
+import useJobCounts from '../hooks/useJobCounts';
+import useEngineerCounts from '../hooks/useEngineerCounts';
 
 const VendorCountsContext = createContext(null);
 
@@ -29,10 +31,12 @@ export const VendorCountsProvider = ({ children }) => {
   const quality = useQualityCounts();
   const finance = useFinanceCounts();
   const global = useGlobalCounts();
+  const jobs = useJobCounts();
+  const engineers = useEngineerCounts();
 
   return (
     <VendorCountsContext.Provider
-      value={{ businessIntake, clientsContracts, projectOps, workforce, resources, quality, finance, global }}
+      value={{ businessIntake, clientsContracts, projectOps, workforce, resources, quality, finance, global, jobs, engineers }}
     >
       {children}
     </VendorCountsContext.Provider>

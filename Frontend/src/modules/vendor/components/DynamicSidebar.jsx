@@ -21,26 +21,26 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
-  Handshake,
+  ClipboardList,
+  Wrench,
+  CalendarCheck,
+  Receipt,
+  BarChart3,
   LogOut,
   X
 } from 'lucide-react';
 
 const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
-  const { sidebarSections, vendorProfile, primaryService } = useVendorConfig();
+  const { vendorProfile, primaryService } = useVendorConfig();
   const { basePath } = useVendorBasePath();
   const [expandedSections, setExpandedSections] = useState({});
   const location = useLocation();
   const { loggingOut, confirmOpen, openConfirm, closeConfirm, confirmLogout } = useVendorLogout();
   const {
     businessIntake: { counts },
-    clientsContracts: { counts: ccCounts },
-    projectOps: { counts: poCounts },
-    workforce: { counts: wfCounts },
-    resources: { counts: resCounts },
-    quality: { counts: qcCounts },
-    finance: { counts: finCounts },
+    engineers: { counts: engCounts },
     global: { counts: globalCounts },
+    jobs: { counts: jobCounts },
   } = useVendorCounts();
 
   const vendorName = vendorProfile?.businessName || vendorProfile?.companyName || 'Vendor Portal';
@@ -64,53 +64,129 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
 
   const NAV_ITEMS = useMemo(() => {
     const b = basePath;
-    const newJobsCount = (counts.clientRequests || 0) + (counts.b2bOpportunities || 0);
+    const red = (n) => Boolean(n > 0);
     return {
       'Dashboard': { path: `${b}/dashboard`, icon: LayoutDashboard },
-      'My Jobs': {
-        path: `${b}/my-jobs`,
+      'Jobs': {
+        path: `${b}/jobs`,
         icon: Briefcase,
+        // Same sections, order and counts as the Jobs page (backend TAB_STATES).
         subItems: [
-          { name: 'All Jobs', path: `${b}/my-jobs?tab=all` },
-          { name: 'User Projects', path: `${b}/my-jobs?tab=user`, badge: counts.clientRequests, badgeRed: Boolean(counts.clientRequests > 0) },
-          { name: 'B2B Jobs', path: `${b}/my-jobs?tab=b2b`, badge: counts.b2bOpportunities, badgeRed: Boolean(counts.b2bOpportunities > 0) },
-          { name: 'In Progress', path: `${b}/my-jobs?status=in_progress`, badge: poCounts.liveJobs, badgeRed: Boolean(poCounts.liveJobs > 0) },
-          { name: 'Completed', path: `${b}/my-jobs?status=completed` }
+          { name: 'All Jobs', path: `${b}/jobs?tab=all`, badge: jobCounts.all },
+          { name: 'New Requests', path: `${b}/jobs?tab=new`, badge: jobCounts.new, badgeRed: red(jobCounts.new) },
+          { name: 'Pending Assignment', path: `${b}/jobs?tab=pending_assignment`, badge: jobCounts.pending_assignment, badgeRed: red(jobCounts.pending_assignment) },
+          { name: 'Assigned', path: `${b}/jobs?tab=assigned`, badge: jobCounts.assigned },
+          { name: 'Accepted', path: `${b}/jobs?tab=accepted`, badge: jobCounts.accepted },
+          { name: 'In Progress', path: `${b}/jobs?tab=in_progress`, badge: jobCounts.in_progress },
+          { name: 'Completed', path: `${b}/jobs?tab=completed` },
+          { name: 'Cancelled', path: `${b}/jobs?tab=cancelled` },
+          { name: 'Rejected', path: `${b}/jobs?tab=rejected` }
         ]
       },
       'Engineers': {
         path: `${b}/engineers`,
         icon: Users,
+        // Same sections and counts as the Engineers pages (backend vendorEngineers.service).
         subItems: [
-          { name: 'Engineer List', path: `${b}/engineers?tab=all`, badge: wfCounts.totalEngineers },
-          { name: 'Available', path: `${b}/engineers?tab=available`, badge: wfCounts.available },
-          { name: 'Busy / On Job', path: `${b}/engineers?tab=busy`, badge: wfCounts.openAssignments, badgeRed: Boolean(wfCounts.openAssignments > 0) },
-          { name: 'Skills', path: `${b}/engineers?tab=skills` }
+          { name: 'All Engineers', path: `${b}/engineers?tab=all`, badge: engCounts.all },
+          { name: 'Add Engineer', path: `${b}/engineers/add` },
+          { name: 'Pending Engineers', path: `${b}/engineers?tab=pending`, badge: engCounts.pending, badgeRed: red(engCounts.pendingOnVendor) },
+          { name: 'Active Engineers', path: `${b}/engineers?tab=active`, badge: engCounts.active },
+          { name: 'Inactive Engineers', path: `${b}/engineers?tab=inactive` },
+          { name: 'Engineer Skills', path: `${b}/engineers/skills` },
+          { name: 'Engineer Availability', path: `${b}/engineers/availability`, badge: engCounts.availability?.available },
+          { name: 'Engineer Performance', path: `${b}/engineers/performance` }
         ]
       },
-      'Finance': {
-        path: `${b}/finance`,
+      'Assignments': {
+        path: `${b}/assignments`,
+        icon: ClipboardList,
+        subItems: [
+          { name: 'Assign Job', path: `${b}/assignments`, badge: jobCounts.pending_assignment, badgeRed: red(jobCounts.pending_assignment) },
+          { name: 'Bulk Assignment', path: `${b}/assignments/bulk` },
+          { name: 'Assignment History', path: `${b}/assignments/history` },
+          { name: 'Reassignment', path: `${b}/assignments/reassign` }
+        ]
+      },
+      'Services': {
+        path: `${b}/services`,
+        icon: Wrench,
+        subItems: [
+          { name: 'My Services', path: `${b}/services` },
+          { name: 'Service Coverage', path: `${b}/services/coverage` },
+          { name: 'Service Keys', path: `${b}/services/keys` },
+          { name: 'Service Areas', path: `${b}/services/areas` }
+        ]
+      },
+      'Parts': {
+        path: `${b}/parts`,
+        icon: Box,
+        subItems: [
+          { name: 'Parts', path: `${b}/parts` },
+          { name: 'Inventory', path: `${b}/parts/inventory` },
+          { name: 'Required Parts', path: `${b}/parts/required` },
+          { name: 'Used Parts', path: `${b}/parts/used` }
+        ]
+      },
+      'Bookings': {
+        path: `${b}/bookings?tab=user`,
+        icon: CalendarCheck,
+        badge: counts.clientRequests,
+        badgeRed: red(counts.clientRequests)
+      },
+      'Payments': {
+        path: `${b}/payments`,
         icon: Wallet,
         subItems: [
+          { name: 'Job Payments', path: `${b}/payments` },
           { name: 'Earnings', path: `${b}/finance/earnings` },
           { name: 'Wallet / Ledger', path: `${b}/finance/wallet` },
-          { name: 'Engineer Payments', path: `${b}/finance/engineer-payments` },
-          { name: 'Settlements', path: `${b}/finance/settlements` }
+          { name: 'Engineer Payments', path: `${b}/finance/engineer-payments` }
         ]
       },
+      'Settlements': {
+        path: `${b}/settlements`,
+        icon: Receipt,
+        subItems: [
+          { name: 'Job Settlements', path: `${b}/settlements` },
+          { name: 'Wallet Payouts', path: `${b}/finance/settlements` }
+        ]
+      },
+      'Support': { path: `${b}/support`, icon: HelpCircle },
+      'Analytics': { path: `${b}/analytics`, icon: BarChart3 },
+      'Documents': { path: `${b}/documents`, icon: FileCheck },
+      'Settings': { path: `${b}/settings`, icon: Settings },
       'Notifications': { path: `${b}/notifications`, icon: Bell, badge: globalCounts.unreadNotifications, badgeRed: true }
     };
-  }, [basePath, counts, poCounts, wfCounts, globalCounts]);
+  }, [basePath, counts, engCounts, globalCounts, jobCounts]);
 
-  const sectionsToRender = useMemo(() => {
-    return ['Dashboard', 'My Jobs', 'Engineers', 'Finance', 'Notifications'];
-  }, []);
+  const sectionsToRender = useMemo(() => [
+    'Dashboard', 'Jobs', 'Engineers', 'Assignments', 'Services', 'Parts', 'Bookings',
+    'Payments', 'Settlements', 'Support', 'Analytics', 'Documents', 'Settings', 'Notifications'
+  ], []);
 
-  // Auto-expand active section
+  const pathOf = (to) => to.split('?')[0];
+
+  // A sub-item with a query (?tab=x) is active only on that exact tab; "tab=all"
+  // also matches the bare page. Sub-items without a query match their subtree.
+  const isSubActive = (to) => {
+    const [pathname, query] = to.split('?');
+    if (!query) {
+      const siblings = Object.values(NAV_ITEMS).flatMap((i) => i.subItems || []).map((si) => pathOf(si.path));
+      const moreSpecific = siblings.some((sp) => sp !== pathname && sp.startsWith(`${pathname}/`) && location.pathname.startsWith(sp));
+      return !moreSpecific && (location.pathname === pathname || location.pathname.startsWith(`${pathname}/`));
+    }
+    if (location.pathname !== pathname) return false;
+    const have = new URLSearchParams(location.search);
+    return [...new URLSearchParams(query)].every(([k, v]) => (have.get(k) || (k === 'tab' ? 'all' : null)) === v);
+  };
+
+  // Auto-expand the section that owns the current page
   useEffect(() => {
     sectionsToRender.forEach((section) => {
       const item = NAV_ITEMS[section];
-      if (item?.path && location.pathname.startsWith(item.path)) {
+      const paths = [item?.path, ...(item?.subItems || []).map((si) => si.path)].filter(Boolean).map(pathOf);
+      if (item?.subItems && paths.some((pp) => location.pathname === pp || location.pathname.startsWith(`${pp}/`))) {
         setExpandedSections((prev) => ({ ...prev, [section]: true }));
       }
     });
@@ -159,7 +235,7 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
             const Icon = item.icon;
             const hasSubItems = item.subItems && item.subItems.length > 0;
             const isExpanded = expandedSections[section];
-            const isActiveMain = location.pathname.startsWith(item.path) || location.pathname === item.path;
+            const isActiveMain = location.pathname.startsWith(pathOf(item.path));
 
             return (
               <div key={section} className="flex flex-col">
@@ -199,9 +275,9 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
                       <NavLink
                         key={subItem.name}
                         to={subItem.path}
-                        className={({ isActive }) =>
+                        className={() =>
                           `flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                            isActive
+                            isSubActive(subItem.path)
                               ? 'text-white font-bold bg-gray-800'
                               : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                           }`

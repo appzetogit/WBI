@@ -293,6 +293,233 @@ const EVENT_CATALOG = {
   }
 };
 
+/**
+ * B2B operational lifecycle events.
+ *
+ * These are the events the B2B ecosystem announces, from upload to payout.
+ * Keys are upper-case to match the operational spec; everything else in the
+ * catalog keeps its existing lower-case key.
+ */
+const jobLink = (d, role) => {
+  const id = d.jobId || d.entityId;
+  if (!id) return null;
+  if (role === 'admin') return `/admin/jobs/${id}`;
+  if (role === 'vendor') return `/vendor/jobs?job=${id}`;
+  if (role === 'engineer') return `/jobs/${id}`;
+  return `/b2b/jobs?job=${id}`;
+};
+
+const jobDedupe = (key) => (d, role, id) => `${key}:${d.jobId || d.entityId}:${role}:${id}`;
+
+const B2B_LIFECYCLE_EVENTS = {
+  B2B_UPLOAD_COMPLETED: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.MEDIUM,
+    category: 'bulk_upload',
+    title: () => 'Bulk upload processed',
+    message: (d) => d.message || `${d.createdJobs || 0} job(s) created from ${d.fileName || 'your upload'}.`,
+    actionUrl: () => '/b2b/bulk-jobs',
+    dedupe: jobDedupe('b2b_upload_completed')
+  },
+  B2B_VALIDATION_FAILED: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.HIGH,
+    category: 'bulk_upload',
+    title: () => 'Upload needs attention',
+    message: (d) => d.message || `${d.invalidRows || 0} row(s) could not be accepted. Download the error report.`,
+    actionUrl: () => '/b2b/bulk-jobs',
+    dedupe: jobDedupe('b2b_validation_failed')
+  },
+  PAYMENT_SUCCESS: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.MEDIUM,
+    category: 'payment',
+    title: () => 'Payment received',
+    message: (d) => d.message || `₹${Number(d.amount || 0).toLocaleString('en-IN')} credited to your wallet.`,
+    actionUrl: () => '/b2b/wallet',
+    dedupe: (d, role, id) => `payment_success:${d.transactionId || d.entityId}:${id}`
+  },
+  PAYMENT_FAILED: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.HIGH,
+    category: 'payment',
+    title: () => 'Payment failed',
+    message: (d) => d.message || 'A wallet payment could not be completed.',
+    actionUrl: () => '/b2b/wallet',
+    dedupe: (d, role, id) => `payment_failed:${d.transactionId || d.entityId}:${id}`
+  },
+  JOB_CREATED: {
+    recipients: ['b2b'],
+    channels: ['in_app'],
+    priority: PRIORITY.LOW,
+    category: 'job',
+    title: () => 'Job created',
+    message: (d) => d.message || `${d.jobCode || 'A job'} has been created.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('job_created')
+  },
+  JOB_ROUTED: {
+    recipients: ['b2b'],
+    channels: ['in_app'],
+    priority: PRIORITY.LOW,
+    category: 'job',
+    title: () => 'Job being routed',
+    message: (d) => d.message || `${d.jobCode || 'A job'} is being matched to a provider.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('job_routed')
+  },
+  VENDOR_ASSIGNED: {
+    recipients: ['b2b', 'vendor'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.MEDIUM,
+    category: 'job',
+    title: () => 'Vendor assigned',
+    message: (d) => d.message || `${d.vendorName || 'A vendor'} accepted ${d.jobCode || 'the job'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('vendor_assigned')
+  },
+  ENGINEER_ASSIGNED: {
+    recipients: ['b2b', 'engineer', 'vendor'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.HIGH,
+    category: 'job',
+    title: () => 'Engineer assigned',
+    message: (d) => d.message || `${d.engineerName || 'An engineer'} is assigned to ${d.jobCode || 'the job'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('engineer_assigned')
+  },
+  FREELANCER_REQUEST: {
+    recipients: ['engineer'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.HIGH,
+    category: 'job',
+    title: () => 'New job request',
+    message: (d) => d.message
+      || `${d.service || 'A job'} in ${d.city || 'your area'} — ₹${Number(d.earnings || 0).toLocaleString('en-IN')}. Respond before it expires.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('freelancer_request')
+  },
+  REQUEST_EXPIRED: {
+    recipients: ['b2b', 'engineer', 'vendor'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.MEDIUM,
+    category: 'job',
+    title: () => 'Request expired',
+    message: (d) => d.message || `No response on ${d.jobCode || 'a job'} in time — it went back to the queue.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('request_expired')
+  },
+  ENGINEER_ACCEPTED: {
+    recipients: ['b2b', 'vendor'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.MEDIUM,
+    category: 'job',
+    title: () => 'Engineer accepted',
+    message: (d) => d.message || `${d.engineerName || 'The engineer'} accepted ${d.jobCode || 'the job'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('engineer_accepted')
+  },
+  ENGINEER_REJECTED: {
+    recipients: ['b2b', 'vendor'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.HIGH,
+    category: 'job',
+    title: () => 'Engineer declined',
+    message: (d) => d.message || `${d.engineerName || 'The engineer'} declined ${d.jobCode || 'the job'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('engineer_rejected')
+  },
+  EN_ROUTE: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.LOW,
+    category: 'job',
+    title: () => 'Engineer on the way',
+    message: (d) => d.message || `${d.engineerName || 'The engineer'} is travelling to ${d.jobCode || 'the site'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('en_route')
+  },
+  ARRIVED: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.LOW,
+    category: 'job',
+    title: () => 'Engineer arrived',
+    message: (d) => d.message || `${d.engineerName || 'The engineer'} reached the site for ${d.jobCode || 'the job'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('arrived')
+  },
+  WORK_STARTED: {
+    recipients: ['b2b'],
+    channels: ['in_app'],
+    priority: PRIORITY.LOW,
+    category: 'job',
+    title: () => 'Work started',
+    message: (d) => d.message || `Work has started on ${d.jobCode || 'the job'}.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('work_started')
+  },
+  WORK_COMPLETED: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.MEDIUM,
+    category: 'job',
+    title: () => 'Work completed',
+    message: (d) => d.message || `${d.jobCode || 'A job'} is complete and awaiting verification.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('work_completed')
+  },
+  JOB_CLOSED: {
+    recipients: ['b2b'],
+    channels: ['in_app', 'email'],
+    priority: PRIORITY.LOW,
+    category: 'job',
+    title: () => 'Job closed',
+    message: (d) => d.message || `${d.jobCode || 'A job'} has been verified and closed.`,
+    actionUrl: jobLink,
+    dedupe: jobDedupe('job_closed')
+  },
+  SLA_BREACH: {
+    recipients: ['b2b', 'admin', 'vendor'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.HIGH,
+    category: 'sla',
+    title: () => 'SLA breached',
+    message: (d) => d.message
+      || `${d.jobCode || 'A job'} missed its ${d.metric || 'SLA'} target by ${d.delayMinutes || 0} minute(s).`,
+    actionUrl: jobLink,
+    dedupe: (d, role, id) => `sla_breach:${d.jobId || d.entityId}:${d.metric}:${role}:${id}`
+  },
+  SETTLEMENT_CREATED: {
+    recipients: ['vendor', 'engineer'],
+    channels: ['in_app', 'push'],
+    priority: PRIORITY.MEDIUM,
+    category: 'payment',
+    title: () => 'Settlement created',
+    message: (d) => d.message
+      || `A settlement of ₹${Number(d.amount || 0).toLocaleString('en-IN')} has been raised.`,
+    actionUrl: (d, role) => (role === 'vendor' ? '/vendor/finance/settlements' : '/earnings'),
+    dedupe: (d, role, id) => `settlement_created:${d.settlementId || d.entityId}:${role}:${id}`
+  },
+  PAYOUT_COMPLETED: {
+    recipients: ['vendor', 'engineer'],
+    channels: ['in_app', 'push', 'email'],
+    priority: PRIORITY.MEDIUM,
+    category: 'payment',
+    title: () => 'Payout completed',
+    message: (d) => d.message
+      || `₹${Number(d.amount || 0).toLocaleString('en-IN')} has been paid out.`,
+    actionUrl: (d, role) => (role === 'vendor' ? '/vendor/finance/settlements' : '/earnings'),
+    dedupe: (d, role, id) => `payout_completed:${d.payoutId || d.entityId}:${role}:${id}`
+  }
+};
+
+Object.assign(EVENT_CATALOG, B2B_LIFECYCLE_EVENTS);
+
 function getEventDef(eventKey) {
   return EVENT_CATALOG[eventKey] || null;
 }
@@ -303,6 +530,7 @@ function listEventKeys() {
 
 module.exports = {
   EVENT_CATALOG,
+  B2B_LIFECYCLE_EVENTS,
   PRIORITY,
   getEventDef,
   listEventKeys

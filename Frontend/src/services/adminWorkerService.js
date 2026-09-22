@@ -76,8 +76,8 @@ const adminWorkerService = {
   /**
    * Get worker earnings and payment history
    */
-  getWorkerEarnings: async (id) => {
-    const response = await api.get(`/admin/workers/${id}/earnings`);
+  getWorkerEarnings: async (id, params = {}) => {
+    const response = await api.get(`/admin/workers/${id}/earnings`, { params });
     return response.data;
   },
 

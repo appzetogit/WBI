@@ -529,9 +529,24 @@ const getProfile = async (req, res) => {
         message: 'Company profile not found'
       });
     }
+    // What this signed-in principal may do — the panel hides what the API
+    // would refuse anyway (the API remains the enforcer).
+    const { permissionsFor, ACCESS_ROLES } = require('../../config/b2bAccessRoles');
+    const accessRole = req.user?.accessRole || 'B2B_ADMIN';
     return res.status(200).json({
       success: true,
-      company
+      company,
+      principal: {
+        id: req.user?.id || null,
+        name: req.user?.isCompanyLogin
+          ? (company.authorizedPerson?.name || company.companyName)
+          : (req.user?.name || req.user?.fullName || req.user?.email || ''),
+        email: req.user?.email || company.email,
+        accessRole,
+        accessRoleLabel: ACCESS_ROLES[accessRole]?.label || accessRole,
+        isCompanyLogin: Boolean(req.user?.isCompanyLogin),
+        permissions: Array.from(permissionsFor(req.user || {}))
+      }
     });
   } catch (error) {
     console.error('B2B Get Profile Error:', error);

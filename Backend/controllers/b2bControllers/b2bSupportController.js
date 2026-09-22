@@ -49,24 +49,36 @@ const writeAuditLog = async (companyId, action, ticketId, details) => {
 /**
  * Helper to generate the next unique Sup ticket number: SUP-YYYY-00001
  */
+/**
+ * Next ticket number, allocated atomically from a per-year counter so two
+ * tickets raised at the same moment never share a number. The counter is
+ * seeded from the highest existing number the first time a year is used.
+ */
 const getNextTicketNumber = async (year) => {
-  const lastTicket = await SupportTicket.findOne({
-    ticketNumber: new RegExp(`^SUP-${year}-`),
-  }).sort({ createdAt: -1 });
+  const counters = mongoose.connection.collection('counters');
+  const key = `support_ticket_${year}`;
 
-  let sequence = 1;
-  if (lastTicket && lastTicket.ticketNumber) {
-    const parts = lastTicket.ticketNumber.split('-');
-    if (parts.length === 3) {
-      const lastSeq = parseInt(parts[2], 10);
-      if (!isNaN(lastSeq)) {
-        sequence = lastSeq + 1;
-      }
+  if (!(await counters.findOne({ _id: key }))) {
+    const last = await SupportTicket.findOne({ ticketNumber: new RegExp(`^SUP-${year}-`) })
+      .sort({ ticketNumber: -1 })
+      .select('ticketNumber')
+      .lean();
+    const lastSeq = last ? parseInt(String(last.ticketNumber).split('-')[2], 10) || 0 : 0;
+    try {
+      // $max never lowers the counter, so a concurrent seed cannot rewind it.
+      await counters.updateOne({ _id: key }, { $max: { seq: lastSeq } }, { upsert: true });
+    } catch (err) {
+      if (err?.code !== 11000) throw err; // another request created it first
     }
   }
 
-  const paddedSeq = String(sequence).padStart(5, '0');
-  return `SUP-${year}-${paddedSeq}`;
+  const res = await counters.findOneAndUpdate(
+    { _id: key },
+    { $inc: { seq: 1 } },
+    { upsert: true, returnDocument: 'after' }
+  );
+  const seq = (res && res.value ? res.value : res)?.seq;
+  return `SUP-${year}-${String(seq).padStart(5, '0')}`;
 };
 
 /**
@@ -158,15 +170,16 @@ const getTickets = async (req, res) => {
       }
     }
 
-    if (search.trim()) {
+    if (String(search).trim()) {
+      const rx = String(search).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
-        { ticketNumber: { $regex: search.trim(), $options: 'i' } },
-        { subject: { $regex: search.trim(), $options: 'i' } }
+        { ticketNumber: { $regex: rx, $options: 'i' } },
+        { subject: { $regex: rx, $options: 'i' } }
       ];
     }
 
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
     const skipNum = (pageNum - 1) * limitNum;
 
     // Retrieve list fields only for optimal database memory usage
@@ -227,7 +240,6 @@ const createTicket = async (req, res) => {
     }
 
     const year = new Date().getFullYear();
-    const ticketNumber = await getNextTicketNumber(year);
 
     // Validate relationships if specified
     if (relatedJobId && !mongoose.Types.ObjectId.isValid(relatedJobId)) {
@@ -243,24 +255,44 @@ const createTicket = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid Batch ID' });
     }
 
-    const ticket = await SupportTicket.create({
-      companyId: company._id,
-      ticketNumber,
-      subject,
-      description,
-      category,
-      priority,
-      status: 'Open',
-      relatedJobId: relatedJobId || null,
-      relatedInvoiceId: relatedInvoiceId || null,
-      relatedPaymentId: relatedPaymentId || null,
-      relatedBatchId: relatedBatchId || null,
-      createdBy: company.authorizedPerson?.name || company.companyName,
-      contactEmail: company.email,
-      contactNumber: company.phone,
-      attachments,
-      lastMessageAt: new Date()
-    });
+    // A linked job/batch must be this company's own.
+    if (relatedJobId && !(await B2BJob.exists({ _id: relatedJobId, companyId: company._id }))) {
+      return res.status(400).json({ success: false, message: 'Linked job not found for your company' });
+    }
+
+    // Ticket numbers are sequential and unique; two tickets raised at the same
+    // moment can compute the same next number, so retry on the collision.
+    let ticket = null;
+    for (let attempt = 0; attempt < 5 && !ticket; attempt++) {
+      const ticketNumber = await getNextTicketNumber(year);
+      try {
+        ticket = await SupportTicket.create({
+          companyId: company._id,
+          ticketNumber,
+          subject: String(subject).trim().slice(0, 200),
+          description: String(description).trim().slice(0, 5000),
+          category,
+          priority,
+          status: 'Open',
+          relatedJobId: relatedJobId || null,
+          relatedInvoiceId: relatedInvoiceId || null,
+          relatedPaymentId: relatedPaymentId || null,
+          relatedBatchId: relatedBatchId || null,
+          createdBy: req.user?.isCompanyLogin
+            ? (company.authorizedPerson?.name || company.companyName)
+            : (req.user?.name || req.user?.email || company.companyName),
+          contactEmail: company.email,
+          contactNumber: company.phone,
+          attachments,
+          lastMessageAt: new Date()
+        });
+      } catch (err) {
+        if (err?.code !== 11000 || !err?.keyPattern?.ticketNumber) throw err;
+      }
+    }
+    if (!ticket) {
+      return res.status(503).json({ success: false, message: 'Could not allocate a ticket number, please retry' });
+    }
 
     // Seed initial support message mapping the ticket description
     const firstMsg = await SupportMessage.create({
@@ -286,7 +318,7 @@ const createTicket = async (req, res) => {
       await SupportAttachment.insertMany(attachmentRecords);
     }
 
-    await writeAuditLog(company._id, 'CREATE_TICKET', ticket._id, { ticketNumber });
+    await writeAuditLog(company._id, 'CREATE_TICKET', ticket._id, { ticketNumber: ticket.ticketNumber });
 
     // Emit Real-time Socket notifications
     emitSocketEvent(`b2b:${companyId}`, 'support:ticketCreated', ticket);
@@ -299,6 +331,9 @@ const createTicket = async (req, res) => {
       data: ticket
     });
   } catch (error) {
+    if (error?.name === 'ValidationError') {
+      return res.status(400).json({ success: false, message: Object.values(error.errors || {}).map((e) => e.message).join('; ') || 'Invalid ticket details' });
+    }
     console.error('[B2B Support Controller] Create error:', error);
     return res.status(500).json({ success: false, message: 'Failed to create support ticket' });
   }
@@ -377,6 +412,10 @@ const sendMessage = async (req, res) => {
     const authCompanyId = req.companyId || req.user.companyId || req.user.id;
     if (ticket.companyId.toString() !== authCompanyId.toString()) {
       return res.status(403).json({ success: false, message: 'Access denied. Ownership mismatch.' });
+    }
+
+    if (ticket.status === 'Closed') {
+      return res.status(409).json({ success: false, message: 'This ticket is closed. Raise a new ticket to continue.' });
     }
 
     const company = await B2BCompany.findById(authCompanyId);

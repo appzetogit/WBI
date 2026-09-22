@@ -2,31 +2,52 @@
   {
     "title": "Dashboard",
     "route": "/admin/dashboard",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Users",
     "route": "/admin/users",
-    "allowedRoles": ["super_admin", "admin"],
-    "children": ["All Users", "User Bookings", "User Analytics"]
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
+    "children": [
+      "All Users",
+      "User Bookings",
+      "User Analytics"
+    ]
   },
   {
     "title": "B2B",
     "route": "/admin/b2b",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
+      "Unassigned Jobs Queue",
       "Company Approvals",
       "Corporate Wallets",
+      "Transactions",
+      "Pricing",
+      "Contracts",
       "Invoices",
       "Reports",
-      "Support Tickets"
+      "Support Tickets",
+      "Settings"
     ]
   },
   {
     "title": "Vendors",
     "route": "/admin/vendors",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "All Vendors",
       "Vendor Bookings",
@@ -47,7 +68,10 @@
   {
     "title": "Workers",
     "route": "/admin/workers",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "All Workers",
       "Worker Jobs",
@@ -59,7 +83,10 @@
   {
     "title": "Engineers",
     "route": "/admin/engineers",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "All Engineers",
       "Engineer Jobs",
@@ -71,19 +98,31 @@
   {
     "title": "Bookings",
     "route": "/admin/bookings",
-    "allowedRoles": ["super_admin", "admin"],
-    "children": ["All Bookings", "Booking Tracking", "Booking Notifications"]
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
+    "children": [
+      "All Bookings",
+      "Booking Tracking",
+      "Booking Notifications"
+    ]
   },
   {
     "title": "Scrap Items",
     "route": "/admin/scrap",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Payments",
     "route": "/admin/payments",
-    "allowedRoles": ["super_admin"],
+    "allowedRoles": [
+      "super_admin"
+    ],
     "children": [
       "Payment Overview",
       "User Payments",
@@ -95,73 +134,115 @@
   {
     "title": "User Catalog",
     "route": "/admin/user-categories",
-    "allowedRoles": ["super_admin", "admin"],
-    "children": ["Home", "Manage Categories", "Manage Brands", "Manage Services"]
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
+    "children": [
+      "Home",
+      "Manage Categories",
+      "Manage Brands",
+      "Manage Services"
+    ]
   },
   {
     "title": "One-Time Services",
     "route": "/admin/one-time-services",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Banners & Offers",
     "route": "/admin/banners",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Home Content",
     "route": "/admin/home-content",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Premium Services",
     "route": "/admin/service-categories",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Reports",
     "route": "/admin/reports",
-    "allowedRoles": ["super_admin"],
-    "children": ["Revenue Report", "Booking Report", "Payment Report"]
+    "allowedRoles": [
+      "super_admin"
+    ],
+    "children": [
+      "Revenue Report",
+      "Booking Report",
+      "Payment Report"
+    ]
   },
   {
     "title": "Reviews",
     "route": "/admin/reviews",
-    "allowedRoles": ["super_admin"],
+    "allowedRoles": [
+      "super_admin"
+    ],
     "children": []
   },
   {
     "title": "Plans",
     "route": "/admin/plans",
-    "allowedRoles": ["super_admin"],
+    "allowedRoles": [
+      "super_admin"
+    ],
     "children": []
   },
   {
     "title": "Settings",
     "route": "/admin/settings",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "CMS Content",
     "route": "/admin/cms-content",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Trust Videos",
     "route": "/admin/trust-videos",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": []
   },
   {
     "title": "Digital Solutions",
     "route": "/admin/digital-solutions",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "Web Development",
       "App Development",
@@ -173,7 +254,10 @@
   {
     "title": "Security Solutions",
     "route": "/admin/security-solutions",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "Installation & Dismantle",
       "Preventive maintenance",
@@ -186,7 +270,10 @@
   {
     "title": "Banking Solutions",
     "route": "/admin/banking-solutions",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "ATM Service",
       "ATM Cassette Service",
@@ -200,7 +287,10 @@
   {
     "title": "Energy Solutions",
     "route": "/admin/energy-solutions",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "Diesel Generator Service",
       "Battery Service",
@@ -214,7 +304,10 @@
   {
     "title": "Healthcare Solutions",
     "route": "/admin/healthcare-solutions",
-    "allowedRoles": ["super_admin", "admin"],
+    "allowedRoles": [
+      "super_admin",
+      "admin"
+    ],
     "children": [
       "Medical Equipment Services",
       "Quality Control Test",

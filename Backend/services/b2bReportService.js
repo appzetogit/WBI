@@ -124,7 +124,7 @@ const getReportSummaryInternal = async (companyId, query) => {
       }
     }
   ]);
-  summary.avgRating = ratingStats[0] ? parseFloat(ratingStats[0].avgRating.toFixed(1)) : 4.5;
+  summary.avgRating = ratingStats[0]?.avgRating != null ? parseFloat(ratingStats[0].avgRating.toFixed(1)) : null;
 
   // SLA compliance: % of completed jobs resolved within their per-job SLA
   // target window (B2BJob.slaTarget, in hours, defaults to 24h). Real
@@ -204,6 +204,8 @@ const getReportSummary = async (companyId, filters = {}) => {
 
   const calculateMomChange = (curr, prev, isRating = false) => {
     if (isRating) {
+      if (curr === null || curr === undefined) return 'No ratings yet';
+      if (prev === null || prev === undefined) return `No ratings in ${prevMonthName}`;
       const diff = curr - prev;
       const arrow = diff >= 0 ? '↑' : '↓';
       return `${arrow} ${Math.abs(diff).toFixed(1)} vs ${prevMonthName}`;
@@ -417,7 +419,8 @@ const getEngineerPerformance = async (companyId, filters = {}) => {
       assignedJobs: stat.assignedJobs || 0,
       completedJobs: stat.completedJobs || 0,
       activeJobs: stat.activeJobs || 0,
-      averageRating: stat.engineerInfo?.rating || 4.5,
+      averageRating: stat.engineerInfo?.rating ?? null,
+      engineerId: stat._id || null,
       utilization: `${utilizationPercent}%`,
       utilizationBasis: `${activeHours.toFixed(1)}h active ÷ ${capacityHours}h capacity (${windowDays}d × ${STANDARD_SHIFT_HOURS}h shift)`
     };

@@ -127,10 +127,30 @@ const isApprovedB2B = (req, res, next) => {
       message: 'Access denied. B2B account verification was rejected.'
     });
   }
+  // The operational account status is the gate: PENDING and APPROVED companies
+  // are still onboarding and may use the panel; these three may not.
+  const BLOCKED = ['SUSPENDED', 'REJECTED', 'INACTIVE'];
+  if (BLOCKED.includes(req.user.companyStatus)) {
+    return res.status(403).json({
+      success: false,
+      accountStatus: req.user.companyStatus,
+      message: `Access denied. This company account is ${req.user.companyStatus.toLowerCase()}.`
+    });
+  }
   next();
 };
 
+/**
+ * Guard a B2B route with a permission key.
+ *
+ * Permissions come from the user's access role (B2B_ADMIN / B2B_OPERATIONS /
+ * B2B_FINANCE / DISPATCHER) plus any per-user overrides. The company's own
+ * login holds everything. This is the only place that decides — a panel
+ * hiding a button is not access control.
+ */
 const checkB2BPermission = (permissionKey) => {
+  const { hasPermission, ACCESS_ROLES } = require('../config/b2bAccessRoles');
+
   return (req, res, next) => {
     if (req.userRole !== 'B2B' && req.userRole !== 'b2b') {
       return res.status(403).json({
@@ -139,21 +159,17 @@ const checkB2BPermission = (permissionKey) => {
       });
     }
 
-    const userPermissions = req.user?.permissions || [];
-    
-    // Company Admin has full access, so they automatically pass all permission checks!
-    if (req.user?.role === 'Company Admin') {
-      return next();
-    }
+    if (hasPermission(req.user || {}, permissionKey)) return next();
 
-    if (!userPermissions.includes(permissionKey)) {
-      return res.status(403).json({
-        success: false,
-        message: `Access denied. Permission '${permissionKey}' is required.`
-      });
-    }
-
-    next();
+    const role = req.user?.accessRole;
+    return res.status(403).json({
+      success: false,
+      code: 'PERMISSION_DENIED',
+      message: role && ACCESS_ROLES[role]
+        ? `Your role (${ACCESS_ROLES[role].label}) cannot do this. It needs '${permissionKey}'.`
+        : `Access denied. Permission '${permissionKey}' is required.`,
+      requiredPermission: permissionKey
+    });
   };
 };
 

@@ -15,14 +15,19 @@ const { uploadLimiter } = require('../../middleware/rateLimiter');
  * The real controls are therefore: mime/extension filtering and size caps in
  * uploadMiddleware, plus this volume limit so the endpoints cannot be abused as
  * anonymous object storage.
+ *
+ * The limiter is attached to each upload route, NOT via router.use(): this
+ * router is mounted at /api and /api/admin, and router-level middleware runs
+ * for every request that passes through it — which throttled every later
+ * /api and /api/admin route (notifications, bookings, admin screens…) to
+ * 30 requests / 5 min per IP.
  */
-router.use(uploadLimiter);
 
 // Get signature for direct signed upload
-router.get('/upload/sign-signature', getSignature);
+router.get('/upload/sign-signature', uploadLimiter, getSignature);
 
 // Upload single file to Cloudinary
-router.post('/upload', uploadImage, async (req, res) => {
+router.post('/upload', uploadLimiter, uploadImage, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -48,7 +53,7 @@ router.post('/upload', uploadImage, async (req, res) => {
 });
 
 // Upload media file to Cloudinary (Images & Videos)
-router.post('/upload-media', uploadMedia, async (req, res) => {
+router.post('/upload-media', uploadLimiter, uploadMedia, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -74,7 +79,7 @@ router.post('/upload-media', uploadMedia, async (req, res) => {
 });
 
 // Upload generic file (PDF, DOC, Images) to Cloudinary
-router.post('/upload-file', uploadGenericFile, async (req, res) => {
+router.post('/upload-file', uploadLimiter, uploadGenericFile, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({

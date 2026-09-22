@@ -5,6 +5,21 @@ const VendorBill = require('../../models/VendorBill');
 const { validationResult } = require('express-validator');
 const { VENDOR_STATUS, BOOKING_STATUS, PAYMENT_STATUS } = require('../../utils/constants');
 const { createNotification } = require('../notificationControllers/notificationController');
+const { logAudit } = require('../../utils/auditLogger');
+
+/** Every admin decision about a vendor is recorded with actor, change and reason. */
+const auditVendor = (req, actionType, vendor, oldValue, newValue, reason = '') =>
+  logAudit({
+    actionType,
+    actorId: req.user?._id || req.user?.id || null,
+    actorRole: 'admin',
+    targetType: 'Vendor',
+    targetId: vendor._id,
+    oldValue,
+    newValue,
+    reason: String(reason || ''),
+    req
+  });
 
 /**
  * Get all vendors with filters and pagination
@@ -30,24 +45,22 @@ const getAllVendors = async (req, res) => {
     }
 
     // Search by name, email, phone, or business name
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { businessName: { $regex: search, $options: 'i' } }
-      ];
+    if (search && String(search).trim()) {
+      const rx = { $regex: String(search).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+      query.$or = [{ name: rx }, { email: rx }, { phone: rx }, { businessName: rx }];
     }
 
     // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 500);
+    const skip = (pageNum - 1) * limitNum;
 
     // Get vendors
     const vendors = await Vendor.find(query)
       .select('-password')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(limitNum);
 
     // Get total count
     const total = await Vendor.countDocuments(query);
@@ -56,10 +69,10 @@ const getAllVendors = async (req, res) => {
       success: true,
       data: vendors,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageNum,
+        limit: limitNum,
         total,
-        pages: Math.ceil(total / parseInt(limit))
+        pages: Math.ceil(total / limitNum)
       }
     });
   } catch (error) {
@@ -238,6 +251,7 @@ const approveVendor = async (req, res) => {
       });
     }
 
+    const approveBefore = { approvalStatus: vendor.approvalStatus, isActive: vendor.isActive };
     vendor.approvalStatus = VENDOR_STATUS.APPROVED;
     vendor.approvalDate = new Date();
     vendor.isActive = true;
@@ -285,6 +299,8 @@ const approveVendor = async (req, res) => {
       });
     }
 
+    await auditVendor(req, 'ADMIN_APPROVED_VENDOR', vendor, approveBefore, { approvalStatus: vendor.approvalStatus, isActive: true });
+
     res.status(200).json({
       success: true,
       message: 'Vendor approved successfully',
@@ -325,9 +341,11 @@ const rejectVendor = async (req, res) => {
       });
     }
 
+    const rejectBefore = { approvalStatus: vendor.approvalStatus, isActive: vendor.isActive };
     vendor.approvalStatus = VENDOR_STATUS.REJECTED;
     vendor.rejectedReason = reason || 'Registration rejected by admin';
     await vendor.save();
+    await auditVendor(req, 'ADMIN_REJECTED_VENDOR', vendor, rejectBefore, { approvalStatus: vendor.approvalStatus }, vendor.rejectedReason);
 
     try {
       const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
@@ -383,13 +401,31 @@ const suspendVendor = async (req, res) => {
       });
     }
 
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) {
+      return res.status(400).json({ success: false, message: 'A reason is required to suspend a vendor' });
+    }
+    const suspendBefore = { approvalStatus: vendor.approvalStatus, isActive: vendor.isActive };
     vendor.approvalStatus = VENDOR_STATUS.SUSPENDED;
     vendor.isActive = false;
+    vendor.rejectedReason = reason;
     await vendor.save();
+    await auditVendor(req, 'ADMIN_SUSPENDED_VENDOR', vendor, suspendBefore, { approvalStatus: vendor.approvalStatus, isActive: false }, reason);
+
+    // Jobs the vendor still holds need an operator's attention.
+    const B2BJob = require('../../models/B2BJob');
+    const { viewFilter } = require('../../services/b2bJobViews');
+    const openJobs = await B2BJob.countDocuments({
+      assignedVendorId: vendor._id,
+      $nor: [viewFilter('resolved'), viewFilter('cancelled'), viewFilter('failed')]
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Vendor suspended successfully',
+      openJobs,
+      message: openJobs
+        ? `Vendor suspended. ${openJobs} open job(s) are still with this vendor; reassign them from the Project Assignment Engine.`
+        : 'Vendor suspended successfully',
       data: vendor
     });
   } catch (error) {
@@ -455,10 +491,14 @@ const getVendorEarnings = async (req, res) => {
   try {
     const { id } = req.params;
     const { startDate, endDate } = req.query;
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid vendor id' });
+    }
 
     // Get earnings from VendorBill (single source of truth)
     const billQuery = {
-      vendorId: require('mongoose').Types.ObjectId(id),
+      vendorId: new mongoose.Types.ObjectId(id),
       status: 'paid'
     };
 
@@ -695,6 +735,9 @@ const toggleVendorStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { isActive } = req.body; // Expecting { isActive: true/false }
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'isActive must be true or false' });
+    }
 
     const vendor = await Vendor.findById(id);
 
@@ -705,11 +748,10 @@ const toggleVendorStatus = async (req, res) => {
       });
     }
 
+    const toggleBefore = { isActive: vendor.isActive };
     vendor.isActive = isActive;
     await vendor.save();
-
-    // Log the action (optional but recommended)
-    // console.log(`Vendor ${vendor._id} status changed to ${isActive}`);
+    await auditVendor(req, isActive ? 'ADMIN_ACTIVATED_VENDOR' : 'ADMIN_DEACTIVATED_VENDOR', vendor, toggleBefore, { isActive }, req.body?.reason);
 
     res.status(200).json({
       success: true,
@@ -732,14 +774,39 @@ const deleteVendor = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const vendor = await Vendor.findByIdAndDelete(id);
-
+    const vendor = await Vendor.findById(id);
     if (!vendor) {
       return res.status(404).json({
         success: false,
         message: 'Vendor not found'
       });
     }
+
+    // A vendor with jobs, bookings, engineers, bills or withdrawals is part of
+    // the record: deleting it would orphan them. Deactivate it instead.
+    const B2BJob = require('../../models/B2BJob');
+    const Engineer = require('../../models/Engineer');
+    const [jobs, bookings, engineers, bills, withdrawals] = await Promise.all([
+      B2BJob.countDocuments({ $or: [{ assignedVendorId: vendor._id }, { notifiedVendors: vendor._id }] }),
+      Booking.countDocuments({ vendorId: vendor._id }),
+      Engineer.countDocuments({ vendorId: vendor._id }),
+      VendorBill.countDocuments({ vendorId: vendor._id }),
+      Withdrawal.countDocuments({ vendorId: vendor._id })
+    ]);
+    const linked = { jobs, bookings, engineers, bills, withdrawals };
+    if (jobs + bookings + engineers + bills + withdrawals > 0) {
+      return res.status(409).json({
+        success: false,
+        code: 'VENDOR_HAS_RECORDS',
+        linked,
+        message: 'This vendor has jobs, bookings, engineers or payments on record and cannot be deleted. Deactivate or suspend it instead.'
+      });
+    }
+
+    await auditVendor(req, 'ADMIN_DELETED_VENDOR', vendor,
+      { businessName: vendor.businessName, name: vendor.name, phone: vendor.phone, email: vendor.email, approvalStatus: vendor.approvalStatus },
+      null, req.body?.reason);
+    await Vendor.deleteOne({ _id: vendor._id });
 
     res.status(200).json({
       success: true,
@@ -761,15 +828,21 @@ const updateVendorKycStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, reason } = req.body;
-    
+    if (!['pending', 'verified', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'status must be pending, verified or rejected' });
+    }
+    if (status === 'rejected' && !String(reason || '').trim()) {
+      return res.status(400).json({ success: false, message: 'A reason is required to reject KYC' });
+    }
+
     const vendor = await Vendor.findById(id);
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
-    
+
+    const kycBefore = { kycStatus: vendor.kycStatus };
     vendor.kycStatus = status;
-    if (status === 'rejected' && reason) {
-      // You can store reason in Vendor or VendorKYC
-    }
     await vendor.save();
+    // The reason is kept on the audit trail for this vendor.
+    await auditVendor(req, 'ADMIN_VENDOR_KYC_STATUS', vendor, kycBefore, { kycStatus: status }, reason);
 
     try {
       const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');
@@ -777,9 +850,10 @@ const updateVendorKycStatus = async (req, res) => {
     } catch (_) {
       /* non-blocking */
     }
-    
+
     res.status(200).json({ success: true, message: `KYC status updated to ${status}` });
   } catch (error) {
+    console.error('Update vendor KYC status error:', error);
     res.status(500).json({ success: false, message: 'Failed to update KYC status' });
   }
 };
@@ -791,12 +865,20 @@ const updateVendorBankStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, reason } = req.body;
-    
+    if (!['pending', 'verified', 'rejected'].includes(status)) {
+      return res.status(400).json({ success: false, message: 'status must be pending, verified or rejected' });
+    }
+    if (status === 'rejected' && !String(reason || '').trim()) {
+      return res.status(400).json({ success: false, message: 'A reason is required to reject bank details' });
+    }
+
     const vendor = await Vendor.findById(id);
     if (!vendor) return res.status(404).json({ success: false, message: 'Vendor not found' });
-    
+
+    const bankBefore = { bankStatus: vendor.bankStatus };
     vendor.bankStatus = status;
     await vendor.save();
+    await auditVendor(req, 'ADMIN_VENDOR_BANK_STATUS', vendor, bankBefore, { bankStatus: status }, reason);
 
     try {
       const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');
@@ -804,9 +886,10 @@ const updateVendorBankStatus = async (req, res) => {
     } catch (_) {
       /* non-blocking */
     }
-    
+
     res.status(200).json({ success: true, message: `Bank status updated to ${status}` });
   } catch (error) {
+    console.error('Update vendor bank status error:', error);
     res.status(500).json({ success: false, message: 'Failed to update Bank status' });
   }
 };
@@ -824,7 +907,7 @@ const updateVendorRegistrationConfig = async (req, res) => {
       Object.assign(config, req.body);
     }
     await config.save();
-    
+
     res.status(200).json({ success: true, message: 'Configuration updated successfully', data: config });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to update configuration' });

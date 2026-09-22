@@ -30,7 +30,15 @@ const RESERVED_VENDOR_SEGMENTS = new Set([
   'jobs',
   'workers',
   'requests',
-  'my-jobs'
+  'my-jobs',
+  'assignments',
+  'services',
+  'parts',
+  'bookings',
+  'payments',
+  'settlements',
+  'analytics',
+  'documents'
 ]);
 
 const ServiceSlugRoute = ({ children }) => {
@@ -144,6 +152,28 @@ const Finance = lazyLoad(() => import('../pages/Finance/Finance'));
 const Performance = lazyLoad(() => import('../pages/Performance/Performance'));
 const Compliance = lazyLoad(() => import('../pages/Compliance/Compliance'));
 const Support = lazyLoad(() => import('../pages/Support/Support'));
+// Field-operations vendor panel (central job model)
+const Jobs = lazyLoad(() => import('../pages/Jobs'));
+const VendorEngineers = lazyLoad(() => import('../pages/VendorEngineers'));
+const AddEngineer = lazyLoad(() => import('../pages/VendorEngineers/AddEngineer'));
+const EngineerSkills = lazyLoad(() => import('../pages/VendorEngineers/EngineerSkills'));
+const EngineerAvailability = lazyLoad(() => import('../pages/VendorEngineers/EngineerAvailability'));
+const EngineerPerformance = lazyLoad(() => import('../pages/VendorEngineers/EngineerPerformance'));
+const AssignJob = lazyLoad(() => import('../pages/Assignments/AssignJob'));
+const BulkAssignment = lazyLoad(() => import('../pages/Assignments/BulkAssignment'));
+const AssignmentHistory = lazyLoad(() => import('../pages/Assignments/AssignmentHistory'));
+const Reassignment = lazyLoad(() => import('../pages/Assignments/Reassignment'));
+const ServiceCoverage = lazyLoad(() => import('../pages/Services'));
+const MyServices = lazyLoad(() => import('../pages/Services/MyServices'));
+const ServiceKeys = lazyLoad(() => import('../pages/Services/ServiceKeys'));
+const ServiceAreas = lazyLoad(() => import('../pages/Services/ServiceAreas'));
+const PartsCatalog = lazyLoad(() => import('../pages/Parts/PartsCatalog'));
+const PartsInventory = lazyLoad(() => import('../pages/Parts/Inventory'));
+const RequiredParts = lazyLoad(() => import('../pages/Parts/RequiredParts'));
+const UsedParts = lazyLoad(() => import('../pages/Parts/UsedParts'));
+const Payments = lazyLoad(() => import('../pages/Payments'));
+const Settlements = lazyLoad(() => import('../pages/Settlements'));
+const Analytics = lazyLoad(() => import('../pages/Analytics'));
 const CmsPage = lazyLoad(() => import('../../user/pages/CmsPage'));
 
 const LoadingFallback = () => (
@@ -236,6 +266,14 @@ const VendorRoutes = () => {
             <Route path="support" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="support" /></ProtectedRoute>} />
             <Route path="requests" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="requests" /></ProtectedRoute>} />
             <Route path="my-jobs" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="my-jobs" /></ProtectedRoute>} />
+            <Route path="jobs" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="jobs" /></ProtectedRoute>} />
+            <Route path="assignments" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="assignments" /></ProtectedRoute>} />
+            <Route path="services" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="services" /></ProtectedRoute>} />
+            <Route path="bookings" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="bookings" /></ProtectedRoute>} />
+            <Route path="payments" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="payments" /></ProtectedRoute>} />
+            <Route path="settlements" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="settlements" /></ProtectedRoute>} />
+            <Route path="analytics" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="analytics" /></ProtectedRoute>} />
+            <Route path="documents" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="documents" /></ProtectedRoute>} />
 
             {/* ── Service-specific portal: /vendor/:serviceSlug/... ─────── */}
             <Route
@@ -252,7 +290,32 @@ const VendorRoutes = () => {
               {/* 5 Core Pillars */}
               <Route path="dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
               <Route path="my-jobs/*" element={<AnimatedPage><MyJobs /></AnimatedPage>} />
-              <Route path="engineers/*" element={<AnimatedPage><Engineers /></AnimatedPage>} />
+              <Route path="jobs/*" element={<AnimatedPage><Jobs /></AnimatedPage>} />
+              <Route path="engineers/roster/*" element={<AnimatedPage><Engineers /></AnimatedPage>} />
+              <Route path="engineers/add" element={<AnimatedPage><AddEngineer /></AnimatedPage>} />
+              <Route path="engineers/skills" element={<AnimatedPage><EngineerSkills /></AnimatedPage>} />
+              <Route path="engineers/availability" element={<AnimatedPage><EngineerAvailability /></AnimatedPage>} />
+              <Route path="engineers/performance" element={<AnimatedPage><EngineerPerformance /></AnimatedPage>} />
+              <Route path="engineers/*" element={<AnimatedPage><VendorEngineers /></AnimatedPage>} />
+              <Route path="assignments/bulk" element={<AnimatedPage><BulkAssignment /></AnimatedPage>} />
+              <Route path="assignments/history" element={<AnimatedPage><AssignmentHistory /></AnimatedPage>} />
+              <Route path="assignments/reassign" element={<AnimatedPage><Reassignment /></AnimatedPage>} />
+              <Route path="assignments/*" element={<AnimatedPage><AssignJob /></AnimatedPage>} />
+              <Route path="services/coverage" element={<AnimatedPage><ServiceCoverage /></AnimatedPage>} />
+              <Route path="services/keys" element={<AnimatedPage><ServiceKeys /></AnimatedPage>} />
+              <Route path="services/areas" element={<AnimatedPage><ServiceAreas /></AnimatedPage>} />
+              <Route path="services/*" element={<AnimatedPage><MyServices /></AnimatedPage>} />
+              <Route path="bookings/*" element={<AnimatedPage><MyJobs /></AnimatedPage>} />
+              <Route path="payments/*" element={<AnimatedPage><Payments /></AnimatedPage>} />
+              <Route path="settlements/*" element={<AnimatedPage><Settlements /></AnimatedPage>} />
+              <Route path="analytics/*" element={<AnimatedPage><Analytics /></AnimatedPage>} />
+              <Route path="resources/*" element={<AnimatedPage><Resources /></AnimatedPage>} />
+              <Route path="parts/inventory" element={<AnimatedPage><PartsInventory /></AnimatedPage>} />
+              <Route path="parts/required" element={<AnimatedPage><RequiredParts /></AnimatedPage>} />
+              <Route path="parts/used" element={<AnimatedPage><UsedParts /></AnimatedPage>} />
+              <Route path="parts/*" element={<AnimatedPage><PartsCatalog /></AnimatedPage>} />
+              <Route path="support/*" element={<AnimatedPage><Support /></AnimatedPage>} />
+              <Route path="documents/*" element={<AnimatedPage><Compliance /></AnimatedPage>} />
               <Route path="finance/*" element={<AnimatedPage><Finance /></AnimatedPage>} />
               <Route path="notifications/*" element={<AnimatedPage><Notifications /></AnimatedPage>} />
 
@@ -265,12 +328,10 @@ const VendorRoutes = () => {
               <Route path="business-intake/*" element={<Navigate to="../my-jobs" replace />} />
               <Route path="clients/*" element={<Navigate to="../my-jobs" replace />} />
               <Route path="projects/*" element={<Navigate to="../my-jobs" replace />} />
-              <Route path="workforce/*" element={<Navigate to="../engineers" replace />} />
-              <Route path="resources/*" element={<Navigate to="../engineers" replace />} />
+              <Route path="workforce/*" element={<Navigate to="../engineers/roster" replace />} />
               <Route path="quality/*" element={<Navigate to="../my-jobs" replace />} />
               <Route path="performance/*" element={<Navigate to="../dashboard" replace />} />
-              <Route path="compliance/*" element={<Navigate to="../dashboard" replace />} />
-              <Route path="support/*" element={<Navigate to="../settings" replace />} />
+              <Route path="compliance/*" element={<Navigate to="../documents" replace />} />
               <Route path="wallet/*" element={<Navigate to="../finance/wallet" replace />} />
               <Route path="earnings/*" element={<Navigate to="../finance/earnings" replace />} />
             </Route>

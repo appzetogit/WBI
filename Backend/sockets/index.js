@@ -1,6 +1,5 @@
 // Socket.io initialization
 const { Server } = require('socket.io');
-const { authenticateSocket } = require('../middleware/authMiddleware');
 
 let io = null;
 
@@ -90,26 +89,37 @@ const initializeSocket = (server) => {
         return next();
       }
 
-      // Verify token using the same method as HTTP middleware
+      // Verify token using the same method as HTTP middleware. A token that
+      // does not verify is NEVER trusted: its claims (userId/role) could be
+      // forged, so the socket is treated as an anonymous guest and joins no
+      // private rooms.
       const { verifyAccessToken } = require('../utils/tokenService');
+      let decoded = null;
       try {
-        const decoded = verifyAccessToken(token);
-        socket.userId = decoded.userId || decoded.id || decoded.profileId;
-        socket.userRole = decoded.role ? decoded.role.toUpperCase() : 'UNKNOWN';
-        next();
+        decoded = verifyAccessToken(token);
       } catch (jwtErr) {
-        // Graceful decode fallback if secret differs or token expired
-        const jwt = require('jsonwebtoken');
-        const decoded = jwt.decode(token);
-        if (decoded && (decoded.userId || decoded.id || decoded.profileId)) {
-          socket.userId = decoded.userId || decoded.id || decoded.profileId;
-          socket.userRole = decoded.role ? decoded.role.toUpperCase() : 'UNKNOWN';
-        } else {
-          socket.userId = 'anonymous';
-          socket.userRole = 'GUEST';
-        }
-        next();
+        decoded = null;
       }
+      if (!decoded || !(decoded.userId || decoded.id || decoded.profileId)) {
+        socket.userId = 'anonymous';
+        socket.userRole = 'GUEST';
+        return next();
+      }
+      socket.userId = String(decoded.userId || decoded.id || decoded.profileId);
+      socket.userRole = decoded.role ? decoded.role.toUpperCase() : 'UNKNOWN';
+      if (socket.userRole === 'SUPER_ADMIN') socket.userRole = 'ADMIN';
+
+      // B2B sub-users receive their company's job events.
+      if (socket.userRole === 'B2B') {
+        try {
+          const B2BUser = require('../models/B2BUser');
+          const b2bUser = await B2BUser.findById(socket.userId).select('companyId').lean();
+          socket.companyId = String(b2bUser?.companyId || socket.userId);
+        } catch (_) {
+          socket.companyId = socket.userId;
+        }
+      }
+      next();
     } catch (error) {
       console.warn('[Socket Auth Error]', error.message);
       next();
@@ -125,8 +135,10 @@ const initializeSocket = (server) => {
       socket.join(`user_${socket.userId.toString()}`);
       socket.join(`client:${socket.userId.toString()}`); // New format
     } else if (socket.userRole === 'B2B') {
-      socket.join(`b2b:${socket.userId.toString()}`);
-      socket.join(`company:${socket.userId.toString()}`);
+      const companyId = socket.companyId || socket.userId.toString();
+      socket.join(`b2b:${companyId}`);
+      socket.join(`company:${companyId}`);
+      if (companyId !== socket.userId.toString()) socket.join(`b2b:${socket.userId.toString()}`);
     } else if (socket.userRole === 'VENDOR') {
       socket.join(`vendor:${socket.userId.toString()}`);
       socket.join(`vendor_${socket.userId.toString()}`);
@@ -148,6 +160,50 @@ const initializeSocket = (server) => {
       socket.join(`admin_${socket.userId.toString()}`);
       socket.join('admin:wbi'); // New format
     }
+
+    // ── Authorization helpers (every privileged event checks the VERIFIED
+    // socket identity, never ids sent by the client) ─────────────────────────
+    const isSelfEngineer = (engineerId) =>
+      socket.userRole === 'ENGINEER' && Boolean(engineerId) && String(socket.userId) === String(engineerId);
+
+    const deny = (event, message = 'Not authorized') => {
+      socket.emit('socket:error', { event, message });
+    };
+
+    /** Booking participants: the customer, the assigned worker/engineer, the vendor, or admin. */
+    const bookingAccess = new Map();
+    const canAccessBooking = async (bookingId) => {
+      if (!bookingId || socket.userRole === 'GUEST') return false;
+      if (socket.userRole === 'ADMIN') return true;
+      const key = String(bookingId);
+      if (bookingAccess.has(key)) return bookingAccess.get(key);
+      try {
+        const Booking = require('../models/Booking');
+        const b = await Booking.findById(bookingId).select('userId workerId engineerId vendorId').lean();
+        const uid = String(socket.userId);
+        const ok = Boolean(b) && [b.userId, b.workerId, b.engineerId, b.vendorId].some((id) => id && String(id) === uid);
+        // Only grants are cached — a worker assigned later must not stay locked out.
+        if (ok) bookingAccess.set(key, true);
+        return ok;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    /** Same scope rules as the HTTP job APIs (services/jobScope.service.js). */
+    const canAccessJob = async (jobId) => {
+      const mongoose = require('mongoose');
+      if (!jobId || !mongoose.Types.ObjectId.isValid(String(jobId)) || socket.userRole === 'GUEST') return false;
+      const { readScopeFilter } = require('../services/jobScope.service');
+      const B2BJob = require('../models/B2BJob');
+      const scope = readScopeFilter({
+        userRole: socket.userRole,
+        user: { _id: socket.userId },
+        userId: socket.userId,
+        companyId: socket.companyId
+      });
+      return Boolean(await B2BJob.exists({ $and: [{ _id: jobId }, scope] }));
+    };
 
     // Explicit Room Join Events (Fallback/Frontend Initiated)
     socket.on('join_vendor_room', (vendorId) => {
@@ -174,8 +230,12 @@ const initializeSocket = (server) => {
     });
 
     socket.on('worker:register', async (data) => {
-      const { workerId, userId, role, device } = data;
+      const { workerId, userId, role, device } = data || {};
       if (!workerId) return;
+      // Only the authenticated worker/engineer may register (and join) their own room.
+      if (!['WORKER', 'ENGINEER'].includes(socket.userRole) || String(socket.userId) !== String(workerId)) {
+        return deny('worker:register');
+      }
 
       console.log(`[WORKER_CONNECTED] Worker registered: ${workerId}`);
 
@@ -210,6 +270,7 @@ const initializeSocket = (server) => {
     socket.on('join_booking_search', async (bookingId) => {
       try {
         if (!bookingId) return;
+        if (!(await canAccessBooking(bookingId))) return deny('join_booking_search');
         socket.join(`booking_${bookingId}`);
         console.log(`[Socket] Socket ${socket.id} joined booking search room booking_${bookingId}`);
 
@@ -293,16 +354,36 @@ const initializeSocket = (server) => {
       }
     });
 
-    // New Flow: Join Job Room
-    socket.on('join_job', (jobId) => {
-      socket.join(`job:${jobId}`);
-      console.log(`Socket ${socket.userId} joined room job:${jobId}`);
+    // Join a job room (every status change of that job is broadcast there).
+    // Only callers who can see the job via the HTTP APIs may join.
+    socket.on('join_job', async (jobId) => {
+      try {
+        if (!(await canAccessJob(jobId))) return deny('join_job');
+        socket.join(`job:${jobId}`);
+      } catch (_) {
+        deny('join_job', 'Unable to join job room');
+      }
     });
 
-    // B2B Batch Tracking Room Join
-    socket.on('join_batch', (batchId) => {
-      socket.join(`batch:${batchId}`);
-      console.log(`Socket ${socket.userId} joined room batch:${batchId}`);
+    socket.on('leave_job', (jobId) => {
+      if (jobId) socket.leave(`job:${jobId}`);
+    });
+
+    // B2B Batch Tracking Room Join — the owning company (or admin) only.
+    socket.on('join_batch', async (batchId) => {
+      try {
+        const mongoose = require('mongoose');
+        if (!batchId || !mongoose.Types.ObjectId.isValid(String(batchId))) return deny('join_batch');
+        if (socket.userRole !== 'ADMIN') {
+          if (socket.userRole !== 'B2B') return deny('join_batch');
+          const B2BBatch = require('../models/B2BBatch');
+          const owned = await B2BBatch.exists({ _id: batchId, companyId: socket.companyId || socket.userId });
+          if (!owned) return deny('join_batch');
+        }
+        socket.join(`batch:${batchId}`);
+      } catch (_) {
+        deny('join_batch', 'Unable to join batch room');
+      }
     });
 
     // Vendor acknowledges receiving booking alert
@@ -345,11 +426,15 @@ const initializeSocket = (server) => {
 
     socket.on('update_location', async (data) => {
       // data: { bookingId, lat, lng, heading }
-      const lat = parseFloat(data.lat);
-      const lng = parseFloat(data.lng);
-      const heading = parseFloat(data.heading) || 0;
+      const lat = parseFloat(data?.lat);
+      const lng = parseFloat(data?.lng);
+      const heading = parseFloat(data?.heading) || 0;
 
       if (isNaN(lat) || isNaN(lng)) return;
+      // Only the booking's own worker/vendor may publish its live location.
+      if (!['WORKER', 'ENGINEER', 'VENDOR'].includes(socket.userRole) || !(await canAccessBooking(data.bookingId))) {
+        return deny('update_location');
+      }
 
       // Rate limiting: max 1 update per 2 seconds per booking
       const rateLimitKey = `${socket.userId}:${data.bookingId}`;
@@ -412,8 +497,9 @@ const initializeSocket = (server) => {
     // Real-time Chat socket event handler
     socket.on('chat:send_message', async (data) => {
       try {
-        const { bookingId, text, fileUrl, fileType, fileName } = data;
+        const { bookingId, text, fileUrl, fileType, fileName } = data || {};
         if (!bookingId) return;
+        if (!(await canAccessBooking(bookingId))) return deny('chat:send_message');
 
         const Chat = require('../models/Chat');
         const senderModel = socket.userRole === 'WORKER' ? 'Worker' : 'User';
@@ -443,8 +529,11 @@ const initializeSocket = (server) => {
 
     socket.on('engineer:locationUpdated', async (data) => {
       try {
-        const { engineerId, jobId, lat, lng, heading, speed, battery } = data;
+        const { engineerId, jobId, lat, lng, heading, speed, battery } = data || {};
         if (!engineerId || isNaN(parseFloat(lat)) || isNaN(parseFloat(lng))) return;
+        // Location feeds routing (geo matching) — only the engineer themself may set it.
+        if (!isSelfEngineer(engineerId)) return deny('engineer:locationUpdated');
+        if (jobId && !(await canAccessJob(jobId))) return deny('engineer:locationUpdated', 'Not your job');
 
         const mongoose = require('mongoose');
         const Engineer = require('../models/Engineer');
@@ -544,8 +633,10 @@ const initializeSocket = (server) => {
 
     socket.on('engineer:statusChanged', async (data) => {
       try {
-        const { engineerId, jobId, status, message } = data;
+        const { engineerId, jobId, status, message } = data || {};
         if (!engineerId || !status) return;
+        if (!isSelfEngineer(engineerId)) return deny('engineer:statusChanged');
+        if (jobId && !(await canAccessJob(jobId))) return deny('engineer:statusChanged', 'Not your job');
 
         const mongoose = require('mongoose');
         const Engineer = require('../models/Engineer');
@@ -595,250 +686,102 @@ const initializeSocket = (server) => {
       }
     });
 
-    socket.on('engineer:jobAccepted', async (data) => {
+    // ── Engineer lifecycle events (TazkY) ──────────────────────────────────
+    // These used to let ANY socket (even an anonymous one) set ANY job's
+    // status, bypassing OTP, photos and verification. They now:
+    //   - require the verified engineer to be the one assigned,
+    //   - go through the same validated lifecycle service as the HTTP API,
+    //   - refuse start/complete, which need OTP + photo evidence (HTTP only).
+    const recordLegacyTracking = async (jobId, engineerId, status, message, assignmentPatch) => {
       try {
-        const { engineerId, jobId } = data;
-        if (!engineerId || !jobId) return;
-
         const mongoose = require('mongoose');
-        const B2BJob = require('../models/B2BJob');
         const EngineerAssignment = require('../models/EngineerAssignment');
         const JobStatusLog = require('../models/JobStatusLog');
-
-        const engObjId = new mongoose.Types.ObjectId(engineerId);
-        const jobObjId = new mongoose.Types.ObjectId(jobId);
-
-        const job = await B2BJob.findByIdAndUpdate(
-          jobObjId,
-          { status: 'assigned', trackingStatus: 'accepted', assignedAt: new Date() },
-          { new: true }
-        );
-        if (!job) return;
-
-        await EngineerAssignment.findOneAndUpdate(
-          { jobId: jobObjId, engineerId: engObjId },
-          { status: 'accepted', acceptedAt: new Date() },
-          { upsert: true }
-        );
-
-        await JobStatusLog.create({
-          jobId: jobObjId,
-          engineerId: engObjId,
-          status: 'accepted',
-          message: 'Engineer accepted the job assignment'
-        });
-
-        const companyRoom = `b2b:${job.companyId.toString()}`;
-        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'assigned', trackingStatus: 'accepted' });
-        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'assigned', trackingStatus: 'accepted' });
-      } catch (error) {
-        console.error('Error handling engineer:jobAccepted:', error);
-      }
-    });
-
-    socket.on('engineer:enRoute', async (data) => {
-      try {
-        const { engineerId, jobId } = data;
-        if (!engineerId || !jobId) return;
-
-        const mongoose = require('mongoose');
         const B2BJob = require('../models/B2BJob');
-        const EngineerAssignment = require('../models/EngineerAssignment');
-        const EngineerLocationSession = require('../models/EngineerLocationSession');
-        const JobStatusLog = require('../models/JobStatusLog');
-
-        const engObjId = new mongoose.Types.ObjectId(engineerId);
-        const jobObjId = new mongoose.Types.ObjectId(jobId);
-
-        const job = await B2BJob.findByIdAndUpdate(
-          jobObjId,
-          { status: 'in_progress', trackingStatus: 'en_route' },
-          { new: true }
-        );
-        if (!job) return;
-
-        await EngineerAssignment.findOneAndUpdate(
-          { jobId: jobObjId, engineerId: engObjId },
-          { status: 'en_route', enRouteAt: new Date() },
-          { upsert: true }
-        );
-
-        await EngineerLocationSession.findOneAndUpdate(
-          { engineerId: engObjId },
-          { status: 'en_route' }
-        );
-
-        await JobStatusLog.create({
-          jobId: jobObjId,
-          engineerId: engObjId,
-          status: 'en_route',
-          message: 'Engineer started travel (En Route)'
-        });
-
-        const companyRoom = `b2b:${job.companyId.toString()}`;
-        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'en_route' });
-        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'en_route' });
-        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'en_route' });
-        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'en_route' });
-      } catch (error) {
-        console.error('Error handling engineer:enRoute:', error);
+        const job = await B2BJob.findById(jobId).select('companyId').lean();
+        const engObjId = new mongoose.Types.ObjectId(String(engineerId));
+        if (job && assignmentPatch) {
+          await EngineerAssignment.findOneAndUpdate(
+            { jobId, engineerId: engObjId },
+            { $set: assignmentPatch, $setOnInsert: { companyId: job.companyId } },
+            { upsert: true }
+          );
+        }
+        await JobStatusLog.create({ jobId, engineerId: engObjId, status, message });
+      } catch (err) {
+        console.warn('[Socket] legacy tracking write failed:', err.message);
       }
-    });
+    };
 
-    socket.on('engineer:reachedLocation', async (data) => {
+    const runEngineerTransition = async (event, data, run) => {
       try {
-        const { engineerId, jobId } = data;
-        if (!engineerId || !jobId) return;
-
-        const mongoose = require('mongoose');
+        const { engineerId, jobId } = data || {};
+        if (!jobId || !isSelfEngineer(engineerId || socket.userId)) return deny(event);
         const B2BJob = require('../models/B2BJob');
-        const EngineerAssignment = require('../models/EngineerAssignment');
-        const EngineerLocationSession = require('../models/EngineerLocationSession');
-        const JobStatusLog = require('../models/JobStatusLog');
-
-        const engObjId = new mongoose.Types.ObjectId(engineerId);
-        const jobObjId = new mongoose.Types.ObjectId(jobId);
-
-        const job = await B2BJob.findByIdAndUpdate(
-          jobObjId,
-          { trackingStatus: 'reached_location' },
-          { new: true }
-        );
-        if (!job) return;
-
-        await EngineerAssignment.findOneAndUpdate(
-          { jobId: jobObjId, engineerId: engObjId },
-          { status: 'reached_location', reachedAt: new Date() },
-          { upsert: true }
-        );
-
-        await EngineerLocationSession.findOneAndUpdate(
-          { engineerId: engObjId },
-          { status: 'at_location' }
-        );
-
-        await JobStatusLog.create({
-          jobId: jobObjId,
-          engineerId: engObjId,
-          status: 'reached_location',
-          message: 'Engineer arrived at job location'
-        });
-
-        const companyRoom = `b2b:${job.companyId.toString()}`;
-        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: job.status, trackingStatus: 'reached_location' });
-        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'at_location' });
-        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: job.status, trackingStatus: 'reached_location' });
-        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'at_location' });
+        const job = await B2BJob.findById(jobId).read('primary').lean();
+        if (!job) return deny(event, 'Job not found');
+        const updated = await run(job, String(socket.userId));
+        socket.emit(`${event}:ack`, { jobId: String(jobId), status: updated?.status, lifecycleStatus: updated?.lifecycleStatus });
       } catch (error) {
-        console.error('Error handling engineer:reachedLocation:', error);
+        deny(event, error.message || 'Action failed');
       }
-    });
+    };
 
-    socket.on('engineer:workStarted', async (data) => {
-      try {
-        const { engineerId, jobId } = data;
-        if (!engineerId || !jobId) return;
-
-        const mongoose = require('mongoose');
-        const B2BJob = require('../models/B2BJob');
-        const EngineerAssignment = require('../models/EngineerAssignment');
-        const EngineerLocationSession = require('../models/EngineerLocationSession');
-        const JobStatusLog = require('../models/JobStatusLog');
-
-        const engObjId = new mongoose.Types.ObjectId(engineerId);
-        const jobObjId = new mongoose.Types.ObjectId(jobId);
-
-        const job = await B2BJob.findByIdAndUpdate(
-          jobObjId,
-          { status: 'in_progress', trackingStatus: 'work_started', startedAt: new Date() },
-          { new: true }
-        );
-        if (!job) return;
-
-        await EngineerAssignment.findOneAndUpdate(
-          { jobId: jobObjId, engineerId: engObjId },
-          { status: 'work_started' },
-          { upsert: true }
-        );
-
-        await EngineerLocationSession.findOneAndUpdate(
-          { engineerId: engObjId },
-          { status: 'working' }
-        );
-
-        await JobStatusLog.create({
-          jobId: jobObjId,
-          engineerId: engObjId,
-          status: 'work_started',
-          message: 'Engineer started service work'
+    socket.on('engineer:jobAccepted', (data) =>
+      runEngineerTransition('engineer:jobAccepted', data, async (job, engineerId) => {
+        const { acceptAssignment } = require('../services/jobAssignment.service');
+        const updated = await acceptAssignment({ jobId: job._id, engineerId });
+        await recordLegacyTracking(job._id, engineerId, 'accepted', 'Engineer accepted the job assignment', {
+          status: 'accepted', acceptedAt: new Date()
         });
+        return updated;
+      })
+    );
 
-        const companyRoom = `b2b:${job.companyId.toString()}`;
-        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'work_started' });
-        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'working' });
-        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'in_progress', trackingStatus: 'work_started' });
-        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'working' });
-      } catch (error) {
-        console.error('Error handling engineer:workStarted:', error);
-      }
-    });
-
-    socket.on('engineer:jobCompleted', async (data) => {
-      try {
-        const { engineerId, jobId } = data;
-        if (!engineerId || !jobId) return;
-
-        const mongoose = require('mongoose');
-        const B2BJob = require('../models/B2BJob');
-        const Engineer = require('../models/Engineer');
-        const EngineerAssignment = require('../models/EngineerAssignment');
-        const EngineerLocationSession = require('../models/EngineerLocationSession');
-        const JobStatusLog = require('../models/JobStatusLog');
-
-        const engObjId = new mongoose.Types.ObjectId(engineerId);
-        const jobObjId = new mongoose.Types.ObjectId(jobId);
-
-        const job = await B2BJob.findByIdAndUpdate(
-          jobObjId,
-          { status: 'completed', trackingStatus: 'completed', completedAt: new Date(), eta: 0 },
-          { new: true }
-        );
-        if (!job) return;
-
-        await EngineerAssignment.findOneAndUpdate(
-          { jobId: jobObjId, engineerId: engObjId },
-          { status: 'completed', completedAt: new Date() },
-          { upsert: true }
-        );
-
-        await EngineerLocationSession.findOneAndUpdate(
-          { engineerId: engObjId },
-          { status: 'available' }
-        );
-
-        await Engineer.findByIdAndUpdate(engObjId, { status: 'ONLINE' });
-
-        await JobStatusLog.create({
-          jobId: jobObjId,
-          engineerId: engObjId,
-          status: 'completed',
-          message: 'Engineer successfully completed the job'
+    socket.on('engineer:enRoute', (data) =>
+      runEngineerTransition('engineer:enRoute', data, async (job, engineerId) => {
+        const { advanceEngineerJob } = require('../services/jobAssignment.service');
+        const { LIFECYCLE } = require('../services/jobStateMachine');
+        const updated = await advanceEngineerJob({
+          job, engineerId, target: LIFECYCLE.EN_ROUTE, reason: 'Engineer started travel to site',
+          event: 'ENGINEER_EN_ROUTE', patch: { travelStartedAt: new Date() }
         });
+        await recordLegacyTracking(job._id, engineerId, 'en_route', 'Engineer started travel (En Route)', {
+          status: 'en_route', enRouteAt: new Date()
+        });
+        return updated;
+      })
+    );
 
-        const companyRoom = `b2b:${job.companyId.toString()}`;
-        io.to(companyRoom).emit('b2b:jobStatusUpdated', { jobId, status: 'completed', trackingStatus: 'completed' });
-        io.to(companyRoom).emit('b2b:engineerStatusChanged', { engineerId, status: 'available' });
-        io.to('admin').emit('b2b:jobStatusUpdated', { jobId, status: 'completed', trackingStatus: 'completed' });
-        io.to('admin').emit('b2b:engineerStatusChanged', { engineerId, status: 'available' });
-      } catch (error) {
-        console.error('Error handling engineer:jobCompleted:', error);
-      }
-    });
+    socket.on('engineer:reachedLocation', (data) =>
+      runEngineerTransition('engineer:reachedLocation', data, async (job, engineerId) => {
+        const { advanceEngineerJob } = require('../services/jobAssignment.service');
+        const { LIFECYCLE } = require('../services/jobStateMachine');
+        const updated = await advanceEngineerJob({
+          job, engineerId, target: LIFECYCLE.ARRIVED, reason: 'Engineer reached the site',
+          event: 'ENGINEER_ARRIVED', patch: { arrivedAt: new Date() }
+        });
+        await recordLegacyTracking(job._id, engineerId, 'reached_location', 'Engineer reached location', {
+          status: 'reached_location', reachedAt: new Date()
+        });
+        return updated;
+      })
+    );
+
+    // Starting and completing work require the customer OTP and photo
+    // evidence, which only the HTTP endpoints verify.
+    socket.on('engineer:workStarted', (data) =>
+      deny('engineer:workStarted', `Start work via POST /api/engineers/b2b-jobs/${data?.jobId || ':jobId'}/start (customer OTP + before photos required)`)
+    );
+    socket.on('engineer:jobCompleted', (data) =>
+      deny('engineer:jobCompleted', `Complete work via POST /api/engineers/b2b-jobs/${data?.jobId || ':jobId'}/complete (after photos required)`)
+    );
 
     socket.on('engineer:batteryUpdated', async (data) => {
       try {
-        const { engineerId, battery } = data;
+        const { engineerId, battery } = data || {};
         if (!engineerId) return;
+        if (!isSelfEngineer(engineerId)) return deny('engineer:batteryUpdated');
 
         const mongoose = require('mongoose');
         const B2BJob = require('../models/B2BJob');

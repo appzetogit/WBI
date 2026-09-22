@@ -9,6 +9,9 @@ const VendorWorkforceEngineer = require('../../models/VendorWorkforceEngineer');
 const Engineer = require('../../models/Engineer');
 const VendorQualityProof = require('../../models/VendorQualityProof');
 const { getIO } = require('../../sockets');
+const { sendJobError } = require('../../services/jobScope.service');
+const { lifecycleOf } = require('../../services/jobLifecycle.service');
+const { LIFECYCLE: S } = require('../../services/jobStateMachine');
 
 const getVendorId = (req) => new mongoose.Types.ObjectId(req.user._id || req.user.id);
 
@@ -535,6 +538,8 @@ exports.getJobDetails = async (req, res) => {
 
     if (b2bJob) {
       const normStatus = normalizeJobStatus('b2b_job', b2bJob);
+      const { paymentsForJobs } = require('../../services/jobPayments.service');
+      const [payment] = await paymentsForJobs([b2bJob], { perspective: 'vendor' });
 
       return res.status(200).json({
         success: true,
@@ -631,11 +636,18 @@ exports.getJobDetails = async (req, res) => {
             submittedAt: b2bJob.completionSubmittedAt || b2bJob.completedAt
           },
 
+          lifecycleStatus: lifecycleOf(b2bJob),
+          jobSource: b2bJob.source || 'B2B',
           financials: {
             estimatedAmount: b2bJob.charge || 0,
             paymentStatus: b2bJob.paymentStatus || 'unpaid',
             payoutStatus: b2bJob.payoutStatus || 'pending',
-            engineerPayout: b2bJob.charge ? Math.round(b2bJob.charge * 0.7) : 0
+            jobAmount: payment?.jobAmount ?? 0,
+            commission: payment?.commission ?? 0,
+            gst: payment?.gst ?? 0,
+            vendorEarnings: payment?.vendorEarnings ?? 0,
+            payoutState: payment?.status || 'PENDING',
+            paidAt: payment?.paidAt || null
           }
         }
       });
@@ -759,31 +771,55 @@ exports.getJobDetails = async (req, res) => {
 
 /**
  * POST /api/vendor/my-jobs/:id/assign-engineer
- * Assign/reassign an engineer to an accepted job
+ * Assign (or, with a reason, reassign) one of THIS vendor's engineers.
+ * B2B jobs go through the central assignment service: eligibility is checked
+ * server-side and history is appended, never overwritten.
  */
 exports.assignEngineerToJob = async (req, res) => {
   try {
     const vid = getVendorId(req);
     const { id } = req.params;
-    const { engineerId, notes = '', priority } = req.body || {};
+    const { engineerId, notes = '', priority, reason } = req.body || {};
 
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(engineerId)) {
       return res.status(400).json({ success: false, message: 'Valid Job ID and Engineer ID are required' });
     }
 
-    const engObjId = new mongoose.Types.ObjectId(engineerId);
+    // 1. B2B job (central job entity)
+    const b2bJob = await B2BJob.findById(id).select('assignedVendorId assignedTo').lean();
+    if (b2bJob) {
+      if (String(b2bJob.assignedVendorId || '') !== String(vid)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to assign this job' });
+      }
+      const svc = require('../../services/jobAssignment.service');
+      const actor = { id: vid, role: 'vendor' };
+      const result = b2bJob.assignedTo
+        ? await svc.reassignEngineer({ jobId: id, newEngineerId: engineerId, actor, vendorScopeId: vid, reason: reason || notes })
+        : await svc.assignEngineer({ jobId: id, engineerId, actor, vendorScopeId: vid, reason: notes || 'Assigned by vendor' });
+      return res.status(200).json({
+        success: true,
+        message: `B2B Job assigned to ${result.job.assignedToName} successfully`,
+        data: result.job,
+        eligibility: result.eligibility
+      });
+    }
 
-    // Verify engineer belongs to vendor workforce or exists
-    const [workforceEng, engineerDoc] = await Promise.all([
-      VendorWorkforceEngineer.findOne({ vendorId: vid, engineerId: engObjId }),
-      Engineer.findById(engObjId).select('name phone email avatar skills')
-    ]);
+    const { resolveOwnEngineer } = require('./vendorRequestsController');
+    const engineerDoc = await resolveOwnEngineer(vid, engineerId);
+    if (engineerDoc === null) return res.status(404).json({ success: false, message: 'Engineer not found' });
+    if (engineerDoc === false) {
+      return res.status(403).json({ success: false, message: 'This engineer does not belong to your organisation' });
+    }
+    const engObjId = engineerDoc._id;
+    const engineerName = engineerDoc.name;
+    const workforceEng = await VendorWorkforceEngineer.findOne({ vendorId: vid, linkedEngineerId: engObjId });
 
-    const engineerName = engineerDoc?.name || workforceEng?.name || 'Assigned Engineer';
-
-    // 1. Try VendorOpsJob
+    // 2. VendorOpsJob (ops projects from accepted opportunities)
     const opsJob = await VendorOpsJob.findOne({ _id: id, vendorId: vid });
     if (opsJob) {
+      if (!['pending_acceptance', 'accepted', 'rejected'].includes(opsJob.status)) {
+        return res.status(409).json({ success: false, message: `A job in status "${opsJob.status}" cannot be reassigned` });
+      }
       opsJob.engineerId = engObjId;
       opsJob.engineerName = engineerName;
       opsJob.status = 'pending_acceptance';
@@ -792,9 +828,8 @@ exports.assignEngineerToJob = async (req, res) => {
       if (priority) opsJob.priority = priority;
       await opsJob.save();
 
-      // Update parent project
       await VendorOpsProject.updateOne(
-        { _id: opsJob.projectId },
+        { _id: opsJob.projectId, vendorId: vid },
         {
           $set: {
             'assignedEngineers.0.engineerId': engObjId,
@@ -805,18 +840,16 @@ exports.assignEngineerToJob = async (req, res) => {
         }
       ).catch(() => {});
 
-      // Mark workforce engineer status
       if (workforceEng) {
         workforceEng.availability = 'on_project';
         workforceEng.activeJobsCount = (workforceEng.activeJobsCount || 0) + 1;
         await workforceEng.save();
       }
 
-      // Notify engineer via socket
       try {
         const io = getIO();
         if (io) {
-          io.to(`engineer:${engineerId}`).emit('ops:job_assigned', {
+          io.to(`engineer:${engObjId}`).emit('ops:job_assigned', {
             jobId: opsJob._id,
             jobCode: opsJob.jobCode,
             title: opsJob.title,
@@ -832,50 +865,12 @@ exports.assignEngineerToJob = async (req, res) => {
       });
     }
 
-    // 2. Try B2BJob
-    const b2bJob = await B2BJob.findOne({ _id: id, assignedVendorId: vid });
-    if (b2bJob) {
-      b2bJob.assignedTo = engObjId;
-      b2bJob.assignedToName = engineerName;
-      b2bJob.assignmentType = 'vendor_engineer';
-      b2bJob.status = 'assigned';
-      b2bJob.trackingStatus = 'assigned';
-      b2bJob.assignedAt = new Date();
-      await b2bJob.save();
-
-      if (workforceEng) {
-        workforceEng.availability = 'on_project';
-        workforceEng.activeJobsCount = (workforceEng.activeJobsCount || 0) + 1;
-        await workforceEng.save();
-      }
-
-      try {
-        const io = getIO();
-        if (io) {
-          io.to(`engineer:${engineerId}`).emit('b2b:job_assigned', {
-            jobId: b2bJob._id,
-            jobCode: b2bJob.jobId,
-            service: b2bJob.service
-          });
-          io.to(`vendor:${vid}`).emit('b2b:jobStatusUpdated', {
-            jobId: b2bJob._id,
-            jobCode: b2bJob.jobId,
-            status: 'assigned',
-            engineerId: engObjId
-          });
-        }
-      } catch (_) {}
-
-      return res.status(200).json({
-        success: true,
-        message: `B2B Job assigned to ${engineerName} successfully`,
-        data: b2bJob
-      });
-    }
-
-    // 3. Try Booking
+    // 3. Booking owned by this vendor, not yet in the field
     const booking = await Booking.findOne({ _id: id, vendorId: vid });
     if (booking) {
+      if (!['accepted', 'confirmed', 'scheduled', 'assigned'].includes(booking.status)) {
+        return res.status(409).json({ success: false, message: `A booking in status "${booking.status}" cannot be assigned` });
+      }
       booking.engineerId = engObjId;
       booking.status = 'assigned';
       booking.assignedAt = new Date();
@@ -890,7 +885,7 @@ exports.assignEngineerToJob = async (req, res) => {
       try {
         const io = getIO();
         if (io) {
-          io.to(`engineer:${engineerId}`).emit('booking:assigned', {
+          io.to(`engineer:${engObjId}`).emit('booking:assigned', {
             bookingId: booking._id,
             bookingNumber: booking.bookingNumber
           });
@@ -904,16 +899,37 @@ exports.assignEngineerToJob = async (req, res) => {
       });
     }
 
+    const exists = await Promise.all([VendorOpsJob.exists({ _id: id }), Booking.exists({ _id: id })]);
+    if (exists.some(Boolean)) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to assign this job' });
+    }
     return res.status(404).json({ success: false, message: 'Job not found' });
   } catch (error) {
-    console.error('assignEngineerToJob error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to assign engineer' });
+    return sendJobError(res, error, 'Failed to assign engineer');
   }
 };
 
 /**
+ * Status changes a vendor may make on a B2B job it holds. Everything else is
+ * driven by the engineer (TazkY), verification (admin/B2B) or routing — a
+ * vendor can never, for example, mark a job completed.
+ */
+const VENDOR_B2B_TRANSITIONS = {
+  on_hold: { to: S.ON_HOLD, from: [S.EN_ROUTE, S.ARRIVED, S.IN_PROGRESS] },
+  ON_HOLD: { to: S.ON_HOLD, from: [S.EN_ROUTE, S.ARRIVED, S.IN_PROGRESS] },
+  in_progress: { to: S.IN_PROGRESS, from: [S.ON_HOLD] },
+  IN_PROGRESS: { to: S.IN_PROGRESS, from: [S.ON_HOLD] },
+  resume: { to: S.IN_PROGRESS, from: [S.ON_HOLD] }
+};
+
+/** Vendor-side changes allowed on ops jobs (engineer drives the field steps). */
+const VENDOR_OPS_TRANSITIONS = {
+  cancelled: ['pending_acceptance', 'accepted', 'rejected']
+};
+
+/**
  * POST /api/vendor/my-jobs/:id/status
- * Update / dispatch operational job status
+ * Validated vendor status change: hold / resume a job it holds.
  */
 exports.updateJobStatus = async (req, res) => {
   try {
@@ -924,44 +940,63 @@ exports.updateJobStatus = async (req, res) => {
     if (!status) {
       return res.status(400).json({ success: false, message: 'Target status is required' });
     }
-
-    // 1. Check B2BJob
-    const b2bJob = await B2BJob.findOne({ _id: id, assignedVendorId: vid });
-    if (b2bJob) {
-      b2bJob.status = status;
-      if (status === 'completed') b2bJob.completedAt = new Date();
-      if (remarks) b2bJob.workNotes = `${b2bJob.workNotes ? `${b2bJob.workNotes}\n` : ''}[Vendor]: ${remarks}`;
-      await b2bJob.save();
-
-      try {
-        const io = getIO();
-        if (io) {
-          io.to(`vendor:${vid}`).emit('b2b:jobStatusUpdated', {
-            jobId: b2bJob._id,
-            jobCode: b2bJob.jobId,
-            status,
-            updatedAt: new Date()
-          });
-        }
-      } catch (_) {}
-
-      return res.status(200).json({ success: true, message: `Status updated to ${status}`, data: b2bJob });
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid job id' });
     }
 
-    // 2. Check VendorOpsJob
+    // 1. B2B job — only through the state machine
+    const b2bJob = await B2BJob.findById(id).select('assignedVendorId lifecycleStatus status allocationStage assignedTo').lean();
+    if (b2bJob) {
+      if (String(b2bJob.assignedVendorId || '') !== String(vid)) {
+        return res.status(403).json({ success: false, message: 'You do not have permission to change this job' });
+      }
+      const rule = VENDOR_B2B_TRANSITIONS[status];
+      if (!rule) {
+        return res.status(403).json({
+          success: false,
+          code: 'TRANSITION_NOT_PERMITTED',
+          message: `Vendors cannot set a job to "${status}". Allowed: put on hold (with a reason) or resume.`
+        });
+      }
+      if (rule.to === S.ON_HOLD && String(remarks).trim().length < 3) {
+        return res.status(400).json({ success: false, message: 'A reason is required to put a job on hold' });
+      }
+      const { transitionJob } = require('../../services/jobLifecycle.service');
+      const updated = await transitionJob({
+        jobId: id,
+        to: rule.to,
+        actor: { id: vid, role: 'vendor' },
+        expectFrom: rule.from,
+        filter: { assignedVendorId: vid },
+        reason: remarks ? `Vendor: ${String(remarks).slice(0, 300)}` : undefined,
+        event: rule.to === S.ON_HOLD ? 'VENDOR_HOLD' : 'VENDOR_RESUMED'
+      });
+      return res.status(200).json({ success: true, message: `Status updated to ${updated.lifecycleStatus}`, data: updated });
+    }
+
+    // 2. VendorOpsJob
     const opsJob = await VendorOpsJob.findOne({ _id: id, vendorId: vid });
     if (opsJob) {
+      const allowedFrom = VENDOR_OPS_TRANSITIONS[status];
+      if (!allowedFrom || !allowedFrom.includes(opsJob.status)) {
+        return res.status(409).json({
+          success: false,
+          code: 'INVALID_TRANSITION',
+          message: `Cannot move this job from "${opsJob.status}" to "${status}"`
+        });
+      }
       opsJob.status = status;
-      if (status === 'completed') opsJob.completedAt = new Date();
       if (remarks) opsJob.notes = `${opsJob.notes ? `${opsJob.notes}\n` : ''}[Vendor]: ${remarks}`;
       await opsJob.save();
 
       return res.status(200).json({ success: true, message: `Status updated to ${status}`, data: opsJob });
     }
 
+    if (await VendorOpsJob.exists({ _id: id })) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to change this job' });
+    }
     return res.status(404).json({ success: false, message: 'Job not found' });
   } catch (error) {
-    console.error('updateJobStatus error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to update job status' });
+    return sendJobError(res, error, 'Failed to update job status');
   }
 };

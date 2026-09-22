@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../../middleware/authMiddleware');
+const { checkB2BPermission } = require('../../middleware/roleMiddleware');
 const { uploadGenericFile, handleMulterError } = require('../../middleware/uploadMiddleware');
 const { uploadDocument } = require('../../controllers/b2bControllers/profile.controller');
 const ctrl = require('../../controllers/b2bControllers/b2bEnterpriseOnboarding.controller');
@@ -9,6 +10,8 @@ router.get('/config', ctrl.getConfig);
 router.get('/steps', ctrl.getStepsMeta);
 
 router.use(authenticate);
+// Onboarding a company is a company-admin action, not an operator one.
+router.use(checkB2BPermission('company.manage'));
 
 router.get('/me', ctrl.getMyOnboarding);
 router.get('/activation-status', ctrl.activationStatus);

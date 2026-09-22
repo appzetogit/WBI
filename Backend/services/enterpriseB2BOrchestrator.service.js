@@ -396,45 +396,50 @@ async function bootstrapFlowFromB2BJob(jobId) {
   }
 
   const mode = await getAssignmentMode(categoryCode, flow.configSnapshot);
-  if (mode === 'vendor_marketplace' && job.status === 'searching_engineer') {
-    const { createOpportunityFromB2BJob } = require('../utils/createOpportunityFromEnquiry');
-    const fresh = await B2BJob.findById(jobId);
-    const { opportunity, eligibleCount, unmatchedCategory } = await createOpportunityFromB2BJob(fresh);
-    if (opportunity) {
-      flow.opportunityId = opportunity._id;
+  const { lifecycleOf, transitionJob } = require('./jobLifecycle.service');
+  const { LIFECYCLE } = require('./jobStateMachine');
+  const state = lifecycleOf(job);
+  const routable = [LIFECYCLE.VALIDATED, LIFECYCLE.ROUTED].includes(state) &&
+    job.status !== 'pending_wallet' && !job.assignedVendorId && !job.assignedTo;
+
+  if (mode === 'vendor_marketplace' && routable) {
+    // Vendor-first: offer the SAME job to vendors whose coverage includes it.
+    // (No Opportunity/ops-project copy — the vendor works on this job.)
+    if (state !== LIFECYCLE.ROUTED) {
+      await transitionJob({
+        jobId: job._id,
+        to: LIFECYCLE.ROUTED,
+        actor: { role: 'system' },
+        reason: 'Vendor-first routing started',
+        event: 'ROUTING_STARTED'
+      });
+    }
+    const { offerToEligibleVendors } = require('./jobRouting.service');
+    const { notified, ranking } = await offerToEligibleVendors(job._id);
+    if (notified.length) {
       flow.status = 'assignment_active';
-      pushTimeline(flow, 'assignment_started', 'Routed to vendor marketplace', {
-        opportunityId: opportunity._id,
-        eligibleCount
-      });
-      await flow.save();
-      await B2BJob.updateOne({ _id: job._id }, { $set: { status: 'pending' } });
-    } else if (unmatchedCategory) {
-      pushTimeline(flow, 'assignment_blocked', 'No service category matches this job', {
-        service: job.service,
-        subService: job.subService
-      });
+      pushTimeline(flow, 'assignment_started', 'Offered to eligible vendors', { eligibleCount: notified.length });
       await flow.save();
       await B2BJob.updateOne(
         { _id: job._id },
         {
           $set: {
-            status: 'escalated',
-            incompleteReason: `No service category configured for "${job.service}"`
+            allocationStage: 'vendor_marketplace',
+            allocationReason: `Waiting for ${notified.length} vendor(s) to accept`,
+            allocationUpdatedAt: new Date()
           }
         }
       );
-      try {
-        const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
-        await refundB2BJobEscrow({
-          jobId: job._id,
-          reason: 'unmatched_category_escalated'
-        });
-        if (flow.escrow) flow.escrow.status = 'refunded';
-        await flow.save();
-      } catch (e) {
-        console.warn('[bootstrapFlowFromB2BJob] escrow refund:', e.message);
-      }
+      const { scheduleVendorOfferTimeout } = require('./b2bMatchingService');
+      await scheduleVendorOfferTimeout(job._id);
+    } else {
+      pushTimeline(flow, 'assignment_blocked', ranking?.reason || 'No eligible vendor', {
+        service: job.service,
+        serviceKey: ranking?.serviceKey || null
+      });
+      await flow.save();
+      const { escalateToUnassignedQueue } = require('./b2bMatchingService');
+      await escalateToUnassignedQueue(job._id, ranking?.reason || 'No eligible vendor for this job');
     }
   }
 
@@ -470,7 +475,12 @@ async function onB2BJobCompleted(jobId, { status = 'completed' } = {}) {
   const { parseApprovalFlow } = require('./milestoneApproval.service');
   const af = parseApprovalFlow(flow.configSnapshot);
 
-  if (status === 'completed') {
+  // The engineer's successful submission arrives as 'completion_submitted'
+  // (awaiting verification). Previously only the literal 'completed' counted
+  // as success, so every submitted job fell into the cancellation branch
+  // below and had its escrow refunded — leaving nothing to pay out.
+  const WORK_DONE_STATUSES = ['completed', 'completion_submitted', 'admin_review'];
+  if (WORK_DONE_STATUSES.includes(status)) {
     pushTimeline(flow, 'work_completed', 'Field work marked complete', {});
 
     if (!flow.jobSignoffs) flow.jobSignoffs = {};
@@ -562,6 +572,19 @@ async function approveB2BJobWork(jobId, companyId, { party = 'b2b', approved = t
   }
   if (!job) return { ok: false, status: 404, message: 'Job not found' };
 
+  // Sign-off is only meaningful once the engineer has submitted the work.
+  const { lifecycleOf, transitionJob } = require('./jobLifecycle.service');
+  const { LIFECYCLE } = require('./jobStateMachine');
+  const state = lifecycleOf(job);
+  if (![LIFECYCLE.COMPLETED, LIFECYCLE.VERIFICATION].includes(state)) {
+    return {
+      ok: false,
+      status: 409,
+      message: `Work can only be approved after the engineer submits completion (job is ${state})`
+    };
+  }
+  const actor = party === 'b2b' ? { id: companyId, role: 'company' } : { role: 'system' };
+
   const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: job._id });
   if (!flow) return { ok: false, status: 404, message: 'Enterprise flow not found' };
 
@@ -592,18 +615,40 @@ async function approveB2BJobWork(jobId, companyId, { party = 'b2b', approved = t
   }
 
   if (!approved) {
-    flow.status = 'cancelled';
+    // Rejected work goes back to the engineer for revision (VERIFICATION →
+    // IN_PROGRESS); escrow stays held until the work is accepted or the job
+    // is cancelled by admin.
+    flow.status = 'in_progress';
+    pushTimeline(flow, 'revision_requested', `${party} rejected the work — revision required`, {});
     await flow.save();
-    try {
-      const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
-      await refundB2BJobEscrow({ jobId: job._id, reason: `${party}_rejected_work` });
-    } catch (e) {
-      console.warn('[approveB2BJobWork] escrow refund:', e.message);
-    }
-    return { ok: false, status: 400, message: 'Work rejected — escrow refunded to company wallet' };
+    await transitionJob({
+      jobId: job._id,
+      to: LIFECYCLE.IN_PROGRESS,
+      actor,
+      reason: `${party === 'b2b' ? 'Company' : 'Customer'} rejected the submitted work — revision required`,
+      event: 'REVISION_REQUESTED',
+      patch: { payoutStatus: 'held' }
+    });
+    return { ok: true, rejected: true, message: 'Work sent back to the engineer for revision' };
   }
 
-  return finalizeB2BJobAfterSignoffs(flow, job._id);
+  const result = await finalizeB2BJobAfterSignoffs(flow, job._id);
+  if (result?.ok && !result.pending) {
+    await transitionJob({
+      jobId: job._id,
+      to: LIFECYCLE.CLOSED,
+      actor,
+      reason: `${party === 'b2b' ? 'Company' : 'Customer'} approved the work — job closed`,
+      event: 'VERIFIED_CLOSED',
+      patch: { completedAt: job.completedAt || now }
+    }).catch((err) => {
+      // Already closed by an admin verification — nothing to do.
+      if (err.code !== 'INVALID_TRANSITION') throw err;
+    });
+    const { closeAssignmentForJob } = require('./jobAssignment.service');
+    await closeAssignmentForJob({ jobId: job._id, outcome: 'completed', actor, reason: 'Work approved' }).catch(() => {});
+  }
+  return result;
 }
 
 async function approveServiceRequestMilestoneCustomer({ serviceRequestId, milestoneId, approved = true }) {

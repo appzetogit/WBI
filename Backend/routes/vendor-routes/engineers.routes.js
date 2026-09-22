@@ -8,7 +8,9 @@ const {
   getAssignableJobs,
   assignJobToEngineer,
   updateEngineerStatus,
-  syncEngineers
+  syncEngineers,
+  createEngineer,
+  updateEngineerProfile
 } = require('../../controllers/vendorControllers/vendorEngineersController');
 
 // All routes require vendor authentication
@@ -16,9 +18,11 @@ router.use(authenticate);
 router.use(isVendor);
 
 router.get('/', getEngineers);
+router.post('/', createEngineer);
 router.get('/assignable-jobs', getAssignableJobs);
 router.post('/sync', syncEngineers);
 router.get('/:id', getEngineerDetails);
+router.patch('/:id', updateEngineerProfile);
 router.post('/:id/assign-job', assignJobToEngineer);
 router.patch('/:id/status', updateEngineerStatus);
 

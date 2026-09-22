@@ -28,6 +28,9 @@ const vendorResourceInventorySchema = new mongoose.Schema({
     index: true
   },
   lastMovement: { type: String, default: '' },
+  // WBI parts catalog entry this stock item is (price/HSN reference); optional.
+  catalogPartId: { type: mongoose.Schema.Types.ObjectId, ref: 'VendorPartsCatalog', default: null, index: true },
+  hsnCode: { type: String, default: '' },
   demoTag: { type: String, default: null, index: true }
 }, { timestamps: true });
 

@@ -26,10 +26,21 @@ const b2bUserSchema = new mongoose.Schema({
     required: [true, 'Mobile number is required'],
     trim: true
   },
+  /** Free-text role name shown in the UI (e.g. "Site Operations"). */
   role: {
     type: String,
     required: [true, 'Role name is required'],
     trim: true
+  },
+  /**
+   * Access role — what the API actually enforces. `permissions` below is the
+   * per-user override list layered on top of the role's default set.
+   */
+  accessRole: {
+    type: String,
+    enum: ['B2B_ADMIN', 'B2B_OPERATIONS', 'B2B_FINANCE', 'DISPATCHER'],
+    default: 'B2B_OPERATIONS',
+    index: true
   },
   permissions: [{
     type: String

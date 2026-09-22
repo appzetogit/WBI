@@ -14,12 +14,14 @@ import {
   FiActivity
 } from 'react-icons/fi';
 import adminWorkerService from '../../../../services/adminWorkerService';
+import WorkerHistoryModal from '../Workers/WorkerHistoryModal';
 import toast from 'react-hot-toast';
 import { exportToCSV } from '../../../../utils/csvExport';
 import { formatCurrency } from '../../utils/adminHelpers';
 
 const WorkerPayments = () => {
   const [workers, setWorkers] = useState([]);
+  const [historyWorker, setHistoryWorker] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalWorkers: 0,
@@ -259,7 +261,7 @@ const WorkerPayments = () => {
                       <td className="px-6 py-4">
                         <button
                           className="flex items-center gap-1 text-primary-600 font-semibold hover:underline text-sm"
-                          onClick={() => toast('Detailed transaction history coming soon')}
+                          onClick={() => setHistoryWorker(worker)}
                         >
                           View History <FiArrowUpRight className="w-4 h-4" />
                         </button>
@@ -272,6 +274,7 @@ const WorkerPayments = () => {
           )}
         </div>
       </div>
+      <WorkerHistoryModal worker={historyWorker} onClose={() => setHistoryWorker(null)} />
     </motion.div>
   );
 };

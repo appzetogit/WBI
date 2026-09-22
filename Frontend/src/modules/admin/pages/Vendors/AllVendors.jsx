@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { FiCheck, FiX, FiEye, FiSearch, FiFilter, FiDownload, FiPower, FiTrash2, FiExternalLink, FiLoader } from 'react-icons/fi';
+import { FiCheck, FiX, FiEye, FiSearch, FiFilter, FiDownload, FiPower, FiTrash2, FiExternalLink, FiLoader, FiPauseCircle } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import CardShell from '../UserCategories/components/CardShell';
 import Modal from '../UserCategories/components/Modal';
@@ -113,7 +113,12 @@ const AllVendors = () => {
   const loadVendors = async () => {
     try {
       setLoading(true);
-      const response = await adminVendorService.getAllVendors({ limit: 200 });
+      // Filtering happens in the browser, so load every vendor (the API caps a page at 500).
+      const response = await adminVendorService.getAllVendors({ limit: 500 });
+      const total = response.pagination?.total || 0;
+      if (total > (response.data || []).length) {
+        toast(`Showing the newest ${response.data.length} of ${total} vendors. Use search to find older ones.`, { icon: 'ℹ️' });
+      }
       if (response.success) {
         const transformedVendors = response.data.map((vendor) => ({
           id: vendor._id,
@@ -132,7 +137,7 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error loading vendors:', error);
-      toast.error('Failed to load vendors. Please try again.');
+      toast.error(error.response?.data?.message || 'Failed to load vendors. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -170,7 +175,7 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error approving vendor:', error);
-      toast.error('Failed to approve vendor. Please try again.');
+      toast.error(error.response?.data?.message || 'Failed to approve vendor. Please try again.');
     }
   };
 
@@ -188,7 +193,7 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error rejecting vendor:', error);
-      toast.error('Failed to reject vendor. Please try again.');
+      toast.error(error.response?.data?.message || 'Failed to reject vendor. Please try again.');
     }
   };
 
@@ -206,7 +211,7 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error verifying KYC:', error);
-      toast.error('Failed to verify KYC. Please try again.');
+      toast.error(error.response?.data?.message || 'Failed to verify KYC. Please try again.');
     }
   };
 
@@ -226,7 +231,7 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error rejecting KYC:', error);
-      toast.error('Failed to reject KYC. Please try again.');
+      toast.error(error.response?.data?.message || 'Failed to reject KYC. Please try again.');
     }
   };
 
@@ -242,7 +247,26 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error toggling vendor status:', error);
-      toast.error('Failed to update status');
+      toast.error(error.response?.data?.message || 'Failed to update status');
+    }
+  };
+
+  const handleSuspend = async (vendorId) => {
+    const reason = window.prompt('Reason for suspending this vendor (required). The vendor loses access immediately.');
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast.error('A reason is required to suspend a vendor');
+      return;
+    }
+    try {
+      const response = await adminVendorService.suspendVendor(vendorId, reason.trim());
+      setVendors((prev) => prev.map((v) => (v.id === vendorId ? { ...v, approvalStatus: 'suspended', isActive: false } : v)));
+      // The API says how many open jobs the vendor still holds.
+      if (response.openJobs) toast(response.message, { icon: '⚠️', duration: 8000 });
+      else toast.success(response.message || 'Vendor suspended');
+    } catch (error) {
+      console.error('Error suspending vendor:', error);
+      toast.error(error.response?.data?.message || 'Failed to suspend vendor');
     }
   };
 
@@ -260,7 +284,7 @@ const AllVendors = () => {
       }
     } catch (error) {
       console.error('Error deleting vendor:', error);
-      toast.error('Failed to delete vendor');
+      toast.error(error.response?.data?.message || 'Failed to delete vendor');
     }
   };
 
@@ -445,6 +469,11 @@ const AllVendors = () => {
                                 <FiX className="w-3.5 h-3.5" />
                               </button>
                             </>
+                          )}
+                          {vendor.approvalStatus === 'approved' && (
+                            <button type="button" onClick={() => handleSuspend(vendor.id)} className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Suspend Vendor">
+                              <FiPauseCircle className="w-3.5 h-3.5" />
+                            </button>
                           )}
                           <button type="button" onClick={() => handleDelete(vendor.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete Vendor">
                             <FiTrash2 className="w-3.5 h-3.5" />

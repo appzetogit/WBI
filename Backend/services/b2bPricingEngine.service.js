@@ -19,6 +19,25 @@
 
 const B2BPricingRule = require('../models/B2BPricingRule');
 const B2BDeductionRule = require('../models/B2BDeductionRule');
+const B2BContract = require('../models/B2BContract');
+const B2BCompany = require('../models/B2BCompany');
+
+/**
+ * Resolution order is fixed and never negotiable:
+ *   CONTRACT override → COMPANY pricing profile → DEFAULT pricing matrix.
+ * A level is only consulted when the one above it produced nothing.
+ */
+const LEVELS = ['CONTRACT', 'COMPANY', 'DEFAULT'];
+
+/**
+ * Which level a stored rule belongs to. Rules written before levels existed
+ * are classified by their scope, so nothing has to be migrated.
+ */
+const effectiveLevel = (rule) => {
+  if (rule.level === 'CONTRACT' || rule.contractId) return 'CONTRACT';
+  if (rule.level === 'COMPANY' || rule.companyId || rule.pricingProfile) return 'COMPANY';
+  return 'DEFAULT';
+};
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const norm = (v) => String(v || '').toLowerCase().trim();
@@ -29,6 +48,9 @@ const norm = (v) => String(v || '').toLowerCase().trim();
  */
 const WEIGHT = {
   company: 100,
+  serviceKey: 50,
+  subServiceKey: 24,
+  profile: 60,
   service: 40,
   subService: 20,
   categoryCode: 20,
@@ -53,7 +75,22 @@ const scoreRule = (rule, ctx) => {
     score += WEIGHT.company;
   }
 
-  // ── Service scope ──────────────────────────────────────────────────
+  // ── Pricing profile scope ──────────────────────────────────────────
+  if (rule.pricingProfile) {
+    if (!ctx.pricingProfile || norm(rule.pricingProfile) !== norm(ctx.pricingProfile)) return null;
+    score += WEIGHT.profile;
+  }
+
+  // ── Service scope: the service KEY is the identifier; the free-text
+  //    service name is only matched for rules written before keys existed.
+  if (rule.serviceKey) {
+    if (!ctx.serviceKey || norm(rule.serviceKey) !== norm(ctx.serviceKey)) return null;
+    score += WEIGHT.serviceKey;
+  }
+  if (rule.subServiceKey) {
+    if (!ctx.subServiceKey || norm(rule.subServiceKey) !== norm(ctx.subServiceKey)) return null;
+    score += WEIGHT.subServiceKey;
+  }
   if (rule.service) {
     if (norm(rule.service) !== norm(ctx.service)) return null;
     score += WEIGHT.service;
@@ -108,11 +145,87 @@ const scoreRule = (rule, ctx) => {
 };
 
 /**
- * Find the best pricing rule for a job context.
- * @returns {{ rule:Object|null, geoMatched:boolean, score:number }}
+ * The company's pricing profile and its contract in force, if any. Cached per
+ * call chain by the caller passing them back in on `ctx`.
+ */
+const loadCompanyPricingContext = async (companyId, at = new Date()) => {
+  if (!companyId) return { company: null, contract: null };
+  const company = await B2BCompany.findById(companyId)
+    .select('pricingProfile activeContractId allowedServices')
+    .lean();
+  if (!company) return { company: null, contract: null };
+
+  const contract = await B2BContract.findOne({
+    companyId,
+    status: 'ACTIVE',
+    validFrom: { $lte: at },
+    $or: [{ validTo: null }, { validTo: { $gte: at } }]
+  }).lean();
+
+  return { company, contract: contract || null };
+};
+
+/**
+ * A contract's per-service override, shaped like a pricing rule so the rest of
+ * the engine treats it identically.
+ */
+const contractRuleFor = (contract, ctx) => {
+  if (!contract || !Array.isArray(contract.pricing)) return null;
+  const key = norm(ctx.serviceKey);
+  if (!key) return null;
+
+  // An entry naming the sub-service wins over the service-wide entry.
+  const entries = contract.pricing.filter((e) => norm(e.serviceKey) === key);
+  if (!entries.length) return null;
+  const entry =
+    entries.find((e) => e.subServiceKey && norm(e.subServiceKey) === norm(ctx.subServiceKey))
+    || entries.find((e) => !e.subServiceKey)
+    || entries[0];
+
+  return {
+    _id: contract._id,
+    name: `Contract ${contract.contractCode}`,
+    level: 'CONTRACT',
+    contractId: contract._id,
+    companyId: contract.companyId,
+    serviceKey: entry.serviceKey,
+    subServiceKey: entry.subServiceKey || null,
+    baseAmount: entry.baseAmount,
+    serviceCharge: 0,
+    geographicSurcharge: entry.geographicSurcharge || 0,
+    priorityCharges: entry.priorityCharges || {},
+    slaCharge: entry.slaCharge || 0,
+    emergencyCharge: entry.emergencyCharge || 0,
+    afterHoursCharge: entry.afterHoursCharge || 0,
+    additionalCharges: [],
+    volumeDiscounts: [],
+    taxPercent: entry.taxPercent != null ? entry.taxPercent : 18,
+    taxLabel: 'GST',
+    vendorPayoutPercent: entry.vendorPayoutPercent || 0,
+    currency: 'INR',
+    priority: 0
+  };
+};
+
+/**
+ * Find the price for a job context, honouring the fixed level order.
+ * @returns {{ rule:Object|null, geoMatched:boolean, score:number, level:String|null }}
  */
 const resolvePricingRule = async (ctx = {}) => {
   const now = ctx.at ? new Date(ctx.at) : new Date();
+
+  const loaded = ctx.company !== undefined && ctx.contract !== undefined
+    ? { company: ctx.company, contract: ctx.contract }
+    : await loadCompanyPricingContext(ctx.companyId, now);
+  const pricingProfile = ctx.pricingProfile || loaded.company?.pricingProfile || null;
+  const scopedCtx = { ...ctx, pricingProfile };
+
+  // 1. Contract override.
+  const fromContract = contractRuleFor(loaded.contract, scopedCtx);
+  if (fromContract) {
+    const hit = scoreRule(fromContract, scopedCtx) || { score: 0, geoMatched: false };
+    return { rule: fromContract, score: hit.score, geoMatched: hit.geoMatched, level: 'CONTRACT' };
+  }
 
   // Cheap pre-filter in Mongo; full scoping happens in memory because
   // wildcard-vs-scoped matching is not expressible as a single query.
@@ -121,24 +234,35 @@ const resolvePricingRule = async (ctx = {}) => {
     effectiveFrom: { $lte: now },
     $and: [
       { $or: [{ effectiveTo: null }, { effectiveTo: { $gte: now } }] },
-      { $or: [{ companyId: null }, { companyId: ctx.companyId || null }] }
+      {
+        $or: [
+          { companyId: null },
+          { companyId: ctx.companyId || null }
+        ]
+      }
     ]
   }).lean();
 
-  let best = null;
-  for (const rule of candidates) {
-    const hit = scoreRule(rule, ctx);
-    if (!hit) continue;
-    if (
-      !best ||
-      hit.score > best.score ||
-      (hit.score === best.score && (rule.priority || 0) > (best.rule.priority || 0))
-    ) {
-      best = { rule, score: hit.score, geoMatched: hit.geoMatched };
+  // 2. Company profile, then 3. default matrix — never the other way round.
+  for (const level of LEVELS) {
+    if (level === 'CONTRACT') continue;
+    let best = null;
+    for (const rule of candidates) {
+      if (effectiveLevel(rule) !== level) continue;
+      const hit = scoreRule(rule, scopedCtx);
+      if (!hit) continue;
+      if (
+        !best
+        || hit.score > best.score
+        || (hit.score === best.score && (rule.priority || 0) > (best.rule.priority || 0))
+      ) {
+        best = { rule, score: hit.score, geoMatched: hit.geoMatched };
+      }
     }
+    if (best) return { ...best, level };
   }
 
-  return best || { rule: null, score: 0, geoMatched: false };
+  return { rule: null, score: 0, geoMatched: false, level: null };
 };
 
 /**
@@ -157,14 +281,19 @@ const legacyBreakdown = async (companyId, quantity = 1) => {
 
   return {
     source: 'deduction_rule',
+    level: 'LEGACY',
     ruleId: null,
-    ruleName: 'Legacy per-job deduction',
+    ruleName: 'Legacy per-job deduction (no pricing rule matched)',
     currency: 'INR',
     quantity,
     perJob: {
       baseAmount: base,
       serviceCharge: 0,
       geographicCharge: 0,
+      priorityCharge: 0,
+      slaCharge: 0,
+      emergencyCharge: 0,
+      afterHoursCharge: 0,
       additionalCharges: [],
       additionalChargesTotal: 0,
       discountPercent: 0,
@@ -179,6 +308,10 @@ const legacyBreakdown = async (companyId, quantity = 1) => {
       subtotal: round2(base * quantity),
       serviceCharges: 0,
       geographicCharges: 0,
+      priorityCharges: 0,
+      slaCharges: 0,
+      emergencyCharges: 0,
+      afterHoursCharges: 0,
       additionalCharges: 0,
       discount: 0,
       tax: round2(tax * quantity),
@@ -205,7 +338,7 @@ const legacyBreakdown = async (companyId, quantity = 1) => {
  */
 const calculateJobPrice = async (ctx = {}) => {
   const quantity = Math.max(1, parseInt(ctx.quantity, 10) || 1);
-  const { rule, geoMatched } = await resolvePricingRule(ctx);
+  const { rule, geoMatched, level } = await resolvePricingRule(ctx);
 
   if (!rule) {
     return legacyBreakdown(ctx.companyId, quantity);
@@ -216,7 +349,23 @@ const calculateJobPrice = async (ctx = {}) => {
   // Surcharge only applies when the rule was actually selected on geography.
   const geographicCharge = geoMatched ? round2(rule.geographicSurcharge) : 0;
 
-  const preChargeSubtotal = round2(baseAmount + serviceCharge + geographicCharge);
+  // ── Per-job charge components ──────────────────────────────────────
+  // Priority is charged from the job's own priority; SLA, emergency and
+  // after-hours are charged only when the caller says they apply.
+  const priorityKey = ['Low', 'Medium', 'High'].find(
+    (k) => norm(k) === norm(ctx.priority)
+  );
+  const priorityCharge = priorityKey
+    ? round2((rule.priorityCharges || {})[priorityKey] || 0)
+    : 0;
+  const slaCharge = ctx.slaTightened ? round2(rule.slaCharge || 0) : 0;
+  const emergencyCharge = ctx.emergency ? round2(rule.emergencyCharge || 0) : 0;
+  const afterHoursCharge = ctx.afterHours ? round2(rule.afterHoursCharge || 0) : 0;
+
+  const preChargeSubtotal = round2(
+    baseAmount + serviceCharge + geographicCharge
+    + priorityCharge + slaCharge + emergencyCharge + afterHoursCharge
+  );
 
   // ── Additional charges ─────────────────────────────────────────────
   const additionalCharges = (rule.additionalCharges || []).map((c) => {
@@ -252,13 +401,18 @@ const calculateJobPrice = async (ctx = {}) => {
 
   return {
     source: 'pricing_rule',
+    /** Which level of the fixed chain produced this price. */
+    level: level || 'DEFAULT',
     ruleId: rule._id,
     ruleName: rule.name,
+    contractId: rule.contractId || null,
     currency: rule.currency || 'INR',
     quantity,
     matchedOn: {
       company: Boolean(rule.companyId),
+      serviceKey: rule.serviceKey || null,
       service: rule.service || null,
+      pricingProfile: rule.pricingProfile || null,
       tier: rule.serviceTier !== 'any' ? rule.serviceTier : null,
       geography: geoMatched
     },
@@ -266,6 +420,10 @@ const calculateJobPrice = async (ctx = {}) => {
       baseAmount,
       serviceCharge,
       geographicCharge,
+      priorityCharge,
+      slaCharge,
+      emergencyCharge,
+      afterHoursCharge,
       additionalCharges,
       additionalChargesTotal,
       discountPercent,
@@ -281,6 +439,10 @@ const calculateJobPrice = async (ctx = {}) => {
       subtotal: round2(baseAmount * quantity),
       serviceCharges: round2(serviceCharge * quantity),
       geographicCharges: round2(geographicCharge * quantity),
+      priorityCharges: round2(priorityCharge * quantity),
+      slaCharges: round2(slaCharge * quantity),
+      emergencyCharges: round2(emergencyCharge * quantity),
+      afterHoursCharges: round2(afterHoursCharge * quantity),
       additionalCharges: round2(additionalChargesTotal * quantity),
       discount: round2(discountAmount * quantity),
       tax: round2(taxAmount * quantity),
@@ -309,7 +471,11 @@ const calculateBatchPricing = async ({ companyId, jobs = [] } = {}) => {
   if (billable === 0) {
     return {
       lines: [],
-      totals: { subtotal: 0, serviceCharges: 0, geographicCharges: 0, additionalCharges: 0, discount: 0, tax: 0, grandTotal: 0 },
+      totals: {
+        subtotal: 0, serviceCharges: 0, geographicCharges: 0,
+        priorityCharges: 0, slaCharges: 0, emergencyCharges: 0, afterHoursCharges: 0,
+        additionalCharges: 0, discount: 0, tax: 0, grandTotal: 0
+      },
       perJobCharge: 0,
       estimatedCost: 0,
       currency: 'INR'
@@ -323,21 +489,35 @@ const calculateBatchPricing = async ({ companyId, jobs = [] } = {}) => {
     return 'standard';
   };
 
+  // Load the company's profile and contract once for the whole batch.
+  const { company, contract } = await loadCompanyPricingContext(companyId);
+
   // Group identical pricing contexts to avoid one resolution per row.
   const groups = new Map();
   for (const job of jobs) {
     const ctx = {
       companyId,
+      company,
+      contract,
+      pricingProfile: company?.pricingProfile || null,
+      serviceKey: job.serviceKey || null,
+      subServiceKey: job.subServiceKey || null,
       service: job.service || null,
       subService: job.subService || null,
       serviceTier: tierFor(job.priority),
+      priority: job.priority || 'Medium',
+      emergency: Boolean(job.emergency),
+      afterHours: Boolean(job.afterHours),
+      slaTightened: Boolean(job.slaTightened),
       pincode: job.pincode || null,
       city: job.city || null,
       state: job.state || null
     };
-    const key = [ctx.service, ctx.subService, ctx.serviceTier, ctx.pincode, ctx.city, ctx.state]
-      .map(norm)
-      .join('|');
+    const key = [
+      ctx.serviceKey, ctx.subServiceKey, ctx.service, ctx.subService, ctx.serviceTier,
+      ctx.priority, ctx.emergency, ctx.afterHours, ctx.slaTightened,
+      ctx.pincode, ctx.city, ctx.state
+    ].map(norm).join('|');
     if (!groups.has(key)) groups.set(key, { ctx, count: 0 });
     groups.get(key).count += 1;
   }
@@ -345,6 +525,7 @@ const calculateBatchPricing = async ({ companyId, jobs = [] } = {}) => {
   const lines = [];
   const totals = {
     subtotal: 0, serviceCharges: 0, geographicCharges: 0,
+    priorityCharges: 0, slaCharges: 0, emergencyCharges: 0, afterHoursCharges: 0,
     additionalCharges: 0, discount: 0, tax: 0, grandTotal: 0
   };
   let currency = 'INR';
@@ -355,13 +536,16 @@ const calculateBatchPricing = async ({ companyId, jobs = [] } = {}) => {
     currency = priced.currency;
 
     const line = {
+      serviceKey: ctx.serviceKey,
       service: ctx.service,
       subService: ctx.subService,
       tier: ctx.serviceTier,
+      priority: ctx.priority,
       city: ctx.city,
       pincode: ctx.pincode,
       count,
       source: priced.source,
+      level: priced.level,
       ruleId: priced.ruleId,
       ruleName: priced.ruleName,
       perJob: priced.perJob,
@@ -372,6 +556,10 @@ const calculateBatchPricing = async ({ companyId, jobs = [] } = {}) => {
     totals.subtotal = round2(totals.subtotal + priced.perJob.baseAmount * count);
     totals.serviceCharges = round2(totals.serviceCharges + priced.perJob.serviceCharge * count);
     totals.geographicCharges = round2(totals.geographicCharges + priced.perJob.geographicCharge * count);
+    totals.priorityCharges = round2(totals.priorityCharges + (priced.perJob.priorityCharge || 0) * count);
+    totals.slaCharges = round2(totals.slaCharges + (priced.perJob.slaCharge || 0) * count);
+    totals.emergencyCharges = round2(totals.emergencyCharges + (priced.perJob.emergencyCharge || 0) * count);
+    totals.afterHoursCharges = round2(totals.afterHoursCharges + (priced.perJob.afterHoursCharge || 0) * count);
     totals.additionalCharges = round2(totals.additionalCharges + priced.perJob.additionalChargesTotal * count);
     totals.discount = round2(totals.discount + priced.perJob.discountAmount * count);
     totals.tax = round2(totals.tax + priced.perJob.taxAmount * count);
@@ -392,6 +580,10 @@ module.exports = {
   resolvePricingRule,
   calculateJobPrice,
   calculateBatchPricing,
+  loadCompanyPricingContext,
+  contractRuleFor,
+  effectiveLevel,
   scoreRule,
+  LEVELS,
   WEIGHT
 };

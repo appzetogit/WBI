@@ -6,7 +6,7 @@ const { authenticate } = require('../../middleware/authMiddleware');
 
 const MAX_TOKENS = 10;
 
-function buildFcmRouter({ roleCheck, Model, idFromReq }) {
+function buildFcmRouter({ roleCheck, Model, idFromReq, role = 'user' }) {
   const router = express.Router();
 
   router.post('/save', authenticate, async (req, res) => {
@@ -29,6 +29,24 @@ function buildFcmRouter({ roleCheck, Model, idFromReq }) {
 
       const doc = await Model.findByIdAndUpdate(entityId, pushQuery, { new: true });
       if (!doc) return res.status(404).json({ success: false, error: 'Account not found' });
+
+      // The registry is what push reads: one row per device, refreshed here.
+      try {
+        const { registerDevice } = require('../../services/deviceToken.service');
+        await registerDevice({
+          userId: entityId,
+          role,
+          deviceId: req.body.deviceId,
+          token,
+          platform: req.body.platform === 'mobile' ? (req.body.os || 'android') : 'web',
+          appVersion: req.body.appVersion || '',
+          deviceModel: req.body.deviceModel || '',
+          companyId: req.user?.companyId || null
+        });
+      } catch (regErr) {
+        console.warn('[FCM save] device registry skipped:', regErr.message);
+      }
+
       return res.json({ success: true, message: 'Token saved' });
     } catch (err) {
       console.error('[FCM save]', err.message);
@@ -48,6 +66,12 @@ function buildFcmRouter({ roleCheck, Model, idFromReq }) {
         ? { $pull: { fcmTokenMobile: token } }
         : { $pull: { fcmTokens: token } };
       await Model.findByIdAndUpdate(entityId, pullQuery);
+      try {
+        const { removeDevice } = require('../../services/deviceToken.service');
+        await removeDevice({ userId: entityId, deviceId: req.body.deviceId, token });
+      } catch (regErr) {
+        console.warn('[FCM remove] device registry skipped:', regErr.message);
+      }
       return res.json({ success: true, message: 'Token removed' });
     } catch (err) {
       return res.status(500).json({ success: false, error: 'Failed to remove token' });

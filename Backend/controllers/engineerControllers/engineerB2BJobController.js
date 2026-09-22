@@ -2,10 +2,8 @@ const mongoose = require('mongoose');
 const { TXN_OPTS } = require('../../utils/txnOptions');
 const B2BJob = require('../../models/B2BJob');
 const JobStatusTimeline = require('../../models/JobStatusTimeline');
-const JobHistory = require('../../models/JobHistory');
 const DeductionLedger = require('../../models/DeductionLedger');
 const DeviceHistory = require('../../models/DeviceHistory');
-const B2BWalletTransaction = require('../../models/B2BWalletTransaction');
 const B2BWallet = require('../../models/B2BWallet');
 const Wallet = require('../../models/Wallet');
 const WalletTransaction = require('../../models/WalletTransaction');
@@ -16,6 +14,25 @@ const { sendB2BJobCompletionEmail } = require('../../services/emailService');
 const { sendSMS } = require('../../services/smsService');
 const { getIO } = require('../../sockets');
 const { syncEngineerLocationSession } = require('../../utils/engineerLocationSession.util');
+const { LIFECYCLE: S } = require('../../services/jobStateMachine');
+const { transitionJobPath, lifecycleOf, emitJobStatus } = require('../../services/jobLifecycle.service');
+const { sendJobError } = require('../../services/jobScope.service');
+
+const engineerActor = (engineerId) => ({ id: engineerId, role: 'engineer' });
+
+/**
+ * An offer is only visible while it is still open to this engineer: nobody has
+ * taken the job, no vendor holds it, and the engineer has not declined it.
+ */
+const openOfferFilter = (engineerId) => ({
+  notifiedEngineers: engineerId,
+  declinedEngineers: { $ne: engineerId },
+  assignedTo: null,
+  assignedVendorId: null,
+  status: { $in: ['pending', 'searching_engineer'] }
+});
+
+const { advanceEngineerJob: advanceFieldJob } = require('../../services/jobAssignment.service');
 
 const SPARE_PARTS_REASONS = ['Spare Parts', 'Spare Parts Required', 'Parts Unavailable'];
 const CLIENT_DEPENDENCY_REASONS = ['Customer Dependency', 'Site Closed', 'No Access'];
@@ -87,29 +104,6 @@ const sequenceJobsByProximity = (jobs, startCoords) => {
   return [...ordered, ...withoutCoords];
 };
 
-const emitRealtimeStatusUpdate = (job, statusStr, trackingStatusStr) => {
-  try {
-    const io = getIO();
-    if (!io) return;
-    const companyRoom = `b2b:${job.companyId.toString()}`;
-    const payload = {
-      jobId: job._id.toString(),
-      jobCode: job.jobId,
-      status: statusStr,
-      trackingStatus: trackingStatusStr,
-      engineerId: job.assignedTo?.toString() || null,
-      updatedAt: new Date()
-    };
-    io.to(companyRoom).emit('b2b:jobStatusUpdated', payload);
-    io.to('admin').emit('b2b:jobStatusUpdated', payload);
-    if (job.assignedVendorId) {
-      io.to(`vendor:${job.assignedVendorId.toString()}`).emit('b2b:jobStatusUpdated', payload);
-    }
-  } catch (err) {
-    console.warn('[Socket Warning] emitRealtimeStatusUpdate error:', err.message);
-  }
-};
-
 /**
  * GET /api/engineers/b2b-jobs
  * Fetch assigned or offered B2B jobs for engineer with filtering, search, sorting and metrics
@@ -124,7 +118,7 @@ exports.getAssignedB2BJobs = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const baseFilter = {
-      $or: [{ assignedTo: engineerId }, { notifiedEngineers: engineerId }]
+      $or: [{ assignedTo: engineerId }, openOfferFilter(engineerId)]
     };
 
     if (status && status !== 'all') {
@@ -191,7 +185,7 @@ exports.getAssignedB2BJobs = async (req, res) => {
 
     // Summary counts for filter bar
     const allAssignedJobs = await B2BJob.find({
-      $or: [{ assignedTo: engineerId }, { notifiedEngineers: engineerId }]
+      $or: [{ assignedTo: engineerId }, openOfferFilter(engineerId)]
     }).select('status preferredDate').lean();
 
     const counts = {
@@ -267,7 +261,7 @@ exports.getB2BJobById = async (req, res) => {
 
     const job = await B2BJob.findOne({
       _id: req.params.jobId,
-      $or: [{ assignedTo: engineerId }, { notifiedEngineers: engineerId }]
+      $or: [{ assignedTo: engineerId }, openOfferFilter(engineerId)]
     })
       .populate('companyId', 'companyName email phone')
       .populate('assignedVendorId', 'vendorName businessName phone')
@@ -312,129 +306,81 @@ exports.getB2BJobById = async (req, res) => {
 
 /**
  * POST /api/engineers/b2b-jobs/:jobId/accept
- * Accept job offer / assignment
+ * Accept an assignment, or claim an open broadcast offer (first wins).
+ * Validated by the job state machine; ASSIGNED → ACCEPTED only.
  */
 exports.acceptB2BJobOffer = async (req, res) => {
   try {
     const engineerId = req.user.id || req.user._id;
     const { jobId } = req.params;
-    const { location } = req.body;
-
-    const job = await B2BJob.findOne({
-      _id: jobId,
-      $or: [{ assignedTo: engineerId }, { notifiedEngineers: engineerId }]
-    });
-
-    if (!job) return res.status(404).json({ success: false, message: 'Job offer not found' });
-
-    if (['accepted', 'travelling', 'arrived', 'in_progress', 'completed'].includes(job.status)) {
-      return res.status(400).json({ success: false, message: `Job is already in status '${job.status}'` });
+    const { location } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(jobId)) {
+      return res.status(400).json({ success: false, message: 'Invalid job id' });
     }
 
-    const engineer = await Engineer.findById(engineerId).select('name phone engineerType vendorId').lean();
-
-    job.assignedTo = engineerId;
-    job.assignedToName = engineer?.name || 'Assigned Engineer';
-    job.assignmentType = engineer?.engineerType === 'vendor_engineer' ? 'vendor_engineer' : 'freelancer';
-    if (engineer?.vendorId) {
-      job.assignedVendorId = engineer.vendorId;
-    }
-
-    job.status = 'accepted';
-    job.trackingStatus = 'accepted';
-    job.acceptedAt = new Date();
-    job.assignedAt = job.assignedAt || new Date();
-    job.allocationStage = 'allocated';
-
-    await job.save();
+    const { acceptAssignment } = require('../../services/jobAssignment.service');
+    const updated = await acceptAssignment({ jobId, engineerId, location });
 
     await JobStatusTimeline.create({
-      jobId: job._id,
-      companyId: job.companyId,
+      jobId: updated._id,
+      companyId: updated.companyId,
       engineerId,
       status: 'accepted',
-      remarks: 'Engineer accepted the job offer',
-      location: location || { type: 'Point', coordinates: [0, 0] }
+      remarks: 'Engineer accepted the job',
+      location: location?.lat && location?.lng
+        ? { type: 'Point', coordinates: [location.lng, location.lat] }
+        : { type: 'Point', coordinates: [0, 0] }
     });
-
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'accepted',
-      remark: 'Engineer confirmed acceptance of job assignment',
-      role: 'engineer',
-      changedBy: engineerId
-    });
-
-    emitRealtimeStatusUpdate(job, 'accepted', 'accepted');
     syncEngineerLocationSession(engineerId, { location, status: 'assigned', isOnline: true });
 
+    const job = await B2BJob.findById(updated._id).select('-startOtp -endOtp').lean();
     res.status(200).json({ success: true, message: 'Job accepted successfully', job });
   } catch (error) {
-    console.error('[acceptB2BJobOffer]', error);
-    res.status(500).json({ success: false, message: 'Failed to accept job offer' });
+    return sendJobError(res, error, 'Failed to accept job offer');
   }
 };
 
 /**
  * POST /api/engineers/b2b-jobs/:jobId/reject
- * Reject job offer / assignment with mandatory rejection reason
+ * Reject an assignment (only before accepting) or decline an offer.
+ * The assignment is closed as REJECTED in history; a vendor-held job returns
+ * to the vendor's queue, an unowned job is routed again.
  */
 exports.rejectB2BJobOffer = async (req, res) => {
   try {
     const engineerId = req.user.id || req.user._id;
     const { jobId } = req.params;
-    const { rejectionReason, rejectionRemarks } = req.body;
+    const { rejectionReason, rejectionRemarks } = req.body || {};
 
     if (!rejectionReason || !String(rejectionReason).trim()) {
       return res.status(400).json({ success: false, message: 'Rejection reason is mandatory' });
     }
-
-    const job = await B2BJob.findOne({
-      _id: jobId,
-      $or: [{ assignedTo: engineerId }, { notifiedEngineers: engineerId }]
-    });
-
-    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
-
-    if (['travelling', 'arrived', 'in_progress', 'completed'].includes(job.status)) {
-      return res.status(400).json({ success: false, message: `Cannot reject job when status is '${job.status}'` });
+    if (!mongoose.Types.ObjectId.isValid(jobId)) {
+      return res.status(400).json({ success: false, message: 'Invalid job id' });
     }
 
-    const now = new Date();
-    job.status = 'rejected';
-    job.trackingStatus = 'rejected';
-    job.rejectionReason = rejectionReason;
-    job.rejectionRemarks = rejectionRemarks || '';
-    job.rejectedAt = now;
-    job.rejectedBy = engineerId;
-    job.assignedTo = null;
-    job.assignedToName = null;
-    job.allocationStage = 'freelancer_pool';
+    const before = await B2BJob.findById(jobId).select('assignedTo assignedVendorId companyId').lean();
+    const { rejectAssignment } = require('../../services/jobAssignment.service');
+    await rejectAssignment({ jobId, engineerId, reason: rejectionReason, remarks: rejectionRemarks || '' });
 
-    await job.save();
+    if (before && String(before.assignedTo || '') === String(engineerId)) {
+      await JobStatusTimeline.create({
+        jobId,
+        companyId: before.companyId,
+        engineerId,
+        status: 'rejected',
+        remarks: `Engineer rejected job: ${rejectionReason}${rejectionRemarks ? ` (${rejectionRemarks})` : ''}`
+      });
+    }
 
-    await JobStatusTimeline.create({
-      jobId: job._id,
-      companyId: job.companyId,
-      engineerId,
-      status: 'rejected',
-      remarks: `Engineer rejected job: ${rejectionReason} ${rejectionRemarks ? `(${rejectionRemarks})` : ''}`
+    res.status(200).json({
+      success: true,
+      message: before?.assignedVendorId
+        ? 'Job rejected. Your vendor has been notified to reassign it.'
+        : 'Job declined. It will be offered to other engineers.'
     });
-
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'rejected',
-      remark: `Engineer rejected job assignment. Reason: ${rejectionReason}`,
-      role: 'engineer',
-      changedBy: engineerId
-    });
-
-    emitRealtimeStatusUpdate(job, 'rejected', 'rejected');
-
-    res.status(200).json({ success: true, message: 'Job rejected. Admin/Vendor notified for re-assignment.' });
   } catch (error) {
-    console.error('[rejectB2BJobOffer]', error);
-    res.status(500).json({ success: false, message: 'Failed to reject job' });
+    return sendJobError(res, error, 'Failed to reject job');
   }
 };
 
@@ -451,23 +397,23 @@ exports.startTravel = async (req, res) => {
     const job = await B2BJob.findOne({ _id: jobId, assignedTo: engineerId });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    if (job.status === 'travelling') {
+    if (lifecycleOf(job) === S.EN_ROUTE) {
       return res.status(200).json({ success: true, message: 'Already travelling', job });
     }
 
-    if (!['accepted', 'assigned'].includes(job.status)) {
-      return res.status(400).json({ success: false, message: `Cannot start travel from status '${job.status}'` });
-    }
-
     const now = new Date();
-    job.status = 'travelling';
-    job.trackingStatus = 'en_route';
-    job.travelStartedAt = now;
-    if (location?.lat && location?.lng) {
-      job.travelStartLocation = { lat: location.lat, lng: location.lng };
-    }
-
-    await job.save();
+    const updated = await advanceFieldJob({
+      job,
+      engineerId,
+      target: S.EN_ROUTE,
+      reason: 'Engineer started travel to site',
+      event: 'ENGINEER_EN_ROUTE',
+      location,
+      patch: {
+        travelStartedAt: now,
+        ...(location?.lat && location?.lng ? { travelStartLocation: { lat: location.lat, lng: location.lng } } : {})
+      }
+    });
 
     if (location?.lat && location?.lng) {
       await Engineer.findByIdAndUpdate(engineerId, {
@@ -487,21 +433,12 @@ exports.startTravel = async (req, res) => {
       location: location ? { type: 'Point', coordinates: [location.lng || 0, location.lat || 0] } : { type: 'Point', coordinates: [0, 0] }
     });
 
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'travelling',
-      remark: 'Engineer is travelling to customer site',
-      role: 'engineer',
-      changedBy: engineerId
-    });
-
-    emitRealtimeStatusUpdate(job, 'travelling', 'en_route');
     syncEngineerLocationSession(engineerId, { location, status: 'en_route', isOnline: true });
 
-    res.status(200).json({ success: true, message: 'Travel started', job });
+    const { startOtp, endOtp, ...safe } = updated;
+    res.status(200).json({ success: true, message: 'Travel started', job: safe });
   } catch (error) {
-    console.error('[startTravel]', error);
-    res.status(500).json({ success: false, message: 'Failed to start travel' });
+    return sendJobError(res, error, 'Failed to start travel');
   }
 };
 
@@ -581,31 +518,33 @@ exports.arriveAtSite = async (req, res) => {
     const job = await B2BJob.findOne({ _id: jobId, assignedTo: engineerId });
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    if (job.status === 'arrived') {
-      return res.status(200).json({ success: true, message: 'Already marked as arrived', job });
-    }
-
-    if (!['travelling', 'accepted', 'assigned'].includes(job.status)) {
-      return res.status(400).json({ success: false, message: `Cannot mark arrival from status '${job.status}'` });
+    if (lifecycleOf(job) === S.ARRIVED) {
+      const { startOtp, endOtp, ...safe } = job.toObject();
+      return res.status(200).json({ success: true, message: 'Already marked as arrived', job: safe });
     }
 
     const now = new Date();
-    job.status = 'arrived';
-    job.trackingStatus = 'reached_location';
-    job.arrivedAt = now;
-    if (location?.lat && location?.lng) {
-      job.arrivalLocation = { lat: location.lat, lng: location.lng };
-    }
-
     // Generate Customer Start OTP automatically upon arrival
     const otp = generateOtp();
-    job.startOtp = otp;
-    job.startOtpSentAt = now;
-    job.startOtpAttempts = 0;
+    await advanceFieldJob({
+      job,
+      engineerId,
+      target: S.ARRIVED,
+      reason: 'Engineer arrived at site. Customer start OTP sent.',
+      event: 'ENGINEER_ARRIVED',
+      location,
+      patch: {
+        arrivedAt: now,
+        startOtp: otp,
+        startOtpSentAt: now,
+        startOtpAttempts: 0,
+        ...(location?.lat && location?.lng ? { arrivalLocation: { lat: location.lat, lng: location.lng } } : {})
+      }
+    });
 
-    await job.save();
-
-    console.log(`\n========================================\n🔑 [B2B CUSTOMER START OTP GENERATED]\nJob ID: ${job.jobId}\nCustomer Phone: ${job.phone}\nOTP CODE: ${otp}\n========================================\n`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[B2B start OTP][dev] job=${job.jobId} otp=${otp}`);
+    }
 
     if (job.phone) {
       try {
@@ -627,28 +566,16 @@ exports.arriveAtSite = async (req, res) => {
       location: location ? { type: 'Point', coordinates: [location.lng || 0, location.lat || 0] } : { type: 'Point', coordinates: [0, 0] }
     });
 
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'arrived',
-      remark: 'Engineer arrived at service site',
-      role: 'engineer',
-      changedBy: engineerId
-    });
-
-    emitRealtimeStatusUpdate(job, 'arrived', 'reached_location');
     syncEngineerLocationSession(engineerId, { location, status: 'at_location', isOnline: true });
 
-    const safeJob = job.toObject();
-    delete safeJob.startOtp;
-
+    const safeJob = await B2BJob.findById(job._id).select('-startOtp -endOtp').lean();
     res.status(200).json({
       success: true,
       message: 'Arrival confirmed. Customer Start OTP has been sent.',
       job: safeJob
     });
   } catch (error) {
-    console.error('[arriveAtSite]', error);
-    res.status(500).json({ success: false, message: 'Failed to record arrival' });
+    return sendJobError(res, error, 'Failed to record arrival');
   }
 };
 
@@ -682,7 +609,9 @@ exports.resendStartOtp = async (req, res) => {
     job.startOtpAttempts = 0;
     await job.save();
 
-    console.log(`\n========================================\n🔑 [B2B CUSTOMER START OTP RESENT]\nJob ID: ${job.jobId}\nCustomer Phone: ${job.phone}\nOTP CODE: ${otp}\n========================================\n`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[B2B start OTP resent][dev] job=${job.jobId} otp=${otp}`);
+    }
 
     if (job.phone) {
       try {
@@ -727,16 +656,18 @@ exports.startB2BJob = async (req, res) => {
       });
     }
 
-    if (job.status === 'in_progress') {
+    const state = lifecycleOf(job);
+    if (state === S.IN_PROGRESS) {
       const safeJob = job.toObject();
       delete safeJob.startOtp;
       return res.status(200).json({ success: true, message: 'Job already in progress', job: safeJob });
     }
 
-    if (!['arrived', 'assigned', 'accepted', 'travelling'].includes(job.status)) {
-      return res.status(400).json({
+    if (![S.ASSIGNED, S.ACCEPTED, S.EN_ROUTE, S.ARRIVED].includes(state)) {
+      return res.status(409).json({
         success: false,
-        message: `Cannot start job in status '${job.status}'`
+        code: 'INVALID_TRANSITION',
+        message: `Cannot start work while the job is ${state}`
       });
     }
 
@@ -749,6 +680,12 @@ exports.startB2BJob = async (req, res) => {
       job.startOtp = newOtp;
       job.startOtpSentAt = new Date();
       await job.save();
+      if (job.phone) {
+        sendSMS(
+          job.phone,
+          `WBIPVTLTD: Your service start OTP for job ${job.jobId} is ${newOtp}. Share only with the engineer on site.`
+        ).catch((e) => console.warn('[B2B OTP] SMS failed:', e.message));
+      }
       return res.status(400).json({
         success: false,
         message: 'No OTP generated yet. Resending OTP to customer now.'
@@ -787,18 +724,22 @@ exports.startB2BJob = async (req, res) => {
     }
 
     const now = new Date();
-    job.status = 'in_progress';
-    job.trackingStatus = 'work_started';
-    job.startedAt = now;
-    job.startOtpVerifiedAt = now;
-    job.beforePhotos = photos;
-    job.startOtp = null;
-    job.startOtpAttempts = 0;
-    if (location?.lat && location?.lng) {
-      job.startLocation = { lat: location.lat, lng: location.lng };
-    }
-
-    await job.save();
+    await advanceFieldJob({
+      job,
+      engineerId,
+      target: S.IN_PROGRESS,
+      reason: 'Work started — customer OTP verified, before photos captured',
+      event: 'WORK_STARTED',
+      location,
+      patch: {
+        startedAt: now,
+        startOtpVerifiedAt: now,
+        beforePhotos: photos,
+        startOtp: null,
+        startOtpAttempts: 0,
+        ...(location?.lat && location?.lng ? { startLocation: { lat: location.lat, lng: location.lng } } : {})
+      }
+    });
 
     await JobStatusTimeline.create({
       jobId: job._id,
@@ -809,20 +750,9 @@ exports.startB2BJob = async (req, res) => {
       location: location ? { type: 'Point', coordinates: [location.lng || 0, location.lat || 0] } : { type: 'Point', coordinates: [0, 0] }
     });
 
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'in_progress',
-      remark: 'Engineer started job with OTP + before photos. Work timer running.',
-      role: 'engineer',
-      changedBy: engineerId
-    });
-
-    emitRealtimeStatusUpdate(job, 'in_progress', 'work_started');
     syncEngineerLocationSession(engineerId, { location, status: 'working', isOnline: true });
 
-    const safeJob = job.toObject();
-    delete safeJob.startOtp;
-
+    const safeJob = await B2BJob.findById(job._id).select('-startOtp -endOtp').lean();
     res.status(200).json({
       success: true,
       message: 'Job started successfully. Work timer is running.',
@@ -830,8 +760,7 @@ exports.startB2BJob = async (req, res) => {
       workTimerStartedAt: now
     });
   } catch (error) {
-    console.error('[startB2BJob]', error);
-    res.status(500).json({ success: false, message: 'Failed to start job' });
+    return sendJobError(res, error, 'Failed to start job');
   }
 };
 
@@ -877,28 +806,9 @@ exports.markCustomerUnavailable = async (req, res) => {
 };
 
 async function applyWalletAdjustment({ companyId, job, engineerId, amount, reasonCode, remarks, session }) {
-  const q = B2BWallet.findOne({ companyId });
-  if (session) q.session(session);
-  const wallet = await q;
-  if (!wallet) return { success: false, error: 'Wallet not found' };
-
+  const walletLedger = require('../../services/b2bWalletLedger.service');
+  const wallet = await walletLedger.ensureWallet(companyId, session);
   const absAmount = Math.abs(amount);
-  if (amount < 0 && wallet.balance < absAmount) {
-    return { success: false, error: 'Insufficient wallet balance', available: wallet.balance, required: absAmount };
-  }
-
-  wallet.balance = parseFloat((wallet.balance + amount).toFixed(2));
-  if (amount < 0) {
-    wallet.totalSpent = parseFloat((wallet.totalSpent + absAmount).toFixed(2));
-  }
-  wallet.lastUpdatedAt = new Date();
-  await wallet.save(session ? { session } : undefined);
-
-  await B2BCompany.findByIdAndUpdate(
-    companyId,
-    { walletBalance: wallet.balance },
-    session ? { session } : undefined
-  );
 
   const dedOpts = session ? { session } : undefined;
   const deductionDocs = await DeductionLedger.create([{
@@ -909,20 +819,33 @@ async function applyWalletAdjustment({ companyId, job, engineerId, amount, reaso
     reasonCode,
     remarks
   }], dedOpts);
-
   const deduction = Array.isArray(deductionDocs) ? deductionDocs[0] : deductionDocs;
 
-  await B2BWalletTransaction.create([{
-    companyId,
-    walletId: wallet._id,
-    transactionId: `DED-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-    type: amount < 0 ? 'job_deduction' : 'adjustment',
-    amount,
-    totalAmount: amount,
-    status: 'success',
-    deductionId: deduction._id,
-    remark: remarks
-  }], dedOpts);
+  // The ledger applies the balance change and writes its row together; it
+  // refuses rather than letting the wallet go short.
+  try {
+    await walletLedger.postEntry({
+      companyId,
+      ledgerType: 'ADJUSTMENT',
+      amount,
+      jobId: job._id,
+      deductionId: deduction._id,
+      reason: remarks || reasonCode,
+      remark: remarks || reasonCode,
+      actor: { actorId: engineerId, role: 'engineer' },
+      session
+    });
+  } catch (err) {
+    if (err.name === 'WalletError' && err.code === 'INSUFFICIENT_FUNDS') {
+      return {
+        success: false,
+        error: 'Insufficient wallet balance',
+        available: err.details?.available,
+        required: absAmount
+      };
+    }
+    throw err;
+  }
 
   return { success: true, wallet, deduction };
 }
@@ -989,13 +912,16 @@ exports.completeB2BJob = async (req, res) => {
       });
     }
 
-    if (job.status !== 'in_progress' && job.status !== 'revision_required') {
+    if (lifecycleOf(job) !== S.IN_PROGRESS) {
       if (useTxn) { await session.abortTransaction(); session.endSession(); }
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
-        message: 'Job must be in progress before submitting completion'
+        code: 'INVALID_TRANSITION',
+        message: `Job must be in progress before submitting completion (currently ${lifecycleOf(job)})`
       });
     }
+    // Canonical transition(s) applied after the field updates below.
+    let lifecycleSteps = [];
 
     const now = new Date();
     if (beforePhotos?.length) job.beforePhotos = beforePhotos;
@@ -1015,8 +941,11 @@ exports.completeB2BJob = async (req, res) => {
         return res.status(400).json({ success: false, message: 'incompleteReason is required when marking failed' });
       }
 
-      job.status = 'failed';
-      job.trackingStatus = 'failed';
+      lifecycleSteps = [{
+        to: S.FAILED,
+        reason: `Closed incomplete: ${incompleteReason}${incompleteRemarks ? ` — ${incompleteRemarks}` : ''}`,
+        event: 'WORK_FAILED'
+      }];
       job.completedAt = now;
       job.incompleteReason = incompleteReason;
       job.incompleteRemarks = incompleteRemarks || '';
@@ -1114,14 +1043,25 @@ exports.completeB2BJob = async (req, res) => {
         });
       }
 
-      // Transition to COMPLETION_SUBMITTED (admin_review)
-      job.status = 'completion_submitted';
-      job.trackingStatus = 'completion_submitted';
+      // Work done → COMPLETED, then VERIFICATION (admin QA / B2B sign-off
+      // gate the escrow release, so verification is always required here).
       job.completionSubmittedAt = now;
       job.payoutStatus = 'pending_review';
+      lifecycleSteps = [
+        { to: S.COMPLETED, reason: 'Engineer submitted completion with after-work photos', event: 'WORK_COMPLETED' },
+        { to: S.VERIFICATION, reason: 'Awaiting verification before payout', event: 'VERIFICATION_STARTED' }
+      ];
     }
 
     await job.save(useTxn ? { session } : undefined);
+    const finalJob = await transitionJobPath({
+      jobId: job._id,
+      actor: engineerActor(engineerId),
+      session: useTxn ? session : null,
+      steps: lifecycleSteps.map((st) => ({ ...st, emit: false }))
+    });
+    job.status = finalJob.status;
+    job.trackingStatus = finalJob.trackingStatus;
 
     if (job.deviceId && (status === 'completed' || partsReplaced)) {
       let dq = DeviceHistory.findOne({ deviceId: job.deviceId, companyId: job.companyId });
@@ -1156,24 +1096,15 @@ exports.completeB2BJob = async (req, res) => {
       await JobStatusTimeline.create(timelinePayload);
     }
 
-    const historyPayload = {
-      jobId: job._id,
-      status: job.status,
-      remark: status === 'failed'
-        ? `Incomplete: ${incompleteReason}. requiresNewJob=${!!job.requiresNewJob}`
-        : 'Completion submitted for admin approval',
-      role: 'engineer',
-      changedBy: engineerId
-    };
-    if (useTxn) {
-      await JobHistory.create([historyPayload], { session });
-    } else {
-      await JobHistory.create(historyPayload);
-    }
-
     if (useTxn) {
       await session.commitTransaction();
       session.endSession();
+    }
+
+    if (status === 'failed') {
+      // Parts still reserved for this job go back to the vendor's stock.
+      require('../../services/jobParts.service').releaseJobParts(job._id, 'Job closed as failed')
+        .catch((err) => console.warn('[completeB2BJob] parts release:', err.message));
     }
 
     try {
@@ -1195,7 +1126,20 @@ exports.completeB2BJob = async (req, res) => {
       }
     }
 
-    emitRealtimeStatusUpdate(job, job.status, job.trackingStatus);
+    emitJobStatus(finalJob, {
+      from: S.IN_PROGRESS,
+      to: finalJob.lifecycleStatus,
+      actor: engineerActor(engineerId)
+    });
+    if (status === 'failed') {
+      const { closeAssignmentForJob } = require('../../services/jobAssignment.service');
+      await closeAssignmentForJob({
+        jobId: job._id,
+        outcome: 'released',
+        actor: engineerActor(engineerId),
+        reason: `Job closed incomplete: ${incompleteReason}`
+      }).catch((e) => console.warn('[completeB2BJob] assignment close:', e.message));
+    }
     syncEngineerLocationSession(engineerId, { location, status: 'available', isOnline: true });
 
     const safeJob = job.toObject();
@@ -1213,7 +1157,6 @@ exports.completeB2BJob = async (req, res) => {
       await session.abortTransaction().catch(() => {});
       session.endSession();
     }
-    console.error('[completeB2BJob]', error);
-    res.status(500).json({ success: false, message: 'Failed to submit job completion' });
+    return sendJobError(res, error, 'Failed to submit job completion');
   }
 };

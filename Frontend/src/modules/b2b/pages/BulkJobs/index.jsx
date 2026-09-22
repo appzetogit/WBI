@@ -113,7 +113,7 @@ const BulkJobs = () => {
       }
       if (newStatus === 'validated') {
         toast.success(`Validation done! ${activeBatch.validRows} valid rows ready to confirm.`);
-        queryClient.invalidateQueries(['b2bBulkJobStats']);
+        queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
         setUploadProgress(100);
       }
       if (newStatus === 'processing') {
@@ -121,7 +121,7 @@ const BulkJobs = () => {
       }
       if (newStatus === 'completed') {
         toast.success('All jobs created successfully!');
-        queryClient.invalidateQueries(['b2bBulkJobStats']);
+        queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
         setCreationProgress(100);
       }
       if (newStatus === 'failed') {
@@ -131,7 +131,7 @@ const BulkJobs = () => {
           ? 'Some rows had missing or invalid required fields. Download the error report for details.'
           : reason;
         toast.error(cleaned);
-        queryClient.invalidateQueries(['b2bBulkJobStats']);
+        queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
       }
       prevBatchStatus.current = newStatus;
     }
@@ -164,7 +164,7 @@ const BulkJobs = () => {
     const onValidationCompleted = () => {
       setUploadProgress(100);
       toast.success('Validation completed successfully!');
-      queryClient.invalidateQueries(['b2bBulkJobStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
       refetchActiveBatch();
     };
 
@@ -187,7 +187,7 @@ const BulkJobs = () => {
       setCreationProgress(100);
       toast.success('All jobs successfully created and scheduled!');
       localStorage.removeItem('activeB2BBatchId');
-      queryClient.invalidateQueries(['b2bBulkJobStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
       refetchActiveBatch();
     };
 
@@ -239,7 +239,7 @@ const BulkJobs = () => {
       const batchMongoId = data.batch.id;
       setActiveBatchId(batchMongoId);
       localStorage.setItem('activeB2BBatchId', batchMongoId);
-      queryClient.invalidateQueries(['b2bHistoryRecent']);
+      queryClient.invalidateQueries({ queryKey: ['b2bHistoryRecent'] });
       toast.success('Spreadsheet uploaded. Parsing queue running...');
     },
     onError: (err) => {
@@ -268,7 +268,7 @@ const BulkJobs = () => {
     },
     onSuccess: () => {
       toast.success('Batch dispatch queued successfully!');
-      queryClient.invalidateQueries(['b2bBulkJobStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
       refetchActiveBatch();
     },
     onError: (err) => {
@@ -339,7 +339,7 @@ const BulkJobs = () => {
     setCreationProgress(0);
     setLiveStats(null);
     queryClient.removeQueries(['b2bActiveBatch']);
-    queryClient.invalidateQueries(['b2bHistoryRecent']);
+    queryClient.invalidateQueries({ queryKey: ['b2bHistoryRecent'] });
   };
 
   const stats = statsData?.stats || {
@@ -405,7 +405,7 @@ const BulkJobs = () => {
               </p>
             </div>
           </div>
-          <Link to="/b2b/wallet" className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors">
+          <Link to="/b2b/billing/add-funds" className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-colors">
             Top Up Wallet
           </Link>
         </div>
@@ -504,7 +504,7 @@ const BulkJobs = () => {
             <span className="text-xs text-gray-400 font-bold block">{c.title}</span>
             <span className={`text-xl font-extrabold block tracking-tight ${c.color}`}>{c.value}</span>
             {c.action ? (
-              <Link to="/b2b/wallet" className="text-[10px] font-bold text-[#10AFA5] flex items-center gap-1 group-hover:underline">
+              <Link to="/b2b/billing/add-funds" className="text-[10px] font-bold text-[#10AFA5] flex items-center gap-1 group-hover:underline">
                 <FiCreditCard className="w-3.5 h-3.5" /> Top Up Wallet
               </Link>
             ) : (
@@ -1019,7 +1019,7 @@ const BulkJobs = () => {
               Your corporate wallet balance will be verified before jobs creation. Please top up to avoid validation dispatch holds.
             </p>
             <Link 
-              to="/b2b/wallet"
+              to="/b2b/billing/add-funds"
               className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold py-2 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-colors border border-white/15"
             >
               <FiPlusCircle className="w-4 h-4" /> Top Up Corporate Wallet

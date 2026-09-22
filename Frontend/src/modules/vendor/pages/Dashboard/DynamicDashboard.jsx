@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useVendorConfig } from '../../context/VendorConfigContext';
 import { useVendorSocket } from '../../context/VendorSocketContext';
 import useVendorBasePath from '../../hooks/useVendorBasePath';
+import JobOpsOverview from './components/JobOpsOverview';
 import api from '../../../../services/api';
 import {
   Inbox,
@@ -385,7 +386,7 @@ const DynamicDashboard = () => {
               {loading ? '—' : counts.completed}
             </h2>
           </div>
-          <p className="text-[11px] text-emerald-600 font-medium mt-2 truncate">100% verified</p>
+          <p className="text-[11px] text-emerald-600 font-medium mt-2 truncate">Work signed off</p>
         </motion.div>
 
         {/* 6. Available Engineers */}
@@ -436,6 +437,11 @@ const DynamicDashboard = () => {
             {counts.b2bEarnings > 0 ? `B2B: ₹${counts.b2bEarnings.toLocaleString('en-IN')}` : 'Verified revenue'}
           </p>
         </motion.div>
+      </div>
+
+      {/* ── FIELD OPERATIONS (central job records, live) ── */}
+      <div className="mb-8">
+        <JobOpsOverview />
       </div>
 
       {/* ── OPERATIONAL WORKSPACE TABS ── */}

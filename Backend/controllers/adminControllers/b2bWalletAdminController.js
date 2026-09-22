@@ -1,14 +1,17 @@
+const walletLedger = require('../../services/b2bWalletLedger.service');
 const B2BWallet = require('../../models/B2BWallet');
 const B2BWalletTransaction = require('../../models/B2BWalletTransaction');
 const B2BDeductionRule = require('../../models/B2BDeductionRule');
-const B2BCompany = require('../../models/B2BCompany');
+
+/** The signed-in actor, whatever the auth middleware called the field. */
+const actorId = (req) => req.user?._id || req.user?.id || null;
 
 /**
  * GET list of B2B wallets (Admin)
  */
 const getB2BWalletsList = async (req, res) => {
   try {
-    const wallets = await B2BWallet.find().populate('companyId', 'companyName email phone verificationStatus');
+    const wallets = await B2BWallet.find().populate('companyId', 'companyName email phone verificationStatus accountStatus').sort({ updatedAt: -1 });
     res.status(200).json({ success: true, data: wallets });
   } catch (error) {
     console.error('Admin Get Wallets Error:', error);
@@ -90,33 +93,30 @@ const createAdjustment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid adjustment amount' });
     }
 
-    let wallet = await B2BWallet.findOne({ companyId });
-    if (!wallet) {
-      wallet = await B2BWallet.create({ companyId, balance: 0 });
+    // The ledger moves the balance and writes the row in one transaction.
+    let posted;
+    try {
+      posted = await walletLedger.adjust({
+        companyId,
+        amount: amountNum,
+        reason: remark || 'Admin balance adjustment',
+        actor: { actorId: actorId(req) || null, role: 'admin', name: req.user?.name || '' }
+      });
+    } catch (err) {
+      if (err.name === 'WalletError') {
+        return res.status(err.status || 400).json({ success: false, message: err.message, code: err.code, ...err.details });
+      }
+      throw err;
     }
 
-    wallet.balance += amountNum;
-    wallet.lastUpdatedAt = new Date();
-    await wallet.save();
-
-    // Sync company profile
-    await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
-
-    // Create adjustment transaction log
-    const transactionId = `TXN-ADJ-${Date.now()}`;
-    const txn = await B2BWalletTransaction.create({
-      companyId,
-      walletId: wallet._id,
-      transactionId,
-      type: 'adjustment',
-      amount: amountNum,
-      totalAmount: amountNum,
-      status: 'success',
-      paymentMethod: 'system',
-      remark: remark || 'Admin Balance Adjustment'
+    const wallet = await B2BWallet.findOne({ companyId });
+    res.status(200).json({
+      success: true,
+      message: 'Balance adjustment completed',
+      wallet,
+      txn: posted.transaction,
+      balance: posted.balance
     });
-
-    res.status(200).json({ success: true, message: 'Balance adjustment completed', wallet, txn });
   } catch (error) {
     console.error('Admin Create Adjustment Error:', error);
     res.status(500).json({ success: false, message: 'Failed to create adjustment log' });
@@ -162,34 +162,77 @@ const processRefund = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid refund amount' });
     }
 
-    let wallet = await B2BWallet.findOne({ companyId });
-    if (!wallet) {
+    const existingWallet = await B2BWallet.findOne({ companyId });
+    if (!existingWallet) {
       return res.status(404).json({ success: false, message: 'Company wallet does not exist' });
     }
 
-    wallet.balance += amountNum;
-    wallet.lastUpdatedAt = new Date();
-    await wallet.save();
-
-    await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
-
-    const transactionId = `TXN-RFD-${Date.now()}`;
-    const txn = await B2BWalletTransaction.create({
+    const posted = await walletLedger.refund({
       companyId,
-      walletId: wallet._id,
-      transactionId,
-      type: 'refund',
       amount: amountNum,
-      totalAmount: amountNum,
-      status: 'success',
-      paymentMethod: 'system',
-      remark: remark || 'B2B Partner Wallet Refund Credit'
+      remark: remark || 'B2B partner wallet refund credit',
+      actor: { actorId: actorId(req) || null, role: 'admin', name: req.user?.name || '' }
     });
 
-    res.status(200).json({ success: true, message: 'Refund successfully credited to wallet', wallet, txn });
+    const wallet = await B2BWallet.findOne({ companyId });
+    res.status(200).json({
+      success: true,
+      message: 'Refund successfully credited to wallet',
+      wallet,
+      txn: posted.transaction,
+      balance: posted.balance
+    });
   } catch (error) {
     console.error('Admin Process Refund Error:', error);
     res.status(500).json({ success: false, message: 'Failed to execute refund transaction' });
+  }
+};
+
+/**
+ * GET wallet reconciliation (Admin)
+ * Recomputes both balances from the ledger and reports any drift.
+ */
+const reconcileWallet = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    const report = await walletLedger.reconcile(companyId);
+    res.status(200).json({ success: true, data: report });
+  } catch (error) {
+    console.error('Admin Wallet Reconcile Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to reconcile wallet' });
+  }
+};
+
+/**
+ * POST reverse a wallet transaction (Admin)
+ * Posts the exact inverse; the original row is kept and marked reversed.
+ */
+const reverseTransaction = async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    const { reason } = req.body;
+    const posted = await walletLedger.reverse({
+      transactionId,
+      reason,
+      actor: { actorId: actorId(req) || null, role: 'admin', name: req.user?.name || '' }
+    });
+    res.status(200).json({
+      success: true,
+      message: 'Transaction reversed',
+      txn: posted.transaction,
+      balance: posted.balance
+    });
+  } catch (error) {
+    if (error.name === 'WalletError') {
+      return res.status(error.status || 400).json({
+        success: false,
+        message: error.message,
+        code: error.code,
+        ...error.details
+      });
+    }
+    console.error('Admin Wallet Reverse Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to reverse transaction' });
   }
 };
 
@@ -198,5 +241,7 @@ module.exports = {
   getB2BWalletByCompany,
   updateDeductionRule,
   createAdjustment,
-  processRefund
+  processRefund,
+  reconcileWallet,
+  reverseTransaction
 };

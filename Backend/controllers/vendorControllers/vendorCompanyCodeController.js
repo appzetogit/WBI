@@ -2,7 +2,6 @@
  * Vendor company code + engineer join approvals
  */
 const mongoose = require('mongoose');
-const { TXN_OPTS } = require('../../utils/txnOptions');
 const Vendor = require('../../models/Vendor');
 const Engineer = require('../../models/Engineer');
 const {
@@ -203,119 +202,44 @@ exports.listLinkedEngineers = async (req, res) => {
   }
 };
 
-/** POST /api/vendor/engineers/:id/approve */
+/**
+ * POST /api/vendor/engineers/:id/approve
+ * Accepts the engineer into the vendor's team. WBI document verification is a
+ * separate step that a vendor cannot grant (see vendorEngineers.service).
+ */
 exports.approveLinkedEngineer = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction(TXN_OPTS);
   try {
-    const vendorId = getVendorId(req);
-    const { id } = req.params;
-
-    const engineer = await Engineer.findOne({
-      _id: id,
-      vendorId: new mongoose.Types.ObjectId(vendorId),
-      engineerType: 'vendor_engineer',
-      vendorApprovalStatus: 'pending_approval'
-    }).session(session);
-
-    if (!engineer) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: 'Pending engineer not found under your company'
-      });
-    }
-
-    engineer.vendorApprovalStatus = 'approved';
-    engineer.approvalStatus = 'approved';
-    engineer.vendorRejectedReason = null;
-    await engineer.save({ session });
-
-    await session.commitTransaction();
-
-    try {
-      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
-      emitAsync('engineer_vendor_approved', {
-        targets: { engineerId: engineer._id },
-        data: {
-          vendorId,
-          message: 'Your vendor approved your join request. You can now receive assigned jobs.',
-          relatedId: engineer._id,
-          relatedType: 'engineer'
-        }
-      });
-    } catch (nErr) {
-      console.warn('approveLinkedEngineer notification:', nErr.message);
-    }
-
-    res.status(200).json({
-      success: true,
-      message: `${engineer.name} approved`,
-      data: engineer
+    const { decideJoinRequest } = require('../../services/vendorEngineers.service');
+    const data = await decideJoinRequest({
+      vid: getVendorId(req),
+      engineerId: req.params.id,
+      approve: true,
+      actor: { id: getVendorId(req), role: 'vendor' }
     });
+    res.status(200).json({ success: true, message: `${data.name} approved`, data });
   } catch (error) {
-    await session.abortTransaction();
-    console.error('approveLinkedEngineer:', error);
-    res.status(500).json({ success: false, message: error.message || 'Failed to approve engineer' });
-  } finally {
-    session.endSession();
+    const status = Number.isInteger(error.status) ? error.status : 500;
+    if (status >= 500) console.error('approveLinkedEngineer:', error);
+    res.status(status).json({ success: false, message: status >= 500 ? 'Failed to approve engineer' : error.message });
   }
 };
 
 /** POST /api/vendor/engineers/:id/reject  { reason? } */
 exports.rejectLinkedEngineer = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction(TXN_OPTS);
   try {
-    const vendorId = getVendorId(req);
-    const { id } = req.params;
-    const reason = String(req.body?.reason || 'Rejected by vendor').slice(0, 500);
-
-    const engineer = await Engineer.findOne({
-      _id: id,
-      vendorId: new mongoose.Types.ObjectId(vendorId),
-      engineerType: 'vendor_engineer',
-      vendorApprovalStatus: 'pending_approval'
-    }).session(session);
-
-    if (!engineer) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: 'Pending engineer not found under your company'
-      });
-    }
-
-    engineer.vendorApprovalStatus = 'rejected';
-    engineer.approvalStatus = 'rejected';
-    engineer.vendorRejectedReason = reason;
-    engineer.vendorId = null;
-    await engineer.save({ session });
-
-    await session.commitTransaction();
-
-    try {
-      const { sendNotificationToEngineer } = require('../../services/firebaseAdmin');
-      await sendNotificationToEngineer(engineer._id, {
-        title: 'Join Request Rejected',
-        body: reason || 'Your vendor declined the join request.',
-        data: { type: 'engineer_vendor_rejected', engineerId: String(engineer._id) }
-      });
-    } catch (nErr) {
-      console.warn('rejectLinkedEngineer notification:', nErr.message);
-    }
-
-    res.status(200).json({
-      success: true,
-      message: `${engineer.name} rejected`,
-      data: { _id: engineer._id, vendorApprovalStatus: 'rejected' }
+    const { decideJoinRequest } = require('../../services/vendorEngineers.service');
+    const data = await decideJoinRequest({
+      vid: getVendorId(req),
+      engineerId: req.params.id,
+      approve: false,
+      reason: req.body?.reason,
+      actor: { id: getVendorId(req), role: 'vendor' }
     });
+    res.status(200).json({ success: true, message: `${data.name} rejected`, data: { _id: data.id, vendorApprovalStatus: 'rejected' } });
   } catch (error) {
-    await session.abortTransaction();
-    console.error('rejectLinkedEngineer:', error);
-    res.status(500).json({ success: false, message: error.message || 'Failed to reject engineer' });
-  } finally {
-    session.endSession();
+    const status = Number.isInteger(error.status) ? error.status : 500;
+    if (status >= 500) console.error('rejectLinkedEngineer:', error);
+    res.status(status).json({ success: false, message: status >= 500 ? 'Failed to reject engineer' : error.message });
   }
 };
 

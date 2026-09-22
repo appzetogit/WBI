@@ -227,6 +227,13 @@ async function removeInvalidTokens(tokens) {
     if (B2BUser) {
       ops.push(B2BUser.updateMany({ $or: [{ fcmTokens: { $in: tokens } }, { fcmTokenMobile: { $in: tokens } }] }, updateQuery));
     }
+    // The DeviceToken registry is the one push reads; retire the row rather
+    // than deleting it, so a dead device is visible for one audit cycle.
+    try {
+      const { invalidateTokens } = require('./deviceToken.service');
+      ops.push(invalidateTokens(tokens, 'rejected by FCM'));
+    } catch (_) { /* registry optional during boot */ }
+
     await Promise.all(ops);
 
     console.log('[FCM Cleanup] ✅ Invalid tokens removed from database');
@@ -419,6 +426,10 @@ async function sendNotificationToB2B(b2bUserId, payload, includeMobile = true) {
       return { successCount: 0, failureCount: 0 };
     }
     let tokens = [];
+    try {
+      const { tokensFor } = require('./deviceToken.service');
+      tokens = await tokensFor(b2bUserId);
+    } catch (_) { /* fall back to the legacy arrays below */ }
     if (user.fcmTokens?.length) tokens = [...tokens, ...user.fcmTokens];
     if (includeMobile && user.fcmTokenMobile?.length) tokens = [...tokens, ...user.fcmTokenMobile];
     tokens = [...new Set(tokens.filter(Boolean))];

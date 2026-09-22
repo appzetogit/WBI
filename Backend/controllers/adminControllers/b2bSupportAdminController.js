@@ -45,15 +45,16 @@ const getTicketsAdmin = async (req, res) => {
       query.companyId = new mongoose.Types.ObjectId(companyId);
     }
 
-    if (search.trim()) {
+    if (String(search).trim()) {
+      const rx = String(search).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
-        { ticketNumber: { $regex: search.trim(), $options: 'i' } },
-        { subject: { $regex: search.trim(), $options: 'i' } }
+        { ticketNumber: { $regex: rx, $options: 'i' } },
+        { subject: { $regex: rx, $options: 'i' } }
       ];
     }
 
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
     const skipNum = (pageNum - 1) * limitNum;
 
     const tickets = await SupportTicket.find(query)

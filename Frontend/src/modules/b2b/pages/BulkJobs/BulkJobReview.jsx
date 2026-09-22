@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
@@ -13,13 +13,16 @@ const BulkJobReview = () => {
   const { batchId } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  /** The backend's answer when the wallet cannot cover this upload. */
+  const [paymentGate, setPaymentGate] = useState(null);
 
   // 1. Fetch batch details
   const { data: batchData, isLoading: batchLoading } = useQuery({
     queryKey: ['b2bBatchReview', batchId],
     queryFn: async () => {
       const res = await api.get(`/b2b/bulk-jobs/${batchId}`);
-      return res.data.batch;
+      // The preview (counts, cost, wallet position) is computed by the backend.
+      return { ...res.data.batch, preview: res.data.preview };
     }
   });
 
@@ -43,20 +46,36 @@ const BulkJobReview = () => {
     }
   });
 
+  // 3b. The rows themselves — what was read, and what was wrong with each.
+  const { data: rowsData } = useQuery({
+    queryKey: ['b2bBatchRows', batchId],
+    queryFn: async () => {
+      const res = await api.get(`/b2b/bulk-jobs/${batchId}/rows`, { params: { limit: 100 } });
+      return res.data;
+    }
+  });
+
   // 4. Confirm Upload dispatch mutation
   const confirmMutation = useMutation({
     mutationFn: async () => {
       const res = await api.post(`/b2b/bulk-jobs/confirm/${batchId}`);
       return res.data;
     },
-    onSuccess: (data) => {
-      toast.success('Batch dispatch queued successfully!');
+    onSuccess: () => {
+      setPaymentGate(null);
+      toast.success('Payment reserved. Dispatch queued.');
       localStorage.setItem('activeB2BBatchId', batchId); // Retain batchId for live progress matching
-      queryClient.invalidateQueries(['b2bBulkJobStats']);
+      queryClient.invalidateQueries({ queryKey: ['b2bBulkJobStats'] });
       navigate('/b2b/bulk-jobs'); // Redirect back to index where progress is rendered
     },
     onError: (err) => {
-      toast.error(err.response?.data?.message || 'Dispatch confirmation failed');
+      const body = err.response?.data;
+      if (err.response?.status === 402) {
+        setPaymentGate(body);
+        toast.error(body?.message || 'Top up the wallet to dispatch this upload.');
+        return;
+      }
+      toast.error(body?.message || 'Dispatch confirmation failed');
     }
   });
 
@@ -99,8 +118,15 @@ const BulkJobReview = () => {
     );
   }
 
-  const walletBalance = walletData?.balance || 0;
-  const isWalletInsufficient = walletBalance < batch.estimatedCost;
+  // Everything about money comes from the backend's preview: the panel never
+  // decides whether an upload can be paid for.
+  const preview = batch.preview || {};
+  const wallet = preview.wallet || {};
+  const walletBalance = wallet.available ?? walletData?.balance ?? 0;
+  const shortfall = paymentGate?.walletGate?.shortfall ?? wallet.shortfall ?? 0;
+  const isWalletInsufficient = shortfall > 0;
+  const unknownColumns = preview.unknownColumns || batch.unknownColumns || [];
+  const rows = rowsData?.data || [];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -262,6 +288,37 @@ const BulkJobReview = () => {
         )}
 
         {/* Banner alerts depending on valid status */}
+        {unknownColumns.length > 0 && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-xs font-bold text-amber-800">
+              {unknownColumns.length} column{unknownColumns.length === 1 ? '' : 's'} in this file
+              {unknownColumns.length === 1 ? ' is' : ' are'} not part of the template and {unknownColumns.length === 1 ? 'was' : 'were'} not read:
+            </p>
+            <p className="text-[11px] font-semibold text-amber-700 mt-1">{unknownColumns.join(', ')}</p>
+          </div>
+        )}
+
+        {isWalletInsufficient && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 space-y-2">
+            <p className="text-xs font-bold text-red-700">
+              Top up ₹{Number(shortfall).toLocaleString('en-IN')} to dispatch this upload. No jobs have been created.
+            </p>
+            <div className="flex flex-wrap gap-4 text-[11px] font-semibold text-red-600">
+              <span>Required ₹{Number(paymentGate?.walletGate?.required ?? preview.totalCost ?? 0).toLocaleString('en-IN')}</span>
+              <span>Available ₹{Number(paymentGate?.walletGate?.available ?? walletBalance).toLocaleString('en-IN')}</span>
+              <span>Shortfall ₹{Number(shortfall).toLocaleString('en-IN')}</span>
+            </div>
+            {(paymentGate?.topUpMethods || []).length > 0 && (
+              <p className="text-[11px] font-semibold text-red-600">
+                Top up by: {paymentGate.topUpMethods.map((m) => m.label).join(' · ')}
+              </p>
+            )}
+            <Link to="/b2b/billing/add-funds" className="inline-block text-xs font-bold text-red-700 underline">
+              Go to the wallet
+            </Link>
+          </div>
+        )}
+
         {batch.invalidRows > 0 ? (
           <div className="bg-red-50/50 border border-red-100 rounded-2xl p-4 flex gap-3 text-red-500 items-start text-xs font-semibold leading-relaxed">
             <FiAlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -305,7 +362,7 @@ const BulkJobReview = () => {
 
         {isWalletInsufficient ? (
           <Link 
-            to="/b2b/wallet"
+            to="/b2b/billing/add-funds"
             className="bg-[#10AFA5] hover:bg-[#0D9488] text-white text-xs font-bold py-2.5 px-5 rounded-xl shadow-md shadow-teal-500/10 flex items-center gap-2 transition-all shrink-0 cursor-pointer"
           >
             <FiPlusCircle className="w-4.5 h-4.5" /> Top Up Wallet
@@ -318,6 +375,58 @@ const BulkJobReview = () => {
       </div>
 
       {/* Errors Preview table (Renders if errors count > 0) */}
+      {rows.length > 0 && (
+        <div className="bg-white rounded-3xl border border-[#E6F4F2] p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-gray-800">Rows in this file</h3>
+            <span className="text-[11px] font-bold text-gray-400">
+              showing {rows.length} of {rowsData?.pagination?.total || rows.length}
+            </span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead className="text-gray-400 font-bold uppercase">
+                <tr>
+                  <th className="py-2 pr-3">Row</th>
+                  <th className="py-2 pr-3">Customer</th>
+                  <th className="py-2 pr-3">City</th>
+                  <th className="py-2 pr-3">Service</th>
+                  <th className="py-2 pr-3">Price</th>
+                  <th className="py-2 pr-3">Status</th>
+                  <th className="py-2">What to fix</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-700 font-semibold">
+                {rows.map((r) => (
+                  <tr key={r.rowNumber} className="border-t border-gray-50">
+                    <td className="py-2 pr-3">{r.rowNumber}</td>
+                    <td className="py-2 pr-3">{r.customerName || '—'}</td>
+                    <td className="py-2 pr-3">{r.city || '—'}</td>
+                    <td className="py-2 pr-3">{r.serviceKey || r.serviceType || '—'}</td>
+                    <td className="py-2 pr-3">{r.price ? `₹${Number(r.price).toLocaleString('en-IN')}` : '—'}</td>
+                    <td className="py-2 pr-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        r.status === 'INVALID' ? 'bg-red-50 text-red-600'
+                          : r.status === 'DUPLICATE' ? 'bg-amber-50 text-amber-700'
+                            : r.status === 'FAILED' ? 'bg-red-50 text-red-600'
+                              : 'bg-emerald-50 text-emerald-700'
+                      }`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="py-2 text-gray-500">
+                      {(r.errors || []).length
+                        ? r.errors.map((e) => `${e.field}: ${e.error}${e.suggestedFix ? ` — ${e.suggestedFix}` : ''}`).join(' · ')
+                        : r.failureReason || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {batch.invalidRows > 0 && (
         <div className="bg-white rounded-3xl border border-[#E6F4F2] p-6 shadow-sm space-y-4">
           <div className="flex justify-between items-center pb-3 border-b border-gray-50">

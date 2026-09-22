@@ -1,27 +1,36 @@
 /**
- * Admin escalation queue for B2B jobs.
+ * Admin escalation queue (the "unassigned queue") and completion verification
+ * for B2B pipeline jobs.
  *
- * A job lands here when neither the engineer waves, the vendor marketplace nor
- * the freelancer pool could take it. Admin can see why, retry the automated
- * allocation, or assign an engineer directly.
+ * A job lands in the queue when routing found no eligible vendor/engineer
+ * (UNASSIGNED with a stated reason) or when it is stuck in allocation past its
+ * SLA. Admin can see why, retry routing (optionally with a wider search),
+ * route it to a specific vendor, or assign an eligible freelancer directly.
+ * Every change goes through the job lifecycle + assignment services.
  */
 const mongoose = require('mongoose');
 const B2BJob = require('../../models/B2BJob');
 const B2BCompany = require('../../models/B2BCompany');
 const Engineer = require('../../models/Engineer');
 const JobHistory = require('../../models/JobHistory');
+const JobStatusTimeline = require('../../models/JobStatusTimeline');
 const Opportunity = require('../../models/Opportunity');
+const { LIFECYCLE: S } = require('../../services/jobStateMachine');
+const { transitionJob, lifecycleOf } = require('../../services/jobLifecycle.service');
+const { sendJobError, actorFromReq } = require('../../services/jobScope.service');
 
-/** Jobs that need a human: escalated, or parked in a stage past its SLA. */
+/** Jobs that need a human: parked for lack of an eligible vendor/engineer, or stalled. */
 const buildEscalationFilter = (query = {}) => {
   const stalledBefore = new Date(Date.now() - (parseInt(query.stalledMinutes, 10) || 120) * 60 * 1000);
   const filter = {
     $or: [
       { status: 'escalated' },
       { allocationStage: 'admin_escalation' },
+      { lifecycleStatus: { $in: [S.UNASSIGNED, S.ON_HOLD] }, assignedTo: null, assignedVendorId: null },
       {
         status: { $in: ['pending', 'searching_engineer'] },
         assignedTo: null,
+        assignedVendorId: null,
         allocationUpdatedAt: { $lt: stalledBefore }
       }
     ]
@@ -44,8 +53,8 @@ const listEscalations = async (req, res) => {
         .skip((page - 1) * limit)
         .limit(limit)
         .select(
-          'jobId companyId customerName phone service subService city address charge priority status ' +
-            'allocationStage allocationReason allocationUpdatedAt rematchCount paymentStatus createdAt'
+          'jobId companyId source customerName phone service serviceKey subService city pincode address charge priority status ' +
+            'lifecycleStatus allocationStage allocationReason allocationUpdatedAt rematchCount paymentStatus slaDueAt createdAt'
         )
         .lean(),
       B2BJob.countDocuments(filter),
@@ -60,7 +69,12 @@ const listEscalations = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: jobs.map((j) => ({ ...j, companyName: companyMap.get(String(j.companyId)) || '' })),
+      data: jobs.map((j) => ({
+        ...j,
+        lifecycleStatus: lifecycleOf(j),
+        unassignedReason: j.allocationReason || null,
+        companyName: companyMap.get(String(j.companyId)) || ''
+      })),
       stageBreakdown: stageBreakdown.reduce((acc, r) => ({ ...acc, [r._id || 'unknown']: r.n }), {}),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
     });
@@ -72,24 +86,27 @@ const listEscalations = async (req, res) => {
 
 const getEscalationDetail = async (req, res) => {
   try {
-    const job = await B2BJob.findById(req.params.jobId).lean();
+    const job = await B2BJob.findById(req.params.jobId).select('-startOtp -endOtp').lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    const [company, history, opportunity] = await Promise.all([
+    const { getAssignmentHistory } = require('../../services/jobAssignment.service');
+    const [company, history, opportunity, assignments] = await Promise.all([
       B2BCompany.findById(job.companyId).select('companyName email phone').lean(),
-      JobHistory.find({ jobId: job._id }).sort({ createdAt: -1 }).limit(30).lean(),
+      JobHistory.find({ jobId: job._id }).sort({ createdAt: -1 }).limit(50).lean(),
       Opportunity.findOne({ 'assignment.b2bJobId': job._id })
         .sort({ createdAt: -1 })
         .select('opportunityCode type status categoryCode categoryName assignment.phase assignment.vendorQueue')
-        .lean()
+        .lean(),
+      getAssignmentHistory(job._id)
     ]);
 
     return res.status(200).json({
       success: true,
       data: {
-        job,
+        job: { ...job, lifecycleStatus: lifecycleOf(job) },
         company,
         history,
+        assignments,
         opportunity: opportunity
           ? {
               ...opportunity,
@@ -104,13 +121,15 @@ const getEscalationDetail = async (req, res) => {
   }
 };
 
+/** POST /escalations/:jobId/retry  { note?, expandRadiusKm? } */
 const retryAllocation = async (req, res) => {
   try {
     const { rematchB2BJob } = require('../../services/b2bJobRematch.service');
     const result = await rematchB2BJob(req.params.jobId, {
       actorRole: 'admin',
       actorId: req.user.id,
-      note: String(req.body?.note || 'Admin retriggered allocation').slice(0, 200)
+      note: String(req.body?.note || 'Admin retriggered allocation').slice(0, 200),
+      expandRadiusKm: req.body?.expandRadiusKm
     });
     if (!result.ok) {
       return res.status(result.status || 400).json({ success: false, message: result.message });
@@ -118,7 +137,7 @@ const retryAllocation = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Allocation restarted',
-      data: { attempt: result.attempt }
+      data: { attempt: result.attempt, job: result.job }
     });
   } catch (error) {
     console.error('[admin b2b retryAllocation]', error);
@@ -127,8 +146,9 @@ const retryAllocation = async (req, res) => {
 };
 
 /**
- * Direct assignment bypasses matching entirely — used when admin already knows
- * who will do the work. Escrow is re-held first so the job stays funded.
+ * POST /escalations/:jobId/assign  { engineerId, note? }
+ * Assign an eligible engineer directly (vendor-held jobs: that vendor's
+ * engineers; unowned jobs: freelancers). Validated server-side.
  */
 const manualAssign = async (req, res) => {
   try {
@@ -136,108 +156,129 @@ const manualAssign = async (req, res) => {
     if (!engineerId || !mongoose.Types.ObjectId.isValid(engineerId)) {
       return res.status(400).json({ success: false, message: 'A valid engineerId is required' });
     }
-
-    const job = await B2BJob.findById(req.params.jobId);
+    const job = await B2BJob.findById(req.params.jobId).lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
-    if (['completed', 'closed', 'cancelled'].includes(job.status)) {
-      return res.status(400).json({ success: false, message: `Job is already ${job.status}` });
-    }
-    if (job.assignedTo) {
-      return res.status(400).json({ success: false, message: 'Job already has an assigned engineer' });
-    }
 
-    const engineer = await Engineer.findById(engineerId).select('name phone approvalStatus isActive');
-    if (!engineer) return res.status(404).json({ success: false, message: 'Engineer not found' });
-    if (engineer.approvalStatus !== 'approved' || engineer.isActive === false) {
-      return res.status(400).json({ success: false, message: 'Engineer is not approved / active' });
-    }
-
-    const charge = Number(job.charge) || 0;
-    if (charge > 0) {
-      const { holdB2BJobEscrow } = require('../../services/escrowReleaseEngine.service');
-      const escrow = await holdB2BJobEscrow({
-        companyId: job.companyId,
-        jobId: job._id,
-        amount: charge,
-        remark: `Admin manual assign ${job.jobId}`
-      });
-      if (!escrow.ok) {
-        return res.status(400).json({
-          success: false,
-          message:
-            escrow.reason === 'insufficient_balance'
-              ? 'Company wallet balance is insufficient to fund this job'
-              : `Could not hold escrow (${escrow.reason})`
-        });
-      }
-      job.paymentStatus = 'escrow_locked';
-    }
-
-    const { assignJobToEngineer } = require('../../services/b2bMatchingService');
-    // The matcher only assigns jobs it considers still in-flight.
-    job.status = 'searching_engineer';
-    await job.save();
-    await assignJobToEngineer(job, engineer);
-
-    await JobHistory.create({
+    const { assignEngineer } = require('../../services/jobAssignment.service');
+    const result = await assignEngineer({
       jobId: job._id,
-      status: 'assigned',
-      remark: `Manually assigned to ${engineer.name} by admin${note ? ` — ${note}` : ''}.`,
-      role: 'admin'
-    }).catch(() => {});
-
-    const fresh = await B2BJob.findById(job._id).select('status assignedTo assignedToName').lean();
-    if (fresh?.status !== 'assigned') {
-      return res.status(500).json({ success: false, message: 'Assignment did not complete — check job state' });
-    }
-
+      engineerId,
+      actor: actorFromReq(req),
+      reason: note ? `Manually assigned by admin — ${String(note).slice(0, 200)}` : 'Manually assigned by admin',
+      routingMode: 'manual'
+    });
     return res.status(200).json({
       success: true,
-      message: `Assigned to ${engineer.name}`,
-      data: fresh
+      message: `Assigned to ${result.job.assignedToName}`,
+      data: result.job,
+      eligibility: result.eligibility
     });
   } catch (error) {
-    console.error('[admin b2b manualAssign]', error);
-    return res.status(500).json({ success: false, message: 'Failed to assign engineer' });
+    return sendJobError(res, error, 'Failed to assign engineer');
   }
 };
 
-/** Candidate engineers for manual assignment, nearest first when we have coords. */
+/**
+ * GET /escalations/:jobId/engineer-suggestions
+ * Server-computed eligible engineers with the reasoning (skill, location,
+ * availability, current jobs). Ineligible candidates are returned separately
+ * with the reasons they were excluded.
+ */
 const suggestEngineers = async (req, res) => {
   try {
-    const job = await B2BJob.findById(req.params.jobId).select('coordinates city service').lean();
+    const job = await B2BJob.findById(req.params.jobId).lean();
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    const { getAssignableEngineers } = require('../../services/jobAssignment.service');
+    const { eligible, ineligible, skillResolved } = await getAssignableEngineers({ job });
+    return res.status(200).json({ success: true, data: eligible, ineligible, skillResolved });
+  } catch (error) {
+    return sendJobError(res, error, 'Failed to load engineers');
+  }
+};
+
+/** GET /escalations/:jobId/vendor-candidates — ranked eligible vendors (hybrid routing). */
+const suggestVendors = async (req, res) => {
+  try {
+    const job = await B2BJob.findById(req.params.jobId).lean();
+    if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
+    const { findEligibleVendors } = require('../../services/jobRouting.service');
+    const ranking = await findEligibleVendors(job);
+    return res.status(200).json({ success: true, data: ranking.vendors, rejected: ranking.rejected, reason: ranking.reason, serviceKey: ranking.serviceKey });
+  } catch (error) {
+    return sendJobError(res, error, 'Failed to load vendors');
+  }
+};
+
+/**
+ * POST /escalations/:jobId/route-to-vendor  { vendorId, reason, override? }
+ * Manual / hybrid routing: hand the job to a chosen vendor. The vendor must be
+ * eligible (coverage + skilled engineer) unless admin explicitly overrides
+ * with a reason, which is audited.
+ */
+const routeToVendor = async (req, res) => {
+  try {
+    const { vendorId, reason, override = false } = req.body || {};
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ success: false, message: 'A valid vendorId is required' });
+    }
+    if (!reason || String(reason).trim().length < 3) {
+      return res.status(400).json({ success: false, message: 'A reason is required to route a job manually' });
+    }
+    const job = await B2BJob.findById(req.params.jobId).lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    const base = { approvalStatus: 'approved', isActive: true, roleType: { $in: ['Engineer', 'Both'] } };
-    const coords = job.coordinates?.coordinates || [];
-    let engineers = [];
-
-    if (coords.length === 2 && !(coords[0] === 0 && coords[1] === 0)) {
-      engineers = await Engineer.find({
-        ...base,
-        geoLocation: {
-          $nearSphere: {
-            $geometry: { type: 'Point', coordinates: [coords[0], coords[1]] },
-            $maxDistance: 200000
-          }
-        }
-      })
-        .select('name phone status city averageRating secondarySkills')
-        .limit(25)
-        .lean();
+    const { findEligibleVendors } = require('../../services/jobRouting.service');
+    const ranking = await findEligibleVendors(job);
+    const candidate = ranking.vendors.find((v) => v.vendorId === String(vendorId));
+    if (!candidate && !override) {
+      const rejected = ranking.rejected.find((v) => v.vendorId === String(vendorId));
+      return res.status(422).json({
+        success: false,
+        code: 'VENDOR_NOT_ELIGIBLE',
+        message: rejected
+          ? `Vendor is not eligible: ${rejected.reasons.join('; ')}`
+          : `Vendor does not cover ${ranking.serviceKey || job.service} for this location`,
+        details: rejected || null
+      });
     }
 
-    if (!engineers.length) {
-      engineers = await Engineer.find(base)
-        .select('name phone status city averageRating secondarySkills')
-        .limit(25)
-        .lean();
-    }
+    const actor = actorFromReq(req);
+    const { vendorClaimJob } = require('../../services/jobAssignment.service');
+    const result = await vendorClaimJob({
+      jobId: job._id,
+      vendorId,
+      actor,
+      reason: `Routed to vendor by admin${override && !candidate ? ' (override)' : ''}: ${String(reason).slice(0, 200)}`
+    });
+    await B2BJob.updateOne({ _id: job._id }, { $addToSet: { notifiedVendors: new mongoose.Types.ObjectId(String(vendorId)) }, $set: { routingMode: 'manual' } });
 
-    return res.status(200).json({ success: true, data: engineers });
+    const { logAudit } = require('../../utils/auditLogger');
+    await logAudit({
+      actionType: override && !candidate ? 'JOB_ROUTING_OVERRIDE' : 'JOB_ROUTED_MANUALLY',
+      eventMessage: `${job.jobId} routed to vendor ${vendorId}: ${reason}`,
+      actorId: actor.id,
+      actorRole: 'admin',
+      targetId: job._id,
+      targetType: 'B2BJob',
+      changes: { vendorId: String(vendorId), override: Boolean(override && !candidate), eligibility: candidate || null }
+    });
+
+    try {
+      const { createNotification } = require('../notificationControllers/notificationController');
+      await createNotification({
+        vendorId,
+        type: 'b2b_job_request',
+        title: 'Job assigned to you by WBI',
+        message: `${job.service} — ${job.city}. Please assign an engineer.`,
+        relatedId: job._id,
+        relatedType: 'b2b_job',
+        priority: 'high'
+      });
+    } catch (_) { /* non-blocking */ }
+
+    return res.status(200).json({ success: true, message: 'Job routed to vendor', data: result.job });
   } catch (error) {
-    console.error('[admin b2b suggestEngineers]', error);
-    return res.status(500).json({ success: false, message: 'Failed to load engineers' });
+    return sendJobError(res, error, 'Failed to route job to vendor');
   }
 };
 
@@ -248,7 +289,7 @@ const suggestEngineers = async (req, res) => {
 const listUnmatchedServices = async (_req, res) => {
   try {
     const rows = await B2BJob.aggregate([
-      { $match: { allocationReason: { $regex: 'No service category configured', $options: 'i' } } },
+      { $match: { allocationReason: { $regex: 'not an offered service|No service category configured', $options: 'i' } } },
       {
         $group: {
           _id: '$service',
@@ -295,7 +336,7 @@ const listSubmissions = async (req, res) => {
     }
 
     if (search && String(search).trim()) {
-      const q = String(search).trim();
+      const q = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(q, 'i');
       filter.$or = [
         { jobId: regex },
@@ -374,44 +415,52 @@ const getSubmissionDetail = async (req, res) => {
   }
 };
 
+const emitToEngineer = (job, payload) => {
+  try {
+    const { getIO } = require('../../sockets');
+    const io = getIO();
+    if (io && job.assignedTo) io.to(`engineer:${String(job.assignedTo)}`).emit('b2b:jobStatusUpdated', payload);
+  } catch (_) { /* non-blocking */ }
+};
+
 /**
- * Admin QA/Review: Approve B2B job completion & release escrow payout
+ * Admin QA/Review: Approve B2B job completion & release escrow payout.
+ * Only a job whose work was submitted (COMPLETED / VERIFICATION) can be
+ * approved — approving a job nobody worked on would release payment for
+ * nothing.
  */
 const approveCompletion = async (req, res) => {
   try {
     const adminId = req.user.id || req.user._id;
     const { jobId } = req.params;
-    const { remarks } = req.body;
+    const { remarks } = req.body || {};
 
-    const job = await B2BJob.findById(jobId);
+    const job = await B2BJob.findById(jobId).lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    if (['completed', 'cancelled', 'failed'].includes(job.status)) {
-      return res.status(400).json({ success: false, message: `Job is already ${job.status}` });
-    }
-
     const now = new Date();
-    job.status = 'completed';
-    job.trackingStatus = 'completed';
-    job.completedAt = job.completedAt || now;
+    const updated = await transitionJob({
+      jobId: job._id,
+      to: S.CLOSED,
+      actor: { id: adminId, role: 'admin' },
+      expectFrom: [S.COMPLETED, S.VERIFICATION],
+      reason: remarks ? `Verified by admin: ${String(remarks).slice(0, 300)}` : 'Verified and closed by admin',
+      event: 'VERIFIED_CLOSED',
+      patch: { completedAt: job.completedAt || now }
+    });
 
-    await job.save();
-
-    // Release held B2B escrow payment
+    let payout = null;
     try {
       const { releaseB2BJobEscrowPayment } = require('../../services/escrowReleaseEngine.service');
-      const releaseResult = await releaseB2BJobEscrowPayment({
-        jobId: job._id,
-        actor: { id: adminId, role: 'admin' }
-      });
-      console.log(`[Admin Approve B2B Job] Escrow release result for ${job.jobId}:`, releaseResult);
-      if (releaseResult?.ok) {
-        job.payoutStatus = 'released';
-        await job.save();
-      }
+      payout = await releaseB2BJobEscrowPayment({ jobId: job._id, actor: { id: adminId, role: 'admin' } });
+      if (!payout?.ok) console.warn(`[Admin Approve B2B Job] payout not released for ${job.jobId}:`, payout?.reason);
     } catch (escrowErr) {
       console.error('[Admin Approve B2B Job] Escrow release error:', escrowErr.message);
     }
+
+    const { closeAssignmentForJob } = require('../../services/jobAssignment.service');
+    await closeAssignmentForJob({ jobId: job._id, outcome: 'completed', actor: { id: adminId, role: 'admin' }, reason: 'Job verified and closed' })
+      .catch((e) => console.warn('[Admin Approve B2B Job] assignment close:', e.message));
 
     await JobStatusTimeline.create({
       jobId: job._id,
@@ -421,64 +470,48 @@ const approveCompletion = async (req, res) => {
       remarks: remarks || 'Admin approved job completion & released escrow payment'
     });
 
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'completed',
-      remark: `Admin approved completion. ${remarks || ''}`,
-      role: 'admin',
-      changedBy: adminId
-    });
+    emitToEngineer(updated, { jobId: String(job._id), status: updated.status, trackingStatus: updated.trackingStatus, updatedAt: now });
 
-    // Realtime Sockets
-    try {
-      const { getIO } = require('../../sockets');
-      const io = getIO();
-      if (io) {
-        const payload = { jobId: job._id.toString(), status: 'completed', trackingStatus: 'completed', updatedAt: now };
-        io.to(`b2b:${job.companyId.toString()}`).emit('b2b:jobStatusUpdated', payload);
-        io.to('admin').emit('b2b:jobStatusUpdated', payload);
-        if (job.assignedTo) {
-          io.to(`engineer:${job.assignedTo.toString()}`).emit('b2b:jobStatusUpdated', payload);
-        }
-      }
-    } catch (e) {
-      /* ignore socket emit warning */
-    }
-
+    const fresh = await B2BJob.findById(job._id).select('-startOtp -endOtp').lean();
     return res.status(200).json({
       success: true,
-      message: 'Job completion approved and payout released successfully.',
-      job
+      message: payout?.ok
+        ? 'Job completion approved and payout released successfully.'
+        : `Job completion approved. Payout not released: ${payout?.reason || 'see payment logs'}`,
+      job: fresh,
+      payout
     });
   } catch (error) {
-    console.error('[admin b2b approveCompletion]', error);
-    return res.status(500).json({ success: false, message: 'Failed to approve job completion' });
+    return sendJobError(res, error, 'Failed to approve job completion');
   }
 };
 
 /**
- * Admin QA/Review: Request Revision / Reject B2B job completion
+ * Admin QA/Review: Request revision — the job goes back to IN_PROGRESS for
+ * the same engineer; payout stays held.
  */
 const rejectCompletion = async (req, res) => {
   try {
     const adminId = req.user.id || req.user._id;
     const { jobId } = req.params;
-    const { remarks } = req.body;
+    const { remarks } = req.body || {};
 
     if (!remarks || !String(remarks).trim()) {
       return res.status(400).json({ success: false, message: 'Revision / Rejection remarks are required' });
     }
 
-    const job = await B2BJob.findById(jobId);
+    const job = await B2BJob.findById(jobId).lean();
     if (!job) return res.status(404).json({ success: false, message: 'Job not found' });
 
-    const now = new Date();
-    job.status = 'revision_required';
-    job.trackingStatus = 'revision_required';
-    job.incompleteRemarks = remarks;
-    job.payoutStatus = 'held';
-
-    await job.save();
+    const updated = await transitionJob({
+      jobId: job._id,
+      to: S.IN_PROGRESS,
+      actor: { id: adminId, role: 'admin' },
+      expectFrom: [S.COMPLETED, S.VERIFICATION],
+      reason: `Revision requested by admin: ${String(remarks).slice(0, 300)}`,
+      event: 'REVISION_REQUESTED',
+      patch: { incompleteRemarks: remarks, payoutStatus: 'held' }
+    });
 
     await JobStatusTimeline.create({
       jobId: job._id,
@@ -488,38 +521,15 @@ const rejectCompletion = async (req, res) => {
       remarks: `Admin requested revision: ${remarks}`
     });
 
-    await JobHistory.create({
-      jobId: job._id,
-      status: 'revision_required',
-      remark: `Admin rejected submission / requested revision: ${remarks}`,
-      role: 'admin',
-      changedBy: adminId
-    });
-
-    // Realtime Sockets
-    try {
-      const { getIO } = require('../../sockets');
-      const io = getIO();
-      if (io) {
-        const payload = { jobId: job._id.toString(), status: 'revision_required', trackingStatus: 'revision_required', updatedAt: now };
-        io.to(`b2b:${job.companyId.toString()}`).emit('b2b:jobStatusUpdated', payload);
-        io.to('admin').emit('b2b:jobStatusUpdated', payload);
-        if (job.assignedTo) {
-          io.to(`engineer:${job.assignedTo.toString()}`).emit('b2b:jobStatusUpdated', payload);
-        }
-      }
-    } catch (e) {
-      /* ignore socket emit warning */
-    }
+    emitToEngineer(updated, { jobId: String(job._id), status: updated.status, trackingStatus: updated.trackingStatus, updatedAt: new Date() });
 
     return res.status(200).json({
       success: true,
       message: 'Revision requested from engineer successfully.',
-      job
+      job: updated
     });
   } catch (error) {
-    console.error('[admin b2b rejectCompletion]', error);
-    return res.status(500).json({ success: false, message: 'Failed to request revision' });
+    return sendJobError(res, error, 'Failed to request revision');
   }
 };
 
@@ -529,6 +539,8 @@ module.exports = {
   retryAllocation,
   manualAssign,
   suggestEngineers,
+  suggestVendors,
+  routeToVendor,
   listUnmatchedServices,
   listSubmissions,
   getSubmissionDetail,

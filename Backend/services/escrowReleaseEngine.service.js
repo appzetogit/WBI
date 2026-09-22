@@ -310,9 +310,6 @@ async function releaseMilestoneEscrow({
  * write EscrowLedger, and record an audit trail. Idempotent per job.
  */
 async function holdB2BJobEscrow({ companyId, jobId, amount, remark = '' } = {}) {
-  const B2BWallet = require('../models/B2BWallet');
-  const B2BWalletTransaction = require('../models/B2BWalletTransaction');
-  const B2BCompany = require('../models/B2BCompany');
   const B2BJob = require('../models/B2BJob');
   const PaymentAuditLog = require('../models/PaymentAuditLog');
 
@@ -330,19 +327,26 @@ async function holdB2BJobEscrow({ companyId, jobId, amount, remark = '' } = {}) 
     return { ok: true, alreadyHeld: true, ledgerId: existing._id, amount: existing.heldAmount };
   }
 
-  const wallet = await B2BWallet.findOneAndUpdate(
-    { companyId, balance: { $gte: amt } },
-    {
-      $inc: { balance: -amt, escrowBalance: amt },
-      $set: { lastUpdatedAt: new Date() }
-    },
-    { new: true }
-  );
-  if (!wallet) {
-    return { ok: false, reason: 'insufficient_balance', amount: amt };
+  // The wallet ledger moves Available → Reserved and writes the transaction
+  // row in one database transaction; nothing else may touch the balances.
+  const walletLedger = require('./b2bWalletLedger.service');
+  let reservation;
+  try {
+    reservation = await walletLedger.reserve({
+      companyId,
+      amount: amt,
+      reservationId: `JOB-${jobId}`,
+      jobId,
+      idempotencyKey: `job-reservation:${jobId}`,
+      remark: remark || 'Escrow hold for B2B job'
+    });
+  } catch (err) {
+    if (err.code === 'INSUFFICIENT_FUNDS') {
+      return { ok: false, reason: 'insufficient_balance', amount: amt, shortfall: err.details };
+    }
+    throw err;
   }
-
-  await B2BCompany.findByIdAndUpdate(companyId, { walletBalance: wallet.balance });
+  const wallet = { balance: reservation.balance.available, escrowBalance: reservation.balance.reserved };
 
   const ledger = await EscrowLedger.create({
     paymentId: jobId,
@@ -356,23 +360,18 @@ async function holdB2BJobEscrow({ companyId, jobId, amount, remark = '' } = {}) 
     releaseReason: remark || `b2b_hold:${jobId}`
   });
 
-  const txnId = `TXN-ESH-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-  await B2BWalletTransaction.create({
-    companyId,
-    walletId: wallet._id,
-    transactionId: txnId,
-    type: 'escrow_hold',
-    amount: -amt,
-    totalAmount: -amt,
-    status: 'success',
-    paymentMethod: 'wallet',
-    remark: remark || `Escrow hold for B2B job`,
-    relatedJobIds: [jobId]
-  });
-
   await B2BJob.updateOne(
     { _id: jobId },
-    { $set: { paymentStatus: 'escrow_locked', payoutStatus: 'none' } }
+    {
+      $set: {
+        paymentStatus: 'escrow_locked',
+        payoutStatus: 'none',
+        walletStatus: 'reserved',
+        walletReservationId: `JOB-${jobId}`,
+        paymentReference: reservation.transaction._id,
+        paymentMode: reservation.transaction.paymentMode || 'REAL'
+      }
+    }
   );
 
   try {
@@ -417,9 +416,6 @@ async function holdB2BJobEscrow({ companyId, jobId, amount, remark = '' } = {}) 
  * Reverse a held escrow back to company Available balance.
  */
 async function refundB2BJobEscrow({ jobId, reason = 'job_cancelled' } = {}) {
-  const B2BWallet = require('../models/B2BWallet');
-  const B2BWalletTransaction = require('../models/B2BWalletTransaction');
-  const B2BCompany = require('../models/B2BCompany');
   const B2BJob = require('../models/B2BJob');
   const PaymentAuditLog = require('../models/PaymentAuditLog');
 
@@ -454,52 +450,47 @@ async function refundB2BJobEscrow({ jobId, reason = 'job_cancelled' } = {}) {
   const job = await B2BJob.findById(jobId).select('companyId jobId').lean();
   if (!job?.companyId) return { ok: false, reason: 'job_not_found' };
 
-  const wallet = await B2BWallet.findOneAndUpdate(
-    { companyId: job.companyId, escrowBalance: { $gte: remaining } },
-    {
-      $inc: { balance: remaining, escrowBalance: -remaining },
-      $set: { lastUpdatedAt: new Date() }
-    },
-    { new: true }
-  );
-  if (!wallet) {
-    // Soft recover if escrowBalance was never tracked (legacy deducted jobs)
-    const fallback = await B2BWallet.findOneAndUpdate(
-      { companyId: job.companyId },
-      {
-        $inc: { balance: remaining },
-        $set: { lastUpdatedAt: new Date() }
-      },
-      { new: true }
-    );
-    if (!fallback) return { ok: false, reason: 'wallet_not_found' };
-    await B2BCompany.findByIdAndUpdate(job.companyId, { walletBalance: fallback.balance });
-  } else {
-    await B2BCompany.findByIdAndUpdate(job.companyId, { walletBalance: wallet.balance });
+  // Reserved → Available through the ledger, so the release is recorded.
+  const walletLedger = require('./b2bWalletLedger.service');
+  let released;
+  try {
+    released = await walletLedger.release({
+      companyId: job.companyId,
+      amount: remaining,
+      reservationId: `JOB-${jobId}`,
+      jobId,
+      remark: reason || `Escrow refund for ${job.jobId}`
+    });
+  } catch (err) {
+    if (err.code === 'RESERVATION_TOO_SMALL') {
+      // Legacy jobs whose money was spent without ever being reserved: credit
+      // the refund instead of releasing a hold that was never recorded.
+      released = await walletLedger.refund({
+        companyId: job.companyId,
+        amount: remaining,
+        jobId,
+        remark: `${reason || 'Escrow refund'} (legacy job with no recorded hold)`
+      });
+    } else {
+      throw err;
+    }
   }
+  const wallet = { balance: released.balance.available, escrowBalance: released.balance.reserved };
 
   ledger.refundedAmount = (Number(ledger.refundedAmount) || 0) + remaining;
   ledger.status = 'refunded';
   ledger.releaseReason = reason;
   await ledger.save();
 
-  const refreshed = await B2BWallet.findOne({ companyId: job.companyId });
-  await B2BWalletTransaction.create({
-    companyId: job.companyId,
-    walletId: refreshed?._id,
-    transactionId: `TXN-ESR-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-    type: 'escrow_refund',
-    amount: remaining,
-    totalAmount: remaining,
-    status: 'success',
-    paymentMethod: 'wallet',
-    remark: reason || `Escrow refund for ${job.jobId}`,
-    relatedJobIds: [jobId]
-  });
-
   await B2BJob.updateOne(
     { _id: jobId },
-    { $set: { paymentStatus: 'refunded', payoutStatus: 'refunded' } }
+    {
+      $set: {
+        paymentStatus: 'refunded',
+        payoutStatus: 'refunded',
+        walletStatus: 'refunded'
+      }
+    }
   );
 
   try {
@@ -543,8 +534,8 @@ async function refundB2BJobEscrow({ jobId, reason = 'job_cancelled' } = {}) {
   return {
     ok: true,
     amount: remaining,
-    balance: refreshed?.balance,
-    escrowBalance: refreshed?.escrowBalance
+    balance: wallet.balance,
+    escrowBalance: wallet.escrowBalance
   };
 }
 
@@ -552,6 +543,9 @@ async function resolveVendorForB2BJob(job, flow) {
   const Opportunity = require('../models/Opportunity');
   const VendorOpsProject = require('../models/VendorOpsProject');
 
+  // The vendor holding the job is authoritative: it accepted the job and its
+  // engineer did the work, so the release is credited to the vendor.
+  if (job?.assignedVendorId) return job.assignedVendorId;
   if (flow?.vendorId) return flow.vendorId;
   if (flow?.opportunityId) {
     const opp = await Opportunity.findById(flow.opportunityId)
@@ -574,9 +568,6 @@ async function resolveVendorForB2BJob(job, flow) {
  * vendor_marketplace → credit VendorFinanceWallet with net; vendor pays engineers later
  */
 async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'system' } } = {}) {
-  const B2BWallet = require('../models/B2BWallet');
-  const B2BWalletTransaction = require('../models/B2BWalletTransaction');
-  const B2BCompany = require('../models/B2BCompany');
   const B2BJob = require('../models/B2BJob');
   const Transaction = require('../models/Transaction');
   const PaymentAuditLog = require('../models/PaymentAuditLog');
@@ -746,23 +737,24 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
     }
   }
 
-  // Move company escrow → spent (funds leave the company permanently)
-  const companyWallet = await B2BWallet.findOneAndUpdate(
-    { companyId: job.companyId, escrowBalance: { $gte: remaining } },
-    {
-      $inc: { escrowBalance: -remaining, totalSpent: remaining },
-      $set: { lastUpdatedAt: new Date() }
-    },
-    { new: true }
-  );
-  if (!companyWallet) {
-    // Legacy deducted path: escrowBalance may be 0 — still mark spent if not already
-    await B2BWallet.findOneAndUpdate(
-      { companyId: job.companyId },
-      { $set: { lastUpdatedAt: new Date() } }
-    );
-  } else {
-    await B2BCompany.findByIdAndUpdate(job.companyId, { walletBalance: companyWallet.balance });
+  // Move company Reserved → spent (the money leaves the company for good).
+  // The ledger books the charge and its row together.
+  const walletLedger = require('./b2bWalletLedger.service');
+  let charged = null;
+  try {
+    charged = await walletLedger.charge({
+      companyId: job.companyId,
+      amount: remaining,
+      reservationId: `JOB-${jobId}`,
+      jobId,
+      idempotencyKey: `job-charge:${jobId}`,
+      remark: `Escrow released (${mode}) for ${job.jobId}`
+    });
+  } catch (err) {
+    // Legacy jobs deducted before escrow existed hold nothing in reserve; the
+    // money already left the wallet, so there is nothing further to charge.
+    if (err.code !== 'RESERVATION_TOO_SMALL') throw err;
+    console.warn(`[Escrow] Job ${job.jobId} had no recorded hold to charge; leaving balances untouched.`);
   }
 
   ledger.releasedAmount = (Number(ledger.releasedAmount) || 0) + remaining;
@@ -772,7 +764,13 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
 
   await B2BJob.updateOne(
     { _id: jobId },
-    { $set: { paymentStatus: 'released', payoutStatus: 'released' } }
+    {
+      $set: {
+        paymentStatus: 'released',
+        payoutStatus: 'released',
+        walletStatus: charged ? 'charged' : 'released'
+      }
+    }
   );
 
   if (flow) {
@@ -806,20 +804,6 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
       actorRole: actor.role,
       actorId: actor.id
     }
-  });
-
-  const refreshed = await B2BWallet.findOne({ companyId: job.companyId });
-  await B2BWalletTransaction.create({
-    companyId: job.companyId,
-    walletId: refreshed?._id,
-    transactionId: `TXN-ESX-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-    type: 'escrow_release',
-    amount: -remaining,
-    totalAmount: -remaining,
-    status: 'success',
-    paymentMethod: 'wallet',
-    remark: `Escrow released (${mode}) for ${job.jobId}`,
-    relatedJobIds: [jobId]
   });
 
   try {

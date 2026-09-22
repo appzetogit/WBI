@@ -4,9 +4,11 @@ import { FiDollarSign, FiSearch, FiLoader, FiArrowUpRight, FiCheckCircle } from 
 import { toast } from 'react-hot-toast';
 import CardShell from '../UserCategories/components/CardShell';
 import adminWorkerService from '../../../../services/adminWorkerService';
+import WorkerHistoryModal from './WorkerHistoryModal';
 
 const WorkerPayments = () => {
   const [workers, setWorkers] = useState([]);
+  const [historyWorker, setHistoryWorker] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -104,7 +106,7 @@ const WorkerPayments = () => {
                       <td className="px-4 py-4">
                         <button
                           className="flex items-center gap-1 text-primary-600 font-semibold hover:underline"
-                          onClick={() => toast('Detailed transaction history coming soon')}
+                          onClick={() => setHistoryWorker(worker)}
                         >
                           View History <FiArrowUpRight className="w-4 h-4" />
                         </button>
@@ -117,6 +119,7 @@ const WorkerPayments = () => {
           )}
         </div>
       </CardShell>
+      <WorkerHistoryModal worker={historyWorker} onClose={() => setHistoryWorker(null)} />
     </div>
   );
 };

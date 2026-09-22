@@ -61,8 +61,8 @@ const MAX_PENDING_OFFERS_PER_ENGINEER = Math.max(
   parseInt(process.env.B2B_MAX_PENDING_OFFERS_PER_ENGINEER || '1', 10)
 );
 
-/** Statuses that count against an engineer's live workload. */
-const ACTIVE_JOB_STATUSES = ['assigned', 'in_progress'];
+/** Statuses that count against an engineer's live workload (engineer holding the job). */
+const ACTIVE_JOB_STATUSES = ['assigned', 'accepted', 'travelling', 'arrived', 'in_progress', 'revision_required', 'on_hold'];
 
 const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -355,6 +355,12 @@ const getPendingOfferCounts = async (engineerIds = []) => {
     },
     { $unwind: '$notifiedEngineers' },
     { $match: { notifiedEngineers: { $in: engineerIds } } },
+    // A declined offer no longer occupies the engineer.
+    {
+      $match: {
+        $expr: { $not: { $in: ['$notifiedEngineers', { $ifNull: ['$declinedEngineers', []] }] } }
+      }
+    },
     { $group: { _id: '$notifiedEngineers', n: { $sum: 1 } } }
   ]);
 

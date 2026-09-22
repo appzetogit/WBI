@@ -12,7 +12,10 @@ const {
   rejectCompanyDocument,
   verifyCompanyBank,
   getCompanyUsers,
-  updateCompanyUserStatus
+  updateCompanyUserStatus,
+  setCompanyStatus,
+  updateCompanyControls,
+  getCompanyActivity
 } = require('../../controllers/adminControllers/b2bManagementController');
 
 // All routes are protected by authenticate and isAdmin middlewares
@@ -28,6 +31,11 @@ router.patch('/b2b-companies/:companyId/reject', rejectCompany);
 router.patch('/b2b-companies/:companyId/documents/:documentId/verify', verifyCompanyDocument);
 router.patch('/b2b-companies/:companyId/documents/:documentId/reject', rejectCompanyDocument);
 router.patch('/b2b-companies/:companyId/bank/verify', verifyCompanyBank);
+
+// Operational controls: status, allowed services/locations, profiles, billing
+router.patch('/b2b-companies/:companyId/status', setCompanyStatus);
+router.patch('/b2b-companies/:companyId/controls', updateCompanyControls);
+router.get('/b2b-companies/:companyId/activity', getCompanyActivity);
 
 // Admin B2B User management
 router.get('/b2b-companies/:companyId/users', getCompanyUsers);

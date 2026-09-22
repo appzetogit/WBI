@@ -7,7 +7,7 @@ const connectDB = async () => {
   const primaryUri = process.env.MONGODB_URI;
 
   if (!primaryUri) {
-    console.error('❌ MONGODB_URI is not set in environment variables!');
+    console.error(' MONGODB_URI is not set in environment variables!');
     process.exit(1);
   }
 
@@ -43,12 +43,11 @@ const connectDB = async () => {
       mongoose.connection.on('disconnected', () => {
         console.warn('[DB] MongoDB disconnected. Mongoose will auto-reconnect...');
       });
-
       mongoose.connection.on('reconnected', () => {
-        console.log('[DB] ✅ MongoDB reconnected successfully.');
+        console.log('[DB]  MongoDB reconnected successfully.');
       });
 
-      console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+      console.log(` MongoDB Connected: ${conn.connection.host}`);
       retryCount = 0; // Reset on success
 
       // Fix vendor signup E11000 on inviteLinkToken:null (non-blocking)
@@ -61,30 +60,31 @@ const connectDB = async () => {
         }
       });
     } catch (error) {
+      
       retryCount++;
 
       // Log the specific error type for debugging
       if (error.message.includes('ECONNREFUSED')) {
-        console.error(`[DB] ❌ Connection REFUSED to MongoDB Atlas. EC2 Server IP may not be whitelisted.`);
+        console.error(`[DB]  Connection REFUSED to MongoDB Atlas. EC2 Server IP may not be whitelisted.`);
         console.error(`[DB]    → Go to MongoDB Atlas → Network Access → Add IP: (your EC2 public IP)`);
         console.error(`[DB]    → Or temporarily allow 0.0.0.0/0 for testing`);
         console.error(`[DB]    → Attempted URI host: ${primaryUri.split('@')[1]?.split('/')[0] || 'unknown'}`);
       } else if (error.message.includes('Authentication failed')) {
-        console.error(`[DB] ❌ Authentication failed. Check MONGODB_URI username/password.`);
+        console.error(`[DB]  Authentication failed. Check MONGODB_URI username/password.`);
       } else if (error.message.includes('ETIMEOUT') || error.message.includes('ENOTFOUND')) {
-        console.error(`[DB] ❌ DNS/Timeout error. Check internet connectivity or DNS settings on server.`);
+        console.error(`[DB]  DNS/Timeout error. Check internet connectivity or DNS settings on server.`);
       } else {
-        console.error(`[DB] ❌ MongoDB Connection Failed:`, error.message);
+        console.error(`[DB]  MongoDB Connection Failed:`, error.message);
       }
 
       if (retryCount >= MAX_RETRIES) {
-        console.error(`[DB] ❌ Max retries (${MAX_RETRIES}) reached. Server will continue running without DB.`);
+        console.error(`[DB]  Max retries (${MAX_RETRIES}) reached. Server will continue running without DB.`);
         console.error(`[DB]    → Fix the Atlas Network Access whitelist and restart the server.`);
         return; // Don't crash the process — let API return 503 gracefully
       }
 
       const delay = Math.min(RETRY_DELAY_MS * retryCount, 30000); // Exponential backoff, max 30s
-      console.log(`[DB] ⏳ Retrying in ${delay / 1000}s... (${retryCount}/${MAX_RETRIES})`);
+      console.log(`[DB]  Retrying in ${delay / 1000}s... (${retryCount}/${MAX_RETRIES})`);
       setTimeout(connectWithRetry, delay);
     }
   };

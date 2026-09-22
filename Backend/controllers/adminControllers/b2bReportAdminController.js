@@ -252,7 +252,35 @@ const exportPdfAdmin = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/admin/b2b/reports/sla and /financial — the same reports the
+ * company sees in its own panel, for any one company.
+ */
+const opsReportAdmin = (fnName) => async (req, res) => {
+  try {
+    const { companyId, startDate, endDate, service, engineer, city } = req.query;
+    const compVal = await validateCompany(companyId);
+    if (!compVal.valid) {
+      return res.status(compVal.status).json({ success: false, message: compVal.message });
+    }
+    if ((startDate && isNaN(Date.parse(startDate))) || (endDate && isNaN(Date.parse(endDate)))) {
+      return res.status(400).json({ success: false, message: 'Invalid date format' });
+    }
+    const svc = require('../../services/b2bOpsReportService');
+    const data = await svc[fnName](companyId, { startDate, endDate, service, engineer, city });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    console.error(`[Admin B2B Report Controller] ${fnName} error:`, error);
+    return res.status(500).json({ success: false, message: 'Failed to build report' });
+  }
+};
+
+const getSlaAdmin = opsReportAdmin('getSlaReport');
+const getFinancialAdmin = opsReportAdmin('getFinancialReport');
+
 module.exports = {
+  getSlaAdmin,
+  getFinancialAdmin,
   getSummaryAdmin,
   getServicesAdmin,
   getEngineersAdmin,

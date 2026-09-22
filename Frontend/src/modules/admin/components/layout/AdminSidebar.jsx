@@ -86,11 +86,16 @@ const getChildRoute = (parentRoute, childName) => {
     },
     "/admin/b2b": {
       "Submissions QA Review": "/admin/b2b/submissions",
+      "Unassigned Jobs Queue": "/admin/b2b/unassigned",
       "Company Approvals": "/admin/b2b/companies",
       "Corporate Wallets": "/admin/b2b/wallets",
       "Invoices": "/admin/b2b/invoices",
       "Reports": "/admin/b2b/reports",
       "Support Tickets": "/admin/b2b/support",
+      "Transactions": "/admin/b2b/transactions",
+      "Pricing": "/admin/b2b/pricing",
+      "Contracts": "/admin/b2b/contracts",
+      "Settings": "/admin/b2b/settings",
     },
     "/admin/workers": {
       "All Workers": "/admin/workers/all",

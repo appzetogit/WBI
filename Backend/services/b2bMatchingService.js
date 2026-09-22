@@ -149,18 +149,27 @@ const findEngineersInRadius = async (lng, lat, radiusKm, excludeIds = [], contex
  * Dispatch one matching wave; schedule next wave on timeout if still searching
  */
 const dispatchWave = async (jobId, waveIndex = 0) => {
-  const radii = B2B_WAVE_RADII_KM.length ? B2B_WAVE_RADII_KM : [5, 10, 20, 50, 100];
+  const radii = [...(B2B_WAVE_RADII_KM.length ? B2B_WAVE_RADII_KM : [5, 10, 20, 50, 100])];
   console.log(`[Matching] Dispatching Wave ${waveIndex + 1} for Job ${jobId}`);
 
-  const b2bJob = await B2BJob.findById(jobId);
+  let b2bJob = await B2BJob.findById(jobId);
   if (!b2bJob) {
     console.error(`[Matching] Job ${jobId} not found`);
     return;
   }
 
-  if (!['pending', 'searching_engineer'].includes(b2bJob.status)) {
-    console.log(`[Matching] Job ${b2bJob.jobId} status=${b2bJob.status}. Halting waves.`);
+  const { lifecycleOf, transitionJob } = require('./jobLifecycle.service');
+  const { LIFECYCLE } = require('./jobStateMachine');
+  const state = lifecycleOf(b2bJob);
+  // Only unowned, funded jobs are routed. A job a vendor or engineer already
+  // holds, or one parked for a human, must never be re-offered by a stale wave.
+  if (![LIFECYCLE.VALIDATED, LIFECYCLE.ROUTED].includes(state) || b2bJob.assignedTo || b2bJob.assignedVendorId || b2bJob.status === 'pending_wallet') {
+    console.log(`[Matching] Job ${b2bJob.jobId} is ${state}/${b2bJob.status}. Halting waves.`);
     return;
+  }
+
+  if (b2bJob.routingMaxRadiusKm && b2bJob.routingMaxRadiusKm > radii[radii.length - 1]) {
+    radii.push(Number(b2bJob.routingMaxRadiusKm));
   }
 
   if (waveIndex >= radii.length) {
@@ -177,7 +186,17 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
   const [lng, lat] = coords;
   const radiusKm = radii[waveIndex];
 
-  if (b2bJob.status !== 'searching_engineer') {
+  if (state !== LIFECYCLE.ROUTED) {
+    await transitionJob({
+      jobId: b2bJob._id,
+      to: LIFECYCLE.ROUTED,
+      actor: { role: 'system' },
+      reason: `Automatic routing started (waves ${radii.join('→')} km)`,
+      event: 'ROUTING_STARTED'
+    });
+    b2bJob = await B2BJob.findById(jobId).read('primary');
+  } else if (b2bJob.status !== 'searching_engineer') {
+    // Same canonical state (ROUTED); only the legacy label changes.
     b2bJob.status = 'searching_engineer';
   }
   b2bJob.currentWave = waveIndex + 1;
@@ -187,17 +206,8 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
   b2bJob.allocationUpdatedAt = new Date();
   await b2bJob.save();
 
-  if (waveIndex === 0) {
-    await JobHistory.create({
-      jobId: b2bJob._id,
-      status: 'searching_engineer',
-      remark: `Auto-allocation started (waves ${radii.join('→')} km).`,
-      role: 'system'
-    });
-  }
-
   const previouslyNotified = (b2bJob.notifiedEngineers || []).map((id) => id.toString());
-  const excludeIds = previouslyNotified;
+  const excludeIds = [...new Set([...previouslyNotified, ...(b2bJob.declinedEngineers || []).map(String)])];
 
   // Resolve the job's service into catalog ids / skill names once per wave.
   const { buildB2BJobSkillContext } = require('./b2bEngineerEligibility');
@@ -218,57 +228,21 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
     skillContext
   );
 
-  // Parallel vendor discovery: a vendor with a matching, in-radius engineer
-  // is notified directly in this same wave, independent of whether a
-  // freelancer also matched. This is what lets the job reach the vendor
-  // (accept/reject, then pick its own engineer) instead of it only ever
-  // reaching that engineer via a direct self-accept offer that bypasses
-  // the vendor entirely.
-  try {
-    const { findEligibleVendorsInRadius } = require('./b2bEngineerEligibility');
-    const alreadyNotifiedVendors = (b2bJob.notifiedVendors || []).map((id) => id.toString());
-    const { vendorIds: newVendorIds } = await findEligibleVendorsInRadius({
-      lng,
-      lat,
-      radiusKm,
-      context: skillContext,
-      excludeVendorIds: alreadyNotifiedVendors
-    });
-
-    if (newVendorIds.length) {
-      b2bJob.notifiedVendors = [...new Set([...alreadyNotifiedVendors, ...newVendorIds.map((v) => v.toString())])];
-      await b2bJob.save();
-
-      for (const vId of newVendorIds) {
-        emitSocket(`vendor:${vId.toString()}`, 'b2b:jobRequestReceived', {
-          jobId: b2bJob.jobId,
-          mongoId: b2bJob._id.toString(),
-          service: b2bJob.service,
-          customerName: b2bJob.customerName,
-          city: b2bJob.city,
-          charge: b2bJob.charge,
-          waveNumber: waveIndex + 1,
-          radiusKm
-        });
-        try {
-          const { createNotification } = require('../controllers/notificationControllers/notificationController');
-          await createNotification({
-            vendorId: vId,
-            type: 'b2b_job_request',
-            title: 'New B2B job request',
-            message: `${b2bJob.service || 'Service'} — ${b2bJob.city || b2bJob.customerName || 'New request'}`,
-            relatedId: b2bJob._id,
-            relatedType: 'b2b_job',
-            priority: 'high'
-          });
-        } catch (_) {
-          /* non-blocking */
-        }
-      }
-      console.log(`[Matching] Wave ${waveIndex + 1} notified ${newVendorIds.length} new vendor(s) for ${b2bJob.jobId}`);
+  // Vendor routing runs alongside the freelancer waves: vendors whose declared
+  // coverage (service + pincode/city) includes this job and who have a skilled
+  // engineer receive the request in their "New Requests" queue, then pick their
+  // own engineer. Coverage is required — proximity alone never routes to a vendor.
+  if (waveIndex === 0) {
+    try {
+      const { offerToEligibleVendors } = require('./jobRouting.service');
+      const { notified, ranking } = await offerToEligibleVendors(b2bJob._id);
+      console.log(
+        `[Matching] ${b2bJob.jobId}: offered to ${notified.length} vendor(s)` +
+          (notified.length ? '' : ` — ${ranking?.reason || 'none eligible'}`)
+      );
+    } catch (vendorErr) {
+      console.warn('[Matching] Vendor routing failed (non-blocking):', vendorErr.message);
     }
-  } catch (vendorErr) {
-    console.warn('[Matching] Vendor discovery failed (non-blocking):', vendorErr.message);
   }
 
   console.log(
@@ -345,256 +319,224 @@ const dispatchWave = async (jobId, waveIndex = 0) => {
 };
 
 /**
- * Finalize assignment of a B2B job to a specific engineer and issue start OTP to
- * customer. Atomically gated so only one caller can ever win a given job — used
- * both by the engineer's own accept action and by admin manual assignment.
+ * Hand a job to a specific engineer. Kept for callers of the old matcher API;
+ * the work — eligibility, append-only JobAssignment, validated transition,
+ * notifications — is done by services/jobAssignment.service.js.
  */
-const assignJobToEngineer = async (b2bJob, engineer, radiusKm = null, waveNumber = null) => {
-  const claimed = await B2BJob.findOneAndUpdate(
-    { _id: b2bJob._id, status: { $in: ['pending', 'searching_engineer'] }, assignedTo: null },
-    { $set: { status: 'assigned', assignedTo: engineer._id, assignedToName: engineer.name } }
-  );
-  if (!claimed) {
-    console.log(`[Matching] Job ${b2bJob.jobId} no longer assignable (already claimed or closed)`);
-    return { ok: false, reason: 'unavailable' };
-  }
-
-  const fresh = await B2BJob.findById(b2bJob._id);
-  const startOtp = generateStartOtp();
-
-  fresh.trackingStatus = 'assigned';
-  fresh.assignedAt = new Date();
-  fresh.startOtp = startOtp;
-  fresh.startOtpSentAt = new Date();
-  fresh.allocationStage = 'allocated';
-  fresh.allocationReason = `Assigned to ${engineer.name}`;
-  fresh.allocationUpdatedAt = new Date();
-  await fresh.save();
-
-  await JobHistory.create({
-    jobId: fresh._id,
-    status: 'assigned',
-    remark: `Allocated to ${engineer.name}${radiusKm ? ` @ wave ${waveNumber} (${radiusKm}km)` : ''}. Start OTP issued.`,
-    role: 'system'
-  });
-
-  if (fresh.phone) {
-    try {
-      const msg = `WBIPVTLTD: Your service start OTP for job ${fresh.jobId} is ${startOtp}. Share only with the engineer on site.`;
-      await sendSMS(fresh.phone, msg);
-    } catch (smsErr) {
-      console.warn(`[Matching] Start OTP SMS failed for ${fresh.jobId}:`, smsErr.message);
-      if (process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true') {
-        console.log(`[DEV] B2B Start OTP for ${fresh.jobId}: ${startOtp}`);
-      }
-    }
-  }
-
-  emitSocket(`b2b:${fresh.companyId.toString()}`, 'b2b:jobAssigned', {
-    jobId: fresh.jobId,
-    engineerName: engineer.name,
-    engineerPhone: engineer.phone,
-    waveNumber,
-    radiusKm
-  });
-
-  emitSocket(`worker:${engineer._id.toString()}`, 'engineer:jobAssigned', {
-    jobId: fresh.jobId,
-    mongoId: fresh._id.toString(),
-    customerName: fresh.customerName,
-    address: fresh.address,
-    preferredDate: fresh.preferredDate,
-    service: fresh.service
-  });
-
-  emitSocket(`engineer:${engineer._id.toString()}`, 'engineer:jobAssigned', {
-    jobId: fresh.jobId,
-    mongoId: fresh._id.toString(),
-    customerName: fresh.customerName,
-    address: fresh.address,
-    preferredDate: fresh.preferredDate,
-    service: fresh.service
-  });
-
+const assignJobToEngineer = async (b2bJob, engineer, _radiusKm = null, _waveNumber = null, actor = { role: 'system' }) => {
+  const { assignEngineer } = require('./jobAssignment.service');
   try {
-    const { notifyEngineer } = require('./engineerNotify.service');
-    await notifyEngineer(engineer._id, {
-      type: 'worker_assigned',
-      pushType: 'b2b_job_assigned',
-      category: 'jobs',
-      title: 'B2B job assigned',
-      message: `${fresh.service || 'Job'} ${fresh.jobId} — head to site`,
-      relatedId: fresh._id,
-      relatedType: 'b2b_job',
-      priority: 'high',
-      data: { jobId: fresh.jobId }
+    const { job } = await assignEngineer({
+      jobId: b2bJob._id,
+      engineerId: engineer._id,
+      actor,
+      reason: actor.role === 'admin' ? 'Manually assigned by admin' : 'Assigned by routing',
+      routingMode: actor.role === 'system' ? 'auto' : 'manual'
     });
-  } catch (_) {
-    /* non-blocking */
+    return { ok: true, job };
+  } catch (err) {
+    console.log(`[Matching] Job ${b2bJob.jobId} not assignable to ${engineer.name}: ${err.message}`);
+    return { ok: false, reason: err.code || 'unavailable', message: err.message, status: err.status };
   }
+};
 
-  // Tell the rest of the broadcast wave the job is gone so their offer UI clears.
-  const losers = (fresh.notifiedEngineers || []).filter((id) => String(id) !== String(engineer._id));
-  for (const loserId of losers) {
-    emitSocket(`worker:${loserId}`, 'engineer:b2bJobOfferClosed', { jobId: fresh.jobId, mongoId: String(fresh._id) });
-    emitSocket(`engineer:${loserId}`, 'engineer:b2bJobOfferClosed', { jobId: fresh.jobId, mongoId: String(fresh._id) });
+/** Engineer accepts a broadcast offer — first acceptance wins (atomic). */
+const acceptB2BJobOffer = async (jobId, engineerId) => {
+  const { acceptAssignment } = require('./jobAssignment.service');
+  try {
+    const job = await acceptAssignment({ jobId, engineerId });
+    return { ok: true, job };
+  } catch (err) {
+    return { ok: false, status: err.status || 409, message: err.message };
   }
+};
 
-  console.log(`[Matching] Assigned Job ${fresh.jobId} → ${engineer.name} (OTP issued)`);
-  return { ok: true, job: fresh };
+const VENDOR_OFFER_TIMEOUT_MS = Math.max(
+  60000,
+  parseInt(process.env.JOB_VENDOR_OFFER_TIMEOUT_MS || String(30 * 60 * 1000), 10)
+);
+
+/** Escalate to the unassigned queue if no offered vendor claims the job in time. */
+const scheduleVendorOfferTimeout = (jobId, delayMs = VENDOR_OFFER_TIMEOUT_MS) =>
+  b2bMatchingQueue.add(
+    'vendorOfferTimeout',
+    { jobId: String(jobId) },
+    { delay: delayMs, jobId: `b2b-vendor-timeout-${jobId}-${Date.now()}` }
+  );
+
+/** Vendors that were offered the job and have not declined it. */
+const pendingVendorOffers = (job) => {
+  const declined = new Set((job.vendorRejections || []).map((r) => String(r.vendorId)));
+  return (job.notifiedVendors || []).map(String).filter((v) => !declined.has(v));
 };
 
 /**
- * Engineer accepts a broadcast offer for a B2B job. First to accept wins; the
- * atomic guard lives in assignJobToEngineer, so this just validates the caller
- * is eligible and was actually part of the wave that got the offer.
+ * Park an unroutable job in the unassigned queue (UNASSIGNED) with a stated
+ * reason, return its escrow and alert admin + the company. Never silent.
  */
-const acceptB2BJobOffer = async (jobId, engineerId) => {
-  const b2bJob = await B2BJob.findById(jobId).select('_id jobId status assignedTo notifiedEngineers companyId');
-  if (!b2bJob) return { ok: false, status: 404, message: 'Job not found' };
-  if (b2bJob.assignedTo || !['pending', 'searching_engineer'].includes(b2bJob.status)) {
-    return { ok: false, status: 409, message: 'This job has already been assigned to another engineer' };
-  }
+const escalateToUnassignedQueue = async (jobId, reason) => {
+  const { transitionJob, lifecycleOf } = require('./jobLifecycle.service');
+  const { LIFECYCLE } = require('./jobStateMachine');
+  const job = await B2BJob.findById(jobId).read('primary').lean();
+  if (!job || job.assignedTo || job.assignedVendorId) return null;
+  if (lifecycleOf(job) === LIFECYCLE.UNASSIGNED) return job;
 
-  const notified = (b2bJob.notifiedEngineers || []).map((id) => id.toString());
-  if (notified.length && !notified.includes(String(engineerId))) {
-    return { ok: false, status: 403, message: 'You were not offered this job' };
-  }
-
-  const engineer = await Engineer.findById(engineerId).select('name phone approvalStatus isActive');
-  if (!engineer) return { ok: false, status: 404, message: 'Engineer not found' };
-  if (engineer.approvalStatus !== 'approved' || engineer.isActive === false) {
-    return { ok: false, status: 403, message: 'Your account is not approved/active' };
-  }
-
-  const result = await assignJobToEngineer(b2bJob, engineer);
-  if (!result.ok) {
-    return { ok: false, status: 409, message: 'This job has already been assigned to another engineer' };
-  }
-  return { ok: true, job: result.job };
-};
-
-const handleMatchingFailure = async (b2bJob, reason) => {
-  // Fallback: vendor marketplace → freelancer pool (via assignment engine) before admin escalation
-  let escalationReason = reason;
-  try {
-    const { createOpportunityFromB2BJob } = require('../utils/createOpportunityFromEnquiry');
-    const EnterpriseProjectFlow = require('../models/EnterpriseProjectFlow');
-    const result = await createOpportunityFromB2BJob(b2bJob);
-
-    // Admin must add the missing catalog category — routing it anywhere else
-    // would send the job to an unrelated vendor pool.
-    if (result?.unmatchedCategory) {
-      escalationReason = `No service category configured for "${b2bJob.service}". Add it in the service catalog, then retry matching.`;
-    }
-    if (result?.opportunity) {
-      b2bJob.status = 'pending';
-      b2bJob.allocationStage = 'vendor_marketplace';
-      b2bJob.allocationReason = `No engineer accepted (${reason}). Offered to ${result.eligibleCount || 0} vendor(s).`;
-      b2bJob.allocationUpdatedAt = new Date();
-      await b2bJob.save();
-
-      await JobHistory.create({
-        jobId: b2bJob._id,
-        status: 'pending',
-        remark: `Engineer matching failed (${reason}). Escalated to vendor marketplace (${result.eligibleCount || 0} eligible).`,
-        role: 'system'
-      });
-
-      const flow = await EnterpriseProjectFlow.findOne({ b2bJobId: b2bJob._id });
-      if (flow) {
-        flow.opportunityId = result.opportunity._id;
-        flow.status = 'assignment_active';
-        flow.timeline = flow.timeline || [];
-        flow.timeline.push({
-          key: 'vendor_fallback',
-          label: 'Engineer waves exhausted — routed to vendor marketplace',
-          at: new Date(),
-          meta: { reason, eligibleCount: result.eligibleCount || 0 }
-        });
-        await flow.save();
-      }
-
-      emitSocket(`b2b:${b2bJob.companyId.toString()}`, 'b2b:jobVendorFallback', {
-        jobId: b2bJob.jobId,
-        reason,
-        eligibleCount: result.eligibleCount || 0
-      });
-      emitSocket('admin', 'admin:matchingVendorFallback', {
-        jobId: b2bJob.jobId,
-        companyId: b2bJob.companyId,
-        reason,
-        eligibleCount: result.eligibleCount || 0
-      });
-
-      console.warn(`[Matching] ${b2bJob.jobId} engineer fail → vendor marketplace (${result.eligibleCount || 0})`);
-      return;
-    }
-  } catch (fallbackErr) {
-    console.warn(`[Matching] Vendor fallback failed for ${b2bJob.jobId}:`, fallbackErr.message);
-  }
-
-  b2bJob.status = 'escalated';
-  b2bJob.allocationStage = 'admin_escalation';
-  b2bJob.allocationReason = String(escalationReason || 'Allocation failed').slice(0, 300);
-  b2bJob.allocationUpdatedAt = new Date();
-  await b2bJob.save();
-
-  try {
-    const { refundB2BJobEscrow } = require('./escrowReleaseEngine.service');
-    await refundB2BJobEscrow({
-      jobId: b2bJob._id,
-      reason: `matching_escalated:${escalationReason}`
-    });
-  } catch (refundErr) {
-    console.warn(`[Matching] Escrow refund on escalate failed for ${b2bJob.jobId}:`, refundErr.message);
-  }
-
-  await JobHistory.create({
-    jobId: b2bJob._id,
-    status: 'escalated',
-    remark: `Allocation failed: ${escalationReason}. Admin escalation required. Escrow returned to wallet.`,
-    role: 'system'
+  const message = String(reason || 'No vendor or engineer accepted this job').slice(0, 300);
+  const updated = await transitionJob({
+    jobId: job._id,
+    to: LIFECYCLE.UNASSIGNED,
+    actor: { role: 'system' },
+    reason: `Unassigned: ${message}`,
+    event: 'ROUTING_EXHAUSTED',
+    filter: { assignedTo: null, assignedVendorId: null },
+    patch: {
+      assignmentType: 'unassigned',
+      allocationStage: 'admin_escalation',
+      allocationReason: message,
+      allocationUpdatedAt: new Date(),
+      unassignedReason: message,
+      unassignedAt: new Date()
+    },
+    meta: { reason: message }
   });
+
+  // The reservation is NOT released here: the job is still live and will be
+  // retried, re-routed or assigned by hand. Cancelling it releases the money.
 
   try {
     const EnterpriseProjectFlow = require('../models/EnterpriseProjectFlow');
     await EnterpriseProjectFlow.updateOne(
-      { b2bJobId: b2bJob._id },
+      { b2bJobId: job._id },
       {
         $set: { status: 'admin_escalation' },
-        $push: {
-          timeline: {
-            key: 'admin_escalation',
-            label: `Matching failed: ${escalationReason}`,
-            at: new Date(),
-            meta: { reason: escalationReason }
-          }
-        }
+        $push: { timeline: { key: 'admin_escalation', label: `Unassigned: ${message}`, at: new Date(), meta: { reason: message } } }
       }
     );
   } catch (_) { /* non-blocking */ }
 
-  emitSocket('admin', 'admin:matchingFailed', {
-    jobId: b2bJob.jobId,
-    companyId: b2bJob.companyId,
-    reason: escalationReason
-  });
-  emitSocket('admin-room', 'admin:b2bJobEscalated', {
-    jobId: b2bJob.jobId,
-    mongoId: String(b2bJob._id),
-    companyId: String(b2bJob.companyId),
-    service: b2bJob.service,
-    city: b2bJob.city,
-    reason: escalationReason
-  });
+  const alert = {
+    jobId: job.jobId,
+    mongoId: String(job._id),
+    companyId: String(job.companyId),
+    service: job.service,
+    serviceKey: job.serviceKey,
+    city: job.city,
+    pincode: job.pincode,
+    reason: message
+  };
+  emitSocket('admin', 'admin:matchingFailed', alert);
+  emitSocket('admin', 'admin:b2bJobEscalated', alert);
+  emitSocket(`b2b:${String(job.companyId)}`, 'b2b:jobEscalated', { jobId: job.jobId, reason: message });
+  console.warn(`[Matching] Unassigned ${job.jobId}: ${message}`);
+  return updated;
+};
 
-  emitSocket(`b2b:${b2bJob.companyId.toString()}`, 'b2b:jobEscalated', {
-    jobId: b2bJob.jobId,
-    reason: escalationReason
-  });
+/**
+ * Freelancer waves are exhausted. If vendors still hold an open offer, keep
+ * the job routed and wait (bounded by VENDOR_OFFER_TIMEOUT_MS); otherwise try
+ * any remaining eligible vendors; otherwise park it in the unassigned queue.
+ */
+const handleMatchingFailure = async (b2bJob, reason) => {
+  const job = await B2BJob.findById(b2bJob._id).read('primary').lean();
+  if (!job || job.assignedTo || job.assignedVendorId) return;
 
-  console.warn(`[Matching] Escalated ${b2bJob.jobId}: ${escalationReason}`);
+  let pending = pendingVendorOffers(job);
+  let vendorReason = null;
+  if (!pending.length) {
+    const { offerToEligibleVendors } = require('./jobRouting.service');
+    const { notified, ranking } = await offerToEligibleVendors(job._id);
+    pending = notified;
+    vendorReason = ranking?.reason || null;
+  }
+
+  if (pending.length) {
+    await B2BJob.updateOne(
+      { _id: job._id },
+      {
+        $set: {
+          allocationStage: 'vendor_marketplace',
+          allocationReason: `No freelancer accepted (${reason}). Waiting for ${pending.length} vendor(s) to accept.`,
+          allocationUpdatedAt: new Date(),
+          vendorOfferExpiresAt: new Date(Date.now() + VENDOR_OFFER_TIMEOUT_MS)
+        }
+      }
+    );
+    await scheduleVendorOfferTimeout(job._id);
+    emitSocket(`b2b:${String(job.companyId)}`, 'b2b:jobVendorFallback', {
+      jobId: job.jobId,
+      reason,
+      eligibleCount: pending.length
+    });
+    return;
+  }
+
+  await escalateToUnassignedQueue(job._id, [vendorReason, reason].filter(Boolean).join('. '));
+};
+
+/** Vendors were offered the job but none claimed it in time. */
+const handleVendorOfferTimeout = async (jobId) => {
+  const { lifecycleOf } = require('./jobLifecycle.service');
+  const { LIFECYCLE } = require('./jobStateMachine');
+  const job = await B2BJob.findById(jobId).read('primary').lean();
+  if (!job || job.assignedTo || job.assignedVendorId || lifecycleOf(job) !== LIFECYCLE.ROUTED) return;
+  // A newer deadline was set (e.g. the job was handed back and re-offered):
+  // this timer belongs to an earlier offer round.
+  if (job.vendorOfferExpiresAt && job.vendorOfferExpiresAt.getTime() > Date.now() + 5000) return;
+  const offered = (job.notifiedVendors || []).length;
+  await escalateToUnassignedQueue(
+    job._id,
+    `${offered} vendor(s) were offered this job and none accepted within ${Math.round(VENDOR_OFFER_TIMEOUT_MS / 60000)} minutes`
+  );
+};
+
+/**
+ * A vendor declined an offer. If every offered vendor has now declined and
+ * the freelancer waves are already done, the job goes to the unassigned queue.
+ */
+const onVendorOfferDeclined = async (jobId) => {
+  const job = await B2BJob.findById(jobId).read('primary').lean();
+  if (!job || job.assignedTo || job.assignedVendorId) return;
+  if (pendingVendorOffers(job).length) return;
+  if (job.allocationStage !== 'vendor_marketplace') return; // waves still running
+  await handleMatchingFailure(job, 'every offered vendor declined');
+};
+
+/**
+ * A vendor handed back a job it had accepted. Vendors whose offer is still
+ * open see it again (and are told live) with a fresh deadline; if none is
+ * left, routing offers it to other eligible vendors or escalates it.
+ */
+const reopenVendorOffers = async (jobId, reason) => {
+  const job = await B2BJob.findById(jobId).read('primary').lean();
+  if (!job || job.assignedTo || job.assignedVendorId) return { reopenedFor: [] };
+  const pending = pendingVendorOffers(job);
+  if (!pending.length) {
+    await handleMatchingFailure(job, reason);
+    return { reopenedFor: [] };
+  }
+  await B2BJob.updateOne(
+    { _id: job._id },
+    {
+      $set: {
+        allocationStage: 'vendor_marketplace',
+        allocationReason: `${reason}. Re-offered to ${pending.length} vendor(s).`,
+        allocationUpdatedAt: new Date(),
+        vendorOfferExpiresAt: new Date(Date.now() + VENDOR_OFFER_TIMEOUT_MS)
+      }
+    }
+  );
+  await scheduleVendorOfferTimeout(job._id);
+  pending.forEach((vid) => emitSocket(`vendor:${vid}`, 'b2b:jobRequestReceived', {
+    jobId: job.jobId,
+    mongoId: String(job._id),
+    service: job.service,
+    serviceKey: job.serviceKey,
+    city: job.city,
+    pincode: job.pincode,
+    charge: job.charge,
+    reopened: true
+  }));
+  return { reopenedFor: pending };
 };
 
 /**
@@ -607,6 +549,11 @@ const initMatchingWorker = (app) => {
     'b2b-matching-queue',
     async (job) => {
       const { jobId, waveIndex = 0 } = job.data;
+
+      if (job.name === 'vendorOfferTimeout') {
+        await handleVendorOfferTimeout(jobId);
+        return;
+      }
 
       if (job.name === 'processWaveTimeout') {
         const b2bJob = await B2BJob.findById(jobId);
@@ -649,6 +596,13 @@ module.exports = {
   dispatchWave,
   assignJobToEngineer,
   acceptB2BJobOffer,
+  handleMatchingFailure,
+  escalateToUnassignedQueue,
+  onVendorOfferDeclined,
+  reopenVendorOffers,
+  pendingVendorOffers,
+  scheduleVendorOfferTimeout,
+  VENDOR_OFFER_TIMEOUT_MS,
   B2B_WAVE_RADII_KM,
   B2B_WAVE_TIMEOUT_MS
 };

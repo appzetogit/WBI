@@ -24,13 +24,6 @@ function getDatesInRange(startDate, endDate) {
   return dates;
 }
 
-// Helper to check if the target range is the May 2025 reference range
-const checkIsMay2025 = (start, end) => {
-  const s = new Date(start);
-  const e = new Date(end);
-  return s.getFullYear() === 2025 && s.getMonth() === 4 && e.getFullYear() === 2025 && e.getMonth() === 4;
-};
-
 /**
  * GET B2B Dashboard Summary
  */
@@ -42,20 +35,6 @@ const getDashboardSummary = async (req, res) => {
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     
     // Check if matching reference May 2025
-    if (checkIsMay2025(start, end)) {
-      return res.status(200).json({
-        success: true,
-        data: {
-          totalJobs: { value: 1245, change: 12.5, status: 'increase' },
-          inProgress: { value: 210, change: 8.2, status: 'increase' },
-          completed: { value: 943, change: 16.3, status: 'increase' },
-          pending: { value: 92, change: -3.6, status: 'decrease' },
-          totalSpent: { value: 245680, change: 18.7, status: 'increase' },
-          walletBalance: { value: 154320, change: 0, status: 'increase' }
-        }
-      });
-    }
-
     const duration = end.getTime() - start.getTime();
     let prevStart = new Date(start.getTime() - duration);
     let prevEnd = new Date(start.getTime());
@@ -157,20 +136,6 @@ const getJobsOverview = async (req, res) => {
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    if (checkIsMay2025(start, end)) {
-      // Mock exact curve points from reference UI
-      const mockCurve = [
-        { date: 'May 01', Completed: 70, 'In Progress': 30, Pending: 10 },
-        { date: 'May 06', Completed: 190, 'In Progress': 90, Pending: 20 },
-        { date: 'May 11', Completed: 250, 'In Progress': 140, Pending: 35 },
-        { date: 'May 16', Completed: 310, 'In Progress': 180, Pending: 60 },
-        { date: 'May 21', Completed: 240, 'In Progress': 150, Pending: 30 },
-        { date: 'May 26', Completed: 370, 'In Progress': 230, Pending: 90 },
-        { date: 'May 31', Completed: 330, 'In Progress': 200, Pending: 65 }
-      ];
-      return res.status(200).json({ success: true, data: mockCurve });
-    }
-
     const aggregates = await B2BJob.aggregate([
       {
         $match: {
@@ -232,20 +197,6 @@ const getJobsStatusDistribution = async (req, res) => {
     
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-    if (checkIsMay2025(start, end)) {
-      return res.status(200).json({
-        success: true,
-        data: {
-          total: 1245,
-          distribution: [
-            { name: 'Completed', value: 943, percentage: 75.7, color: '#10AFA5' },
-            { name: 'In Progress', value: 210, percentage: 16.8, color: '#F59E0B' },
-            { name: 'Pending', value: 92, percentage: 7.4, color: '#8B5CF6' }
-          ]
-        }
-      });
-    }
 
     const aggregates = await B2BJob.aggregate([
       {
@@ -312,17 +263,6 @@ const getRecentJobs = async (req, res) => {
     let end = req.query.endDate ? new Date(req.query.endDate) : new Date();
     let start = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    if (checkIsMay2025(start, end)) {
-      const mockRecent = [
-        { _id: '1', jobId: 'JOB-1250', service: 'AC Repair', location: 'Navi Mumbai', priority: 'High', assignedTo: 'Rahul Sharma', status: 'in_progress', charge: 4500, date: new Date('2025-05-31T10:30:00') },
-        { _id: '2', jobId: 'JOB-1249', service: 'Plumbing', location: 'Pune', priority: 'Medium', assignedTo: 'Suresh Yadav', status: 'completed', charge: 2200, date: new Date('2025-05-31T16:00:00') },
-        { _id: '3', jobId: 'JOB-1248', service: 'Electrician', location: 'Thane', priority: 'Low', assignedTo: 'Amit Singh', status: 'in_progress', charge: 1800, date: new Date('2025-05-30T11:00:00') },
-        { _id: '4', jobId: 'JOB-1247', service: 'Pest Control', location: 'Mumbai', priority: 'High', assignedTo: 'Vikas Patel', status: 'pending', charge: 3500, date: new Date('2025-05-30T09:30:00') },
-        { _id: '5', jobId: 'JOB-1246', service: 'Washing Machine', location: 'Navi Mumbai', priority: 'Medium', assignedTo: 'Karan Mehta', status: 'completed', charge: 2800, date: new Date('2025-05-29T14:00:00') }
-      ];
-      return res.status(200).json({ success: true, data: mockRecent });
-    }
-
     const jobs = await B2BJob.find({
       companyId,
       date: { $gte: start, $lte: end }
@@ -375,353 +315,294 @@ const getWalletBalance = async (req, res) => {
   }
 };
 
-const getEngineers = async (req, res) => {
-  try {
-    const engineers = await B2BEngineerAssignment.find({ companyId: req.companyId });
-    res.status(200).json({
-      success: true,
-      data: engineers
-    });
-  } catch (error) {
-    console.error('B2B Get Engineers Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve engineers list',
-      error: error.message
-    });
-  }
-};
 
-const getUsers = async (req, res) => {
-  try {
-    const company = await B2BCompany.findById(req.companyId);
-    if (!company) {
-      return res.status(404).json({
-        success: false,
-        message: 'Company not found'
-      });
-    }
 
-    const users = [
-      {
-        id: 'USR-001',
-        name: company.authorizedPerson.name,
-        email: company.authorizedPerson.email,
-        phone: company.authorizedPerson.phone,
-        role: company.authorizedPerson.designation || 'Super Admin',
-        status: 'Active'
-      },
-      {
-        id: 'USR-002',
-        name: 'Aditya Sen',
-        email: 'aditya.sen@techsolve.in',
-        phone: '9820123456',
-        role: 'Branch Manager',
-        status: 'Active'
-      }
-    ];
-
-    res.status(200).json({
-      success: true,
-      data: users
-    });
-  } catch (error) {
-    console.error('B2B Get Users Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve portal users list',
-      error: error.message
-    });
-  }
-};
-
-const getCompanyJobs = async (req, res) => {
-  try {
-    const { status, search, batchId, page = 1, limit = 15 } = req.query;
-    const query = { companyId: req.companyId };
-    
-    if (batchId) {
-      query.batchId = batchId;
-    }
-    
-    if (status && status !== 'all') {
-      // Map frontend status standard
-      if (status === 'in-progress') {
-        query.status = 'in_progress';
-      } else {
-        query.status = status;
-      }
-    }
-    
-    if (search) {
-      query.$or = [
-        { jobId: { $regex: search, $options: 'i' } },
-        { service: { $regex: search, $options: 'i' } },
-        { customerName: { $regex: search, $options: 'i' } },
-        { city: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skipNum = (pageNum - 1) * limitNum;
-
-    const jobs = await B2BJob.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skipNum)
-      .limit(limitNum);
-
-    const total = await B2BJob.countDocuments(query);
-
-    res.status(200).json({
-      success: true,
-      data: jobs,
-      pagination: {
-        page: pageNum,
-        limit: limitNum,
-        total,
-        totalPages: Math.ceil(total / limitNum)
-      }
-    });
-  } catch (error) {
-    console.error('B2B Get Company Jobs Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve jobs list',
-      error: error.message
-    });
-  }
-};
 
 /**
  * NEW INTELLIGENCE APIs FOR B2B COMMAND CENTER
  */
 
-// 1. Executive Metrics
+// 1. Executive Metrics — this month's closures, SLA attainment and wallet runway.
+//    Every figure is computed; with no data a figure is 0 or null, never invented.
+const { viewFilter } = require('../../services/b2bJobViews');
+const walletLedger = require('../../services/b2bWalletLedger.service');
+
+const monthBounds = (offset = 0) => {
+  const now = new Date();
+  return {
+    start: new Date(now.getFullYear(), now.getMonth() + offset, 1),
+    end: new Date(now.getFullYear(), now.getMonth() + offset + 1, 1)
+  };
+};
+const pctTrend = (curr, prev) => {
+  if (!prev) return curr ? 'New this month' : null;
+  const p = Math.round(((curr - prev) / prev) * 100);
+  return `${p >= 0 ? '+' : ''}${p}% vs last month`;
+};
+
 const getExecutiveMetrics = async (req, res) => {
   try {
     const companyId = new mongoose.Types.ObjectId(req.companyId);
-    
-    const [jobs, wallet, transactions, walletGate] = await Promise.all([
-      B2BJob.find({ companyId }),
-      B2BWallet.findOne({ companyId }),
-      B2BWalletTransaction.find({ companyId, type: 'job_deduction' }),
-      getPendingWalletGate(req.companyId)
+    const thisMonth = monthBounds(0);
+    const lastMonth = monthBounds(-1);
+    const resolved = viewFilter('resolved');
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
+
+    const slaGroup = {
+      _id: null,
+      closed: { $sum: 1 },
+      withSla: { $sum: { $cond: [{ $ne: [{ $ifNull: ['$sla.resolutionDueAt', null] }, null] }, 1, 0] } },
+      breached: { $sum: { $cond: [{ $gt: [{ $size: { $ifNull: ['$sla.breaches', []] } }, 0] }, 1, 0] } }
+    };
+
+    const [curr, prev, spendAgg, balance, walletGate, company] = await Promise.all([
+      B2BJob.aggregate([{ $match: { companyId, updatedAt: { $gte: thisMonth.start, $lt: thisMonth.end }, ...resolved } }, { $group: slaGroup }]),
+      B2BJob.aggregate([{ $match: { companyId, updatedAt: { $gte: lastMonth.start, $lt: lastMonth.end }, ...resolved } }, { $group: slaGroup }]),
+      B2BWalletTransaction.aggregate([
+        {
+          $match: {
+            companyId,
+            status: { $nin: ['failed', 'pending'] },
+            $or: [{ ledgerType: 'JOB_CHARGE' }, { ledgerType: null, type: 'job_deduction' }],
+            createdAt: { $gte: thirtyDaysAgo }
+          }
+        },
+        { $group: { _id: null, total: { $sum: { $abs: { $ifNull: ['$totalAmount', '$amount'] } } } } }
+      ]),
+      walletLedger.getBalance(req.companyId),
+      getPendingWalletGate(req.companyId),
+      B2BCompany.findById(companyId).select('slaProfile').lean()
     ]);
 
-    const callsCompleted = jobs.filter(j => j.status === 'completed').length;
-    const slaBreached = jobs.filter(j => j.status === 'completed' && j.completedAt && j.startedAt && ((j.completedAt - j.startedAt) / 3600000) > (j.slaTarget || 24)).length;
-    const slaMet = callsCompleted - slaBreached;
-    const slaRate = callsCompleted > 0 ? ((slaMet / callsCompleted) * 100).toFixed(1) : 0;
-    
-    const spentThisPeriod = transactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
-    const balance = wallet ? wallet.balance : 0;
+    const c = curr[0] || { closed: 0, withSla: 0, breached: 0 };
+    const p = prev[0] || { closed: 0, withSla: 0, breached: 0 };
+    const rate = (g) => (g.withSla ? Math.round(((g.withSla - g.breached) / g.withSla) * 1000) / 10 : null);
+    const spent30 = Math.round((spendAgg[0]?.total || 0) * 100) / 100;
+    const burnRatePerDay = Math.round(spent30 / 30);
+    const currentRate = rate(c);
+    const prevRate = rate(p);
 
     res.status(200).json({
       success: true,
       data: {
         callsCompleted: {
-          value: callsCompleted || 0,
-          target: callsCompleted > 0 ? callsCompleted + 10 : 1500,
-          trend: '+0%',
-          label: 'Total closures this month'
+          value: c.closed,
+          previous: p.closed,
+          trend: pctTrend(c.closed, p.closed),
+          label: 'Jobs resolved this month'
         },
         slaCompliance: {
-          rate: slaRate || 94.2,
-          breached: slaBreached || 72,
-          met: slaMet || 1173,
-          trend: '+0%',
-          label: 'Vs 24hr SLA Target'
+          rate: currentRate,
+          breached: c.breached,
+          met: c.withSla - c.breached,
+          tracked: c.withSla,
+          trend: currentRate !== null && prevRate !== null
+            ? `${currentRate - prevRate >= 0 ? '+' : ''}${Math.round((currentRate - prevRate) * 10) / 10} pts vs last month`
+            : null,
+          label: company?.slaProfile ? `Against the ${company.slaProfile} SLA profile` : 'Against your SLA profile'
         },
         walletUtilization: {
-          currentBalance: balance || 0,
-          spentThisPeriod: spentThisPeriod || 0,
-          burnRatePerDay: spentThisPeriod > 0 ? Math.round(spentThisPeriod / 30) : 0,
-          daysUntilTopup: balance > 0 && spentThisPeriod > 0 ? Math.round(balance / (spentThisPeriod / 30)) : 0,
-          label: 'Runway based on run rate'
+          currentBalance: balance.available,
+          reserved: balance.reserved,
+          spendable: balance.spendable,
+          spentThisPeriod: spent30,
+          burnRatePerDay,
+          daysUntilTopup: burnRatePerDay > 0 ? Math.floor(balance.spendable / burnRatePerDay) : null,
+          label: 'Runway at the last 30 days\' spend'
         },
         walletGate
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('[B2B Dashboard executive metrics]', error);
+    res.status(500).json({ success: false, message: 'Failed to load executive metrics' });
   }
 };
 
-// 2. Geographic & Task Analytics
+// 2. Geographic & Task Analytics — volume by city and service; a city's risk is
+//    its SLA breach rate, not its rank.
 const getGeoTaskAnalytics = async (req, res) => {
   try {
     const companyId = new mongoose.Types.ObjectId(req.companyId);
-    
-    const cityAgg = await B2BJob.aggregate([
-      { $match: { companyId } },
-      { $group: { _id: "$city", volume: { $sum: 1 } } },
-      { $sort: { volume: -1 } },
-      { $limit: 5 }
+    const breachedExpr = { $cond: [{ $gt: [{ $size: { $ifNull: ['$sla.breaches', []] } }, 0] }, 1, 0] };
+
+    const [cityAgg, serviceAgg] = await Promise.all([
+      B2BJob.aggregate([
+        { $match: { companyId } },
+        { $group: { _id: '$city', volume: { $sum: 1 }, breached: { $sum: breachedExpr } } },
+        { $sort: { volume: -1 } },
+        { $limit: 8 }
+      ]),
+      B2BJob.aggregate([
+        { $match: { companyId } },
+        { $group: { _id: '$service', value: { $sum: 1 } } },
+        { $sort: { value: -1 } },
+        { $limit: 6 }
+      ])
     ]);
 
-    const serviceAgg = await B2BJob.aggregate([
-      { $match: { companyId } },
-      { $group: { _id: "$service", value: { $sum: 1 } } },
-      { $sort: { value: -1 } },
-      { $limit: 4 }
-    ]);
-
-    const colors = ['#10B981', '#EF4444', '#3B82F6', '#F59E0B'];
-    
-    const locationHeatmap = cityAgg.length > 0 ? cityAgg.map((c, i) => ({
-      city: c._id || 'Unknown',
-      volume: c.volume,
-      risk: i === 0 ? 'High' : (i < 3 ? 'Medium' : 'Low')
-    })) : [
-      { city: 'Mumbai (Mock)', volume: 450, risk: 'High' },
-      { city: 'Pune (Mock)', volume: 320, risk: 'Medium' }
-    ];
-
-    const taskBreakdown = serviceAgg.length > 0 ? serviceAgg.map((s, i) => ({
-      name: s._id || 'General',
-      value: s.value,
-      color: colors[i % colors.length]
-    })) : [
-      { name: 'Installation (Mock)', value: 45, color: '#10B981' },
-      { name: 'Break-Fix (Mock)', value: 30, color: '#EF4444' }
-    ];
-
-    res.status(200).json({
-      success: true,
-      data: { locationHeatmap, taskBreakdown }
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-// 3. Hardware Health & Repeated Call Deep-Dive
-const getHardwareHealth = async (req, res) => {
-  try {
-    const devices = await DeviceHistory.find({ companyId: req.companyId }).populate('jobHistory.jobId');
-    
-    const repeatedCalls = devices.filter(d => d.jobHistory.length >= 2).map(d => {
-      return {
-        deviceId: d.deviceId,
-        site: d.siteId || 'Unknown Site',
-        visitsIn30Days: d.jobHistory.length,
-        status: d.jobHistory.length > 3 ? 'Critical Alert' : 'Warning',
-        timeline: d.jobHistory.map(jh => ({
-          date: new Date(jh.date).toISOString().split('T')[0],
-          engineer: jh.engineerName || 'Unknown',
-          issue: jh.issueReported || 'N/A',
-          partsReplaced: jh.partsReplaced || 'None'
-        }))
-      };
-    });
+    const colors = ['#10B981', '#EF4444', '#3B82F6', '#F59E0B', '#8B5CF6', '#64748B'];
+    const riskOf = (breached, volume) => {
+      const r = volume ? breached / volume : 0;
+      if (r >= 0.2) return 'High';
+      if (r >= 0.05) return 'Medium';
+      return 'Low';
+    };
 
     res.status(200).json({
       success: true,
       data: {
-        repeatedCalls: repeatedCalls.length > 0 ? repeatedCalls : [
-          {
-            deviceId: 'DEV-88902 (Mock)',
-            site: 'HDFC Branch',
-            visitsIn30Days: 4,
-            status: 'Critical Alert',
-            timeline: [{ date: '2025-05-10', engineer: 'Rahul S.', issue: 'Power supply failure', partsReplaced: 'PSU-400W' }]
-          }
-        ]
+        locationHeatmap: cityAgg.map((c) => ({
+          city: c._id || 'Unspecified',
+          volume: c.volume,
+          breached: c.breached,
+          breachRate: c.volume ? Math.round((c.breached / c.volume) * 1000) / 10 : 0,
+          risk: riskOf(c.breached, c.volume)
+        })),
+        taskBreakdown: serviceAgg.map((s, i) => ({
+          name: s._id || 'Unspecified',
+          value: s.value,
+          color: colors[i % colors.length]
+        }))
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('[B2B Dashboard geo analytics]', error);
+    res.status(500).json({ success: false, message: 'Failed to load geographic analytics' });
   }
 };
 
-// 4. Financial & Accountability Logs
+// 3. Hardware Health — devices visited more than once in the last 30 days.
+const getHardwareHealth = async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 30 * 86400000);
+    const devices = await DeviceHistory.find({ companyId: req.companyId, 'jobHistory.1': { $exists: true } })
+      .sort({ updatedAt: -1 })
+      .limit(200)
+      .lean();
+
+    const repeatedCalls = devices
+      .map((d) => {
+        const recent = (d.jobHistory || []).filter((jh) => jh.date && new Date(jh.date) >= since);
+        return {
+          deviceId: d.deviceId,
+          site: d.siteId || 'Unknown site',
+          visitsIn30Days: recent.length,
+          status: recent.length > 3 ? 'Critical Alert' : 'Warning',
+          timeline: recent
+            .sort((a, b) => new Date(a.date) - new Date(b.date))
+            .map((jh) => ({
+              date: new Date(jh.date).toISOString().split('T')[0],
+              engineer: jh.engineerName || 'Unknown',
+              issue: jh.issueReported || 'N/A',
+              partsReplaced: jh.partsReplaced || 'None'
+            }))
+        };
+      })
+      .filter((d) => d.visitsIn30Days >= 2)
+      .sort((a, b) => b.visitsIn30Days - a.visitsIn30Days)
+      .slice(0, 20);
+
+    res.status(200).json({ success: true, data: { repeatedCalls } });
+  } catch (error) {
+    console.error('[B2B Dashboard hardware health]', error);
+    res.status(500).json({ success: false, message: 'Failed to load hardware health' });
+  }
+};
+
+// 4. Financial & Accountability Logs — deductions and why they were made.
 const getFinancialLogs = async (req, res) => {
   try {
     const companyId = new mongoose.Types.ObjectId(req.companyId);
-    
-    const deductions = await DeductionLedger.find({ companyId }).populate('jobId').populate('engineerId');
-    
-    const reasonAgg = await DeductionLedger.aggregate([
-      { $match: { companyId } },
-      { $group: { _id: "$reasonCode", amount: { $sum: "$amount" }, count: { $sum: 1 } } }
+
+    const [deductions, reasonAgg] = await Promise.all([
+      DeductionLedger.find({ companyId })
+        .sort({ deductedAt: -1 })
+        .limit(50)
+        .populate('jobId', 'jobId')
+        .populate('engineerId', 'firstName lastName name')
+        .lean(),
+      DeductionLedger.aggregate([
+        { $match: { companyId } },
+        { $group: { _id: '$reasonCode', amount: { $sum: '$amount' }, count: { $sum: 1 } } },
+        { $sort: { amount: -1 } }
+      ])
     ]);
-
-    const reasonCodes = reasonAgg.length > 0 ? reasonAgg.map(r => ({
-      reason: r._id,
-      amount: r.amount,
-      count: r.count
-    })) : [
-      { reason: 'Customer Dependency (Mock)', amount: 4500, count: 12 },
-      { reason: 'Spare Part Required (Mock)', amount: 3200, count: 8 }
-    ];
-
-    const deductionLedger = deductions.length > 0 ? deductions.map(d => ({
-      id: d._id,
-      jobId: d.jobId ? d.jobId.jobId : 'N/A',
-      date: new Date(d.deductedAt).toISOString().split('T')[0],
-      charge: d.amount,
-      reason: d.remarks || d.reasonCode,
-      engineer: d.engineerId ? `${d.engineerId.firstName} ${d.engineerId.lastName}` : 'N/A'
-    })) : [
-      { id: 'DED-001 (Mock)', jobId: 'JOB-9921', date: '2025-05-28', charge: 400, reason: 'Site not ready', engineer: 'Rahul S.' }
-    ];
 
     res.status(200).json({
       success: true,
-      data: { reasonCodes, deductionLedger }
+      data: {
+        reasonCodes: reasonAgg.map((r) => ({ reason: r._id || 'Unspecified', amount: r.amount, count: r.count })),
+        deductionLedger: deductions.map((d) => ({
+          id: d._id,
+          jobId: d.jobId?.jobId || 'N/A',
+          date: d.deductedAt ? new Date(d.deductedAt).toISOString().split('T')[0] : null,
+          charge: d.amount,
+          reason: d.remarks || d.reasonCode,
+          engineer: d.engineerId
+            ? (d.engineerId.name || [d.engineerId.firstName, d.engineerId.lastName].filter(Boolean).join(' '))
+            : 'N/A'
+        }))
+      }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('[B2B Dashboard financial logs]', error);
+    res.status(500).json({ success: false, message: 'Failed to load financial logs' });
   }
 };
 
-// 5. Workforce Quality Control
+// 5. Workforce Quality — why jobs were aborted, and how engineers were rated.
 const getWorkforceQuality = async (req, res) => {
   try {
     const companyId = new mongoose.Types.ObjectId(req.companyId);
-    
-    const aborts = await B2BJob.aggregate([
-      { $match: { companyId, status: 'failed', incompleteReason: { $ne: null } } },
-      { $group: { _id: "$incompleteReason", occurrences: { $sum: 1 } } }
+
+    const [aborts, ratingAgg] = await Promise.all([
+      B2BJob.aggregate([
+        { $match: { companyId, incompleteReason: { $ne: null }, ...viewFilter('failed') } },
+        { $group: { _id: '$incompleteReason', occurrences: { $sum: 1 } } },
+        { $sort: { occurrences: -1 } }
+      ]),
+      EngineerRating.aggregate([
+        { $match: { companyId } },
+        {
+          $group: {
+            _id: null,
+            count: { $sum: 1 },
+            overall: { $avg: '$averageRating' },
+            behavior: { $avg: '$metrics.behavior' },
+            slaAdherence: { $avg: '$metrics.slaAdherence' },
+            toolsCarried: { $avg: '$metrics.toolsCarried' },
+            ethics: { $avg: '$metrics.ethics' }
+          }
+        }
+      ])
     ]);
 
-    const ratings = await EngineerRating.find({ companyId });
-    
-    let overallAverage = 0, b = 0, s = 0, t = 0, e = 0;
-    if (ratings.length > 0) {
-      overallAverage = (ratings.reduce((sum, r) => sum + r.averageRating, 0) / ratings.length).toFixed(1);
-      b = (ratings.reduce((sum, r) => sum + r.metrics.behavior, 0) / ratings.length).toFixed(1);
-      s = (ratings.reduce((sum, r) => sum + r.metrics.slaAdherence, 0) / ratings.length).toFixed(1);
-      t = (ratings.reduce((sum, r) => sum + r.metrics.toolsCarried, 0) / ratings.length).toFixed(1);
-      e = (ratings.reduce((sum, r) => sum + r.metrics.ethics, 0) / ratings.length).toFixed(1);
-    }
+    const r = ratingAgg[0];
+    const one = (v) => (v === null || v === undefined ? null : Math.round(v * 10) / 10);
 
     res.status(200).json({
       success: true,
       data: {
         skillGaps: {
-          totalAborted: aborts.reduce((sum, a) => sum + a.occurrences, 0) || 18, // 18 is mock fallback
-          categories: aborts.length > 0 ? aborts.map(a => ({
-            skill: a._id, occurrences: a.occurrences
-          })) : [
-            { skill: 'Adv. Networking Config (Mock)', occurrences: 8 },
-            { skill: 'Proprietary Software (Mock)', occurrences: 3 }
-          ]
+          totalAborted: aborts.reduce((sum, a) => sum + a.occurrences, 0),
+          categories: aborts.map((a) => ({ skill: a._id, occurrences: a.occurrences }))
         },
         engineerRatings: {
-          overallAverage: overallAverage || 4.2,
+          ratingsCount: r?.count || 0,
+          overallAverage: one(r?.overall),
           metrics: {
-            behavior: b || 4.6,
-            slaAdherence: s || 4.1,
-            toolsCarried: t || 3.8,
-            ethics: e || 4.8
+            behavior: one(r?.behavior),
+            slaAdherence: one(r?.slaAdherence),
+            toolsCarried: one(r?.toolsCarried),
+            ethics: one(r?.ethics)
           }
         }
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('[B2B Dashboard workforce quality]', error);
+    res.status(500).json({ success: false, message: 'Failed to load workforce quality' });
   }
 };
 
@@ -731,9 +612,6 @@ module.exports = {
   getJobsStatusDistribution,
   getRecentJobs,
   getWalletBalance,
-  getEngineers,
-  getUsers,
-  getCompanyJobs,
   getExecutiveMetrics,
   getGeoTaskAnalytics,
   getHardwareHealth,

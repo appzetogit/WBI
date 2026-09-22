@@ -18,8 +18,10 @@ const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 /** Whitelist of writable fields — prevents mass-assignment of audit columns. */
 const WRITABLE = [
   'name', 'description', 'companyId', 'service', 'subService', 'categoryCode',
+  'serviceKey', 'subServiceKey', 'level', 'pricingProfile', 'contractId',
   'serviceTier', 'vendorId', 'region', 'baseAmount', 'serviceCharge',
-  'geographicSurcharge', 'additionalCharges', 'volumeDiscounts', 'taxPercent',
+  'geographicSurcharge', 'priorityCharges', 'slaCharge', 'emergencyCharge',
+  'afterHoursCharge', 'additionalCharges', 'volumeDiscounts', 'taxPercent',
   'taxLabel', 'vendorPayoutPercent', 'currency', 'priority', 'effectiveFrom',
   'effectiveTo', 'isActive'
 ];
@@ -30,7 +32,10 @@ const pickWritable = (body = {}) => {
     if (body[key] !== undefined) out[key] = body[key];
   }
   // Normalise wildcard scopes: empty string means "any", stored as null.
-  ['companyId', 'service', 'subService', 'categoryCode', 'vendorId'].forEach((k) => {
+  [
+    'companyId', 'service', 'subService', 'categoryCode',
+    'serviceKey', 'subServiceKey', 'pricingProfile', 'contractId', 'vendorId'
+  ].forEach((k) => {
     if (out[k] === '' || out[k] === 'any' || out[k] === 'all') out[k] = null;
   });
   return out;
@@ -51,6 +56,25 @@ const validateRule = (data, { partial = false } = {}) => {
     if (!Number.isFinite(t) || t < 0 || t > 100) errors.push('taxPercent must be between 0 and 100');
   }
   if (data.companyId && !isValidId(data.companyId)) errors.push('companyId is not a valid id');
+  if (data.contractId && !isValidId(data.contractId)) errors.push('contractId is not a valid id');
+  if (data.level && !['CONTRACT', 'COMPANY', 'DEFAULT'].includes(data.level)) {
+    errors.push('level must be CONTRACT, COMPANY or DEFAULT');
+  }
+  ['slaCharge', 'emergencyCharge', 'afterHoursCharge'].forEach((k) => {
+    if (data[k] !== undefined) {
+      const v = Number(data[k]);
+      if (!Number.isFinite(v) || v < 0) errors.push(`${k} must be a number >= 0`);
+    }
+  });
+  if (data.priorityCharges !== undefined) {
+    Object.entries(data.priorityCharges || {}).forEach(([k, v]) => {
+      if (!['Low', 'Medium', 'High'].includes(k)) {
+        errors.push(`priorityCharges.${k} is not a job priority`);
+      } else if (!Number.isFinite(Number(v)) || Number(v) < 0) {
+        errors.push(`priorityCharges.${k} must be a number >= 0`);
+      }
+    });
+  }
   if (data.vendorId && !isValidId(data.vendorId)) errors.push('vendorId is not a valid id');
 
   (data.volumeDiscounts || []).forEach((d, i) => {
@@ -245,10 +269,16 @@ exports.previewPricing = async (req, res) => {
 
     const priced = await calculateJobPrice({
       companyId,
+      serviceKey: req.body.serviceKey,
+      subServiceKey: req.body.subServiceKey,
       service: req.body.service,
       subService: req.body.subService,
       categoryCode: req.body.categoryCode,
       serviceTier: req.body.serviceTier,
+      priority: req.body.priority,
+      emergency: req.body.emergency,
+      afterHours: req.body.afterHours,
+      slaTightened: req.body.slaTightened,
       vendorId: req.body.vendorId,
       pincode: req.body.pincode,
       city: req.body.city,

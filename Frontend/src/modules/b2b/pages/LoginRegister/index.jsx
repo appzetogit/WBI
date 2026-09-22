@@ -195,46 +195,6 @@ const LoginRegister = ({ defaultTab = 'login' }) => {
     }
   };
 
-  // Upload document helper
-  const handleDocumentUpload = async (e, docType) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    setDocuments(prev => ({
-      ...prev,
-      [docType]: { ...prev[docType], uploading: true }
-    }));
-
-    try {
-      const res = await api.post('/b2b/documents/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 120000
-      });
-      if (res.data.success) {
-        setDocuments(prev => ({
-          ...prev,
-          [docType]: { 
-            fileUrl: res.data.fileUrl, 
-            fileKey: res.data.fileKey, 
-            fileName: file.name,
-            uploading: false 
-          }
-        }));
-        toast.success(`${docType.replace(/([A-Z])/g, ' $1')} uploaded successfully`);
-      }
-    } catch (err) {
-      toast.error('Failed to upload document');
-      setDocuments(prev => ({
-        ...prev,
-        [docType]: { ...prev[docType], uploading: false }
-      }));
-      console.error(err);
-    }
-  };
-
   // Handle Branch Form Submit
   const handleAddBranch = (e) => {
     e.preventDefault();

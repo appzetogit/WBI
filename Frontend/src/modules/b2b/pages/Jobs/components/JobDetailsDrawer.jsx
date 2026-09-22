@@ -53,8 +53,8 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
       toast.success(res.data?.data?.pending
         ? 'Company approval recorded — awaiting other sign-offs'
         : 'Company approval complete — escrow released');
-      queryClient.invalidateQueries(['b2bJobEnterpriseFlow', jobId]);
-      queryClient.invalidateQueries(['b2bJobDetails', jobId]);
+      queryClient.invalidateQueries({ queryKey: ['b2bJobEnterpriseFlow', jobId] });
+      queryClient.invalidateQueries({ queryKey: ['b2bJobDetails', jobId] });
     },
     onError: (e) => toast.error(e.response?.data?.message || 'Approval failed')
   });
@@ -64,7 +64,7 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
       api.post(`/b2b/jobs/projects/${projectId}/milestones/${milestoneId}/b2b-signoff`, { approved: true }),
     onSuccess: () => {
       toast.success('Milestone signed off');
-      queryClient.invalidateQueries(['b2bJobEnterpriseFlow', jobId]);
+      queryClient.invalidateQueries({ queryKey: ['b2bJobEnterpriseFlow', jobId] });
     },
     onError: (e) => toast.error(e.response?.data?.message || 'Milestone sign-off failed')
   });
@@ -213,7 +213,7 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
                       {data.assignedTo ? (
                         <div className="flex items-center gap-4">
                           <img 
-                            src={data.assignedTo.profilePic || 'https://via.placeholder.com/50'} 
+                            src={data.assignedTo.profilePic || 'data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect width=%2240%22 height=%2240%22 fill=%22%23E6F4F2%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%2310AFA5%22/%3E%3Cpath d=%22M6 36c2-8 8-11 14-11s12 3 14 11%22 fill=%22%2310AFA5%22/%3E%3C/svg%3E'} 
                             alt="Engineer" 
                             className="w-12 h-12 rounded-full border-2 border-white shadow-sm"
                           />

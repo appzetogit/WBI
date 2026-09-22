@@ -67,13 +67,15 @@ async function syncLinkedEngineers(vendorId) {
       skills: (eng.primarySkill ? [{ name: eng.primarySkill, proficiency: 70 }] : []),
       city: eng.address?.city || eng.city || '',
       rating: eng.rating || 0,
-      status: eng.approvalStatus === 'suspended' ? 'suspended' : 'active',
       demoTag: null
     };
 
     if (existing) {
       // Don't overwrite leave/on_project availability from sync
       const preserveAvail = ['leave', 'on_project', 'busy', 'traveling'].includes(existing.availability);
+      // The roster status is the vendor's own decision (active / deactivated /
+      // suspended) and routing reads it; a sync must never reset it. WBI
+      // suspension lives on Engineer.approvalStatus and is checked separately.
       Object.assign(existing, payload);
       if (!preserveAvail) existing.availability = mapEngineerAvailability(eng);
       await existing.save();
@@ -81,6 +83,7 @@ async function syncLinkedEngineers(vendorId) {
     } else {
       await VendorWorkforceEngineer.create({
         ...payload,
+        status: 'active',
         availability: mapEngineerAvailability(eng),
         experienceYears: 0,
         certificationLevel: 'mid'

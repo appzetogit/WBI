@@ -4,8 +4,19 @@ const bookingResponseController = require('../../controllers/workerControllers/b
 const { authenticate } = require('../../middleware/authMiddleware');
 const bookingExecutionController = require('../../controllers/workerControllers/bookingExecution.controller');
 
-router.patch('/:bookingId/accept', authenticate, bookingResponseController.acceptBooking);
-router.patch('/:bookingId/reject', authenticate, bookingResponseController.rejectBooking);
+// Only field workers / engineers (TazkY) may accept or reject a booking offer —
+// an arbitrary authenticated account (vendor, B2B, user) must not be able to
+// claim a customer's booking.
+const isFieldWorker = (req, res, next) => {
+  const role = String(req.userRole || '').toUpperCase();
+  if (role !== 'WORKER' && role !== 'ENGINEER') {
+    return res.status(403).json({ success: false, message: 'Access denied. Worker role required.' });
+  }
+  next();
+};
+
+router.patch('/:bookingId/accept', authenticate, isFieldWorker, bookingResponseController.acceptBooking);
+router.patch('/:bookingId/reject', authenticate, isFieldWorker, bookingResponseController.rejectBooking);
 
 // Execution Flow
 router.patch('/:bookingId/start-journey', authenticate, bookingExecutionController.startJourney);

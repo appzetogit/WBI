@@ -38,3 +38,23 @@ export const getUserGrowthMetrics = async (params = 30) => {
   }
 };
 
+/** B2B, Vendor, Engineer (vendor-employed vs freelancer), payments & quality — everything the legacy Booking-only stats never covered. */
+export const getPlatformOverview = async (params) => {
+  try {
+    const response = await api.get('/admin/dashboard/platform-overview', { params });
+    return response.data;
+  } catch (error) {
+    throw error;
+  }
+};
+
+/** Reuses the same live-tracking summary the B2B live map uses, admin-scoped (no companyId = platform-wide). */
+export const getLiveOpsSummary = async () => {
+  try {
+    const response = await api.get('/b2b/live-tracking/summary');
+    return response.data;
+  } catch (error) {
+    throw error;
+  }
+};
+

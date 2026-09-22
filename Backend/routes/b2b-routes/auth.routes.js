@@ -4,6 +4,7 @@ const rateLimiter = require('../../middleware/rateLimiter');
 const { registrationLimiter, loginLimiter } = rateLimiter;
 const { uploadGenericFile, handleMulterError } = require('../../middleware/uploadMiddleware');
 const { authenticate } = require('../../middleware/authMiddleware');
+const { isApprovedB2B, checkB2BPermission } = require('../../middleware/roleMiddleware');
 const {
   registerCompany,
   loginCompany,
@@ -55,9 +56,6 @@ const {
   getJobsStatusDistribution,
   getRecentJobs,
   getWalletBalance,
-  getEngineers,
-  getUsers,
-  getCompanyJobs,
   getExecutiveMetrics,
   getGeoTaskAnalytics,
   getHardwareHealth,
@@ -68,6 +66,8 @@ const {
 const {
   getWalletSummary,
   getWalletTransactions,
+  exportWalletStatement,
+  getWalletReconciliation,
   createTopupOrder,
   verifyTopupPayment,
   getWalletUsageSummary,
@@ -81,41 +81,42 @@ const {
 
 // Authenticated routes
 router.get('/me', authenticate, getProfile);
-router.patch('/profile', authenticate, updateProfile);
+router.patch('/profile', authenticate, checkB2BPermission('company.manage'), updateProfile);
 router.get('/verification-status', authenticate, getVerificationStatus);
 
-const { isApprovedB2B } = require('../../middleware/roleMiddleware');
 
 // Dashboard routes
-router.get('/dashboard/summary', authenticate, isApprovedB2B, getDashboardSummary);
-router.get('/dashboard/jobs-overview', authenticate, isApprovedB2B, getJobsOverview);
-router.get('/dashboard/jobs-status', authenticate, isApprovedB2B, getJobsStatusDistribution);
-router.get('/dashboard/recent-jobs', authenticate, isApprovedB2B, getRecentJobs);
-router.get('/dashboard/executive-metrics', authenticate, isApprovedB2B, getExecutiveMetrics);
-router.get('/dashboard/geo-task-analytics', authenticate, isApprovedB2B, getGeoTaskAnalytics);
-router.get('/dashboard/hardware-health', authenticate, isApprovedB2B, getHardwareHealth);
-router.get('/dashboard/financial-logs', authenticate, isApprovedB2B, getFinancialLogs);
-router.get('/dashboard/workforce-quality', authenticate, isApprovedB2B, getWorkforceQuality);
+router.get('/dashboard/summary', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getDashboardSummary);
+router.get('/dashboard/jobs-overview', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getJobsOverview);
+router.get('/dashboard/jobs-status', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getJobsStatusDistribution);
+router.get('/dashboard/recent-jobs', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getRecentJobs);
+router.get('/dashboard/executive-metrics', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getExecutiveMetrics);
+router.get('/dashboard/geo-task-analytics', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getGeoTaskAnalytics);
+router.get('/dashboard/hardware-health', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getHardwareHealth);
+router.get('/dashboard/financial-logs', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getFinancialLogs);
+router.get('/dashboard/workforce-quality', authenticate, isApprovedB2B, checkB2BPermission('jobs.read'), getWorkforceQuality);
 
 // Wallet endpoints
-router.get('/wallet/balance', authenticate, isApprovedB2B, getWalletBalance);
-router.get('/wallet/summary', authenticate, isApprovedB2B, getWalletSummary);
-router.get('/wallet/transactions', authenticate, isApprovedB2B, getWalletTransactions);
-router.post('/wallet/create-topup-order', authenticate, isApprovedB2B, createTopupOrder);
-router.post('/wallet/verify-topup-payment', authenticate, isApprovedB2B, verifyTopupPayment);
-router.get('/wallet/usage-summary', authenticate, isApprovedB2B, getWalletUsageSummary);
-router.get('/wallet/deduction-rule', authenticate, isApprovedB2B, getDeductionRule);
-router.get('/wallet/payment-methods', authenticate, isApprovedB2B, getPaymentMethods);
-router.post('/wallet/payment-methods', authenticate, isApprovedB2B, addPaymentMethod);
-router.delete('/wallet/payment-methods/:id', authenticate, isApprovedB2B, deletePaymentMethod);
-router.get('/wallet/activation-gate', authenticate, isApprovedB2B, getWalletActivationGate);
-router.post('/wallet/activate-pending', authenticate, isApprovedB2B, activatePendingJobs);
+router.get('/wallet/balance', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getWalletBalance);
+router.get('/wallet/summary', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getWalletSummary);
+router.get('/wallet/transactions', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getWalletTransactions);
+router.get('/wallet/transactions/export', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), exportWalletStatement);
+router.get('/wallet/reconciliation', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getWalletReconciliation);
+router.post('/wallet/create-topup-order', authenticate, isApprovedB2B, checkB2BPermission('wallet.topup'), createTopupOrder);
+router.post('/wallet/verify-topup-payment', authenticate, isApprovedB2B, checkB2BPermission('wallet.topup'), verifyTopupPayment);
+router.get('/wallet/usage-summary', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getWalletUsageSummary);
+router.get('/wallet/deduction-rule', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getDeductionRule);
+router.get('/wallet/payment-methods', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getPaymentMethods);
+router.post('/wallet/payment-methods', authenticate, isApprovedB2B, checkB2BPermission('wallet.topup'), addPaymentMethod);
+router.delete('/wallet/payment-methods/:id', authenticate, isApprovedB2B, checkB2BPermission('wallet.topup'), deletePaymentMethod);
+router.get('/wallet/activation-gate', authenticate, isApprovedB2B, checkB2BPermission('wallet.read'), getWalletActivationGate);
+router.post('/wallet/activate-pending', authenticate, isApprovedB2B, checkB2BPermission('wallet.topup'), activatePendingJobs);
 
-// Engineers & Users list
-router.get('/engineers', authenticate, isApprovedB2B, getEngineers);
-router.get('/users', authenticate, isApprovedB2B, getUsers);
 
-// Dynamic Jobs list query
-router.get('/jobs', authenticate, isApprovedB2B, getCompanyJobs);
+
+// GET /api/b2b/jobs, /engineers and /users are served by their own routers
+// (jobs.routes, engineers.routes, users.routes). Duplicates here used to
+// shadow them, because this router is mounted first under /api/b2b — the
+// users list returned a hardcoded placeholder user.
 
 module.exports = router;

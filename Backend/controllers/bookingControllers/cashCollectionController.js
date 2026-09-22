@@ -263,6 +263,19 @@ exports.confirmCashCollection = async (req, res) => {
     // OTP Verification
     const isPlanBenefitNoExtras = booking.paymentMethod === 'plan_benefit' && otp === '0000';
 
+    // The customer's OTP must have been issued (via initiate) and supplied.
+    // Previously a missing OTP skipped the check, so cash could be "confirmed"
+    // without the customer.
+    if (!isPlanBenefitNoExtras && !booking.customerConfirmationOTP) {
+      return res.status(409).json({
+        success: false,
+        message: 'Start cash collection first so the customer receives the confirmation OTP.'
+      });
+    }
+    if (!isPlanBenefitNoExtras && !otp) {
+      return res.status(400).json({ success: false, message: 'Customer confirmation OTP is required' });
+    }
+
     if (!isPlanBenefitNoExtras && booking.customerConfirmationOTP && otp && booking.customerConfirmationOTP !== otp) {
       if (process.env.NODE_ENV !== 'development' || otp !== '0000') {
         console.warn(`[ConfirmCash] Invalid OTP attempt for booking ${id}. Expected: ${booking.customerConfirmationOTP}, Received: ${otp}`);

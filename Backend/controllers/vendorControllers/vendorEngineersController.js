@@ -58,9 +58,9 @@ const findActiveJobForEngineer = async (vendorId, engineerDocId, linkedEngineerI
   const b2bJob = await B2BJob.findOne({
     assignedVendorId: vendorId,
     assignedTo: { $in: ids },
-    status: { $in: ['assigned', 'in_progress', 'travelling', 'arrived'] }
+    status: { $in: ['assigned', 'accepted', 'in_progress', 'travelling', 'arrived', 'revision_required', 'on_hold'] }
   })
-    .select('jobId service clientName companyName status trackingStatus priority address scheduledDate')
+    .select('jobId service customerName status trackingStatus lifecycleStatus priority city address preferredDate')
     .lean();
 
   if (b2bJob) {
@@ -69,36 +69,37 @@ const findActiveJobForEngineer = async (vendorId, engineerDocId, linkedEngineerI
       jobCode: b2bJob.jobId,
       type: 'b2b_job',
       source: 'B2B Job',
-      title: `${b2bJob.clientName || b2bJob.companyName || 'B2B Client'} - ${b2bJob.service || 'Job'}`,
+      title: `${b2bJob.customerName || 'B2B Client'} - ${b2bJob.service || 'Job'}`,
       service: b2bJob.service || 'B2B Service',
       status: b2bJob.trackingStatus || b2bJob.status,
+      lifecycleStatus: b2bJob.lifecycleStatus || null,
       priority: b2bJob.priority || 'medium',
-      location: b2bJob.address?.city || b2bJob.address?.fullAddress || '',
-      date: b2bJob.scheduledDate
+      location: b2bJob.city || '',
+      date: b2bJob.preferredDate
     };
   }
 
   // 3. Check Booking
   const booking = await Booking.findOne({
-    vendor: vendorId,
-    engineer: { $in: ids },
-    status: { $in: ['assigned', 'journey_started', 'in_progress', 'service_started'] }
+    vendorId,
+    engineerId: { $in: ids },
+    status: { $in: ['assigned', 'journey_started', 'arrived', 'in_progress', 'service_started'] }
   })
-    .select('bookingId serviceName status date timeSlot address')
+    .select('bookingNumber serviceName status scheduledDate timeSlot address')
     .lean();
 
   if (booking) {
     return {
       id: booking._id,
-      jobCode: booking.bookingId || `BK-${booking._id.toString().slice(-6)}`,
+      jobCode: booking.bookingNumber || `BK-${booking._id.toString().slice(-6)}`,
       type: 'booking',
       source: 'Client Booking',
       title: booking.serviceName || 'Direct Booking',
       service: booking.serviceName || 'Service',
       status: booking.status,
       priority: 'normal',
-      location: booking.address?.city || booking.address?.fullAddress || '',
-      date: booking.date
+      location: booking.address?.city || '',
+      date: booking.scheduledDate
     };
   }
 
@@ -156,6 +157,12 @@ exports.getEngineers = async (req, res) => {
 
     const leaveEngIds = new Set(activeLeaves.map((l) => l.engineerId.toString()));
 
+    const linkedIds = allEngineers.map((e) => e.linkedEngineerId).filter(Boolean);
+    const linkedDocs = linkedIds.length
+      ? await Engineer.find({ _id: { $in: linkedIds } }).select('rating completedJobs totalJobs').lean()
+      : [];
+    const linkedById = new Map(linkedDocs.map((d) => [String(d._id), d]));
+
     // Enrich each engineer with real-time active job and calculated availability
     const enriched = await Promise.all(
       allEngineers.map(async (eng) => {
@@ -186,8 +193,11 @@ exports.getEngineers = async (req, res) => {
           skills: eng.skills || [],
           experienceYears: eng.experienceYears || 0,
           certificationLevel: eng.certificationLevel || 'mid',
-          rating: eng.rating || 4.5,
-          performanceScore: eng.performanceScore || 85,
+          // Ratings come from real customer reviews on the linked engineer
+          // profile; null means "not rated yet", never an invented score.
+          rating: eng.linkedEngineerId ? (linkedById.get(String(eng.linkedEngineerId))?.rating ?? null) : null,
+          completedJobs: eng.linkedEngineerId ? (linkedById.get(String(eng.linkedEngineerId))?.completedJobs ?? 0) : 0,
+          performanceScore: null,
           city: eng.city || '',
           currentLocation: eng.currentLocation || '',
           gps: eng.gps || null,
@@ -355,10 +365,12 @@ exports.getEngineerDetails = async (req, res) => {
         linkedData,
         recentHistory,
         stats: {
-          totalAssigned: recentHistory.length,
-          completedCount: recentHistory.filter((h) => h.status === 'completed').length,
-          rating: eng.rating || 4.5,
-          score: eng.performanceScore || 85
+          totalAssigned: (await B2BJob.countDocuments({ assignedVendorId: vendorId, assignedTo: { $in: ids } })) +
+            (await VendorOpsJob.countDocuments({ vendorId, engineerId: { $in: ids } })),
+          completedCount: (await B2BJob.countDocuments({ assignedVendorId: vendorId, assignedTo: { $in: ids }, status: { $in: ['completed', 'closed'] } })) +
+            (await VendorOpsJob.countDocuments({ vendorId, engineerId: { $in: ids }, status: 'completed' })),
+          rating: linkedData?.rating ?? null,
+          score: null
         }
       }
     });
@@ -391,21 +403,21 @@ exports.getAssignableJobs = async (req, res) => {
       // 2. B2BJob: accepted by vendor or looking for engineer
       B2BJob.find({
         assignedVendorId: vendorId,
-        status: { $in: ['accepted', 'assigned', 'searching_engineer'] }
+        lifecycleStatus: { $in: ['PENDING_ASSIGNMENT', 'ASSIGNED', 'ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_HOLD'] }
       })
         .sort({ updatedAt: -1 })
         .limit(30)
-        .select('jobId service clientName companyName status trackingStatus priority address scheduledDate assignedToName')
+        .select('jobId service customerName status lifecycleStatus trackingStatus priority city preferredDate assignedToName')
         .lean(),
 
       // 3. Booking: accepted/assigned
       Booking.find({
-        vendor: vendorId,
-        status: { $in: ['accepted', 'assigned'] }
+        vendorId,
+        status: { $in: ['accepted', 'confirmed', 'scheduled', 'assigned'] }
       })
         .sort({ updatedAt: -1 })
         .limit(30)
-        .select('bookingId serviceName status date timeSlot address')
+        .select('bookingNumber serviceName status scheduledDate timeSlot address')
         .lean()
     ]);
 
@@ -428,25 +440,26 @@ exports.getAssignableJobs = async (req, res) => {
         jobType: 'b2b_job',
         source: 'B2B Job',
         jobCode: j.jobId,
-        title: `${j.clientName || j.companyName || 'B2B Client'} - ${j.service || 'Job'}`,
+        title: `${j.customerName || 'B2B Client'} - ${j.service || 'Job'}`,
         service: j.service || 'B2B Service',
         status: j.trackingStatus || j.status,
+        lifecycleStatus: j.lifecycleStatus,
         priority: j.priority || 'medium',
-        location: j.address?.city || j.address?.fullAddress || 'Site Location',
-        date: j.scheduledDate,
+        location: j.city || 'Site Location',
+        date: j.preferredDate,
         currentlyAssignedTo: j.assignedToName || null
       })),
       ...bookings.map((j) => ({
         id: j._id,
         jobType: 'booking',
         source: 'Client Booking',
-        jobCode: j.bookingId || `BK-${j._id.toString().slice(-6)}`,
+        jobCode: j.bookingNumber || `BK-${j._id.toString().slice(-6)}`,
         title: j.serviceName || 'Direct Booking',
         service: j.serviceName || 'Service',
         status: j.status,
         priority: 'normal',
-        location: j.address?.city || j.address?.fullAddress || 'Client Address',
-        date: j.date,
+        location: j.address?.city || 'Client Address',
+        date: j.scheduledDate,
         currentlyAssignedTo: null
       }))
     ];
@@ -561,58 +574,37 @@ exports.assignJobToEngineer = async (req, res) => {
       }
     }
 
-    // 2. Handle B2BJob
+    // 2. Handle B2BJob — central assignment service (eligibility + history)
     if (jobType === 'b2b_job' || !jobType) {
-      const b2bJob = await B2BJob.findOne({ _id: jobObjId, assignedVendorId: vid });
+      const b2bJob = await B2BJob.findOne({ _id: jobObjId, assignedVendorId: vid }).select('assignedTo').lean();
       if (b2bJob) {
-        b2bJob.assignedTo = targetEngineerId;
-        b2bJob.assignedToName = engineerName;
-        b2bJob.assignmentType = 'vendor_engineer';
-        b2bJob.status = 'assigned';
-        b2bJob.trackingStatus = 'assigned';
-        b2bJob.assignedAt = new Date();
-        await b2bJob.save();
-
-        workforceEng.availability = 'on_project';
-        workforceEng.todayTask = b2bJob.service || 'B2B Job Execution';
-        await workforceEng.save();
-
-        try {
-          const io = getIO();
-          if (io) {
-            io.to(`engineer:${targetEngineerId.toString()}`).emit('b2b:job_assigned', {
-              jobId: b2bJob._id,
-              jobCode: b2bJob.jobId,
-              service: b2bJob.service
-            });
-            if (b2bJob.companyId) {
-              io.to(`b2b:${b2bJob.companyId.toString()}`).emit('b2b:jobStatusUpdated', {
-                jobId: b2bJob._id,
-                status: 'assigned',
-                engineerName
-              });
-            }
-            io.to(`vendor:${vid.toString()}`).emit('engineer:assigned', {
-              engineerId: workforceEng._id,
-              jobId: b2bJob._id
-            });
-          }
-        } catch (_) {}
-
+        if (!workforceEng.linkedEngineerId) {
+          return res.status(422).json({ success: false, message: 'This roster entry is not linked to an engineer account' });
+        }
+        const svc = require('../../services/jobAssignment.service');
+        const actor = { id: vid, role: 'vendor' };
+        const result = b2bJob.assignedTo
+          ? await svc.reassignEngineer({ jobId: jobObjId, newEngineerId: workforceEng.linkedEngineerId, actor, vendorScopeId: vid, reason: req.body?.reason || notes })
+          : await svc.assignEngineer({ jobId: jobObjId, engineerId: workforceEng.linkedEngineerId, actor, vendorScopeId: vid, reason: notes || 'Assigned by vendor' });
         return res.status(200).json({
           success: true,
-          message: `B2B Job ${b2bJob.jobId} assigned to ${engineerName} successfully`,
-          data: b2bJob
+          message: `B2B Job ${result.job.jobId} assigned to ${engineerName} successfully`,
+          data: result.job,
+          eligibility: result.eligibility
         });
       }
     }
 
     // 3. Handle Booking
     if (jobType === 'booking' || !jobType) {
-      const booking = await Booking.findOne({ _id: jobObjId, vendor: vid });
+      const booking = await Booking.findOne({ _id: jobObjId, vendorId: vid });
       if (booking) {
-        booking.engineer = targetEngineerId;
+        if (!['accepted', 'confirmed', 'scheduled', 'assigned'].includes(booking.status)) {
+          return res.status(409).json({ success: false, message: `A booking in status "${booking.status}" cannot be assigned` });
+        }
+        booking.engineerId = targetEngineerId;
         booking.status = 'assigned';
+        booking.assignedAt = new Date();
         await booking.save();
 
         workforceEng.availability = 'on_project';
@@ -642,8 +634,8 @@ exports.assignJobToEngineer = async (req, res) => {
 
     return res.status(404).json({ success: false, message: 'Eligible job not found for assignment' });
   } catch (error) {
-    console.error('assignJobToEngineer error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to assign job to engineer' });
+    const { sendJobError } = require('../../services/jobScope.service');
+    return sendJobError(res, error, 'Failed to assign job to engineer');
   }
 };
 
@@ -671,21 +663,44 @@ exports.updateEngineerStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Engineer not found' });
     }
 
-    if (action === 'suspend') eng.status = 'suspended';
-    else if (action === 'activate') eng.status = 'active';
-    else if (action === 'deactivate') eng.status = 'deactivated';
+    const requested = action || ({ active: 'activate', suspended: 'suspend', deactivated: 'deactivate' })[status];
+    if (requested && !['activate', 'suspend', 'deactivate'].includes(requested)) {
+      return res.status(400).json({ success: false, message: 'action must be activate, suspend or deactivate' });
+    }
+    const ROSTER_AVAILABILITY = ['available', 'busy', 'on_project', 'traveling', 'leave', 'offline'];
+    if (availability && !ROSTER_AVAILABILITY.includes(availability)) {
+      return res.status(400).json({ success: false, message: `availability must be one of ${ROSTER_AVAILABILITY.join(', ')}` });
+    }
 
-    if (status) eng.status = status;
+    if (requested && eng.linkedEngineerId) {
+      // Real engineers go through the team rules routing relies on (no
+      // deactivation while holding a job, WBI suspensions stay WBI's).
+      const { setTeamActive } = require('../../services/vendorEngineers.service');
+      await setTeamActive({
+        vid,
+        engineerId: eng.linkedEngineerId,
+        active: requested === 'activate',
+        mode: requested === 'suspend' ? 'suspended' : 'deactivated',
+        reason: req.body?.reason || `${requested === 'suspend' ? 'Suspended' : 'Deactivated'} from the roster`,
+        actor: { id: vid, role: 'vendor' }
+      });
+    } else if (requested) {
+      eng.status = requested === 'activate' ? 'active' : requested === 'suspend' ? 'suspended' : 'deactivated';
+    }
     if (availability) eng.availability = availability;
-
-    await eng.save();
+    // Only paths changed on this instance are written, so a team status set
+    // above by setTeamActive is not overwritten here.
+    if (eng.isModified()) await eng.save();
 
     return res.status(200).json({
       success: true,
       message: `Engineer status updated successfully`,
-      data: eng
+      data: await VendorWorkforceEngineer.findById(eng._id).lean()
     });
   } catch (error) {
+    if (Number.isInteger(error.status) && error.status < 500) {
+      return res.status(error.status).json({ success: false, code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) });
+    }
     console.error('updateEngineerStatus error:', error);
     return res.status(500).json({ success: false, message: 'Failed to update engineer status' });
   }
@@ -703,5 +718,226 @@ exports.syncEngineers = async (req, res) => {
   } catch (error) {
     console.error('syncEngineers error:', error);
     return res.status(500).json({ success: false, message: 'Failed to sync engineers' });
+  }
+};
+
+const PHONE_RX = /^[6-9][0-9]{9}$/;
+const cleanList = (v) => (Array.isArray(v) ? v : String(v || '').split(','))
+  .map((s) => String(s).trim())
+  .filter(Boolean)
+  .slice(0, 30);
+
+const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+/** Working days as full day names; unknown values are refused, not stored. */
+const cleanDays = (v) => {
+  const days = cleanList(v).map((d) => DAY_NAMES.find((n) => n.toLowerCase().startsWith(d.toLowerCase().slice(0, 3))));
+  if (days.some((d) => !d)) {
+    const err = new Error('workingDays must be day names (Monday … Sunday)');
+    err.status = 400;
+    throw err;
+  }
+  return DAY_NAMES.filter((d) => days.includes(d));
+};
+/** "18:30" or "06:30 PM" → "06:30 PM" (the stored format). */
+const toClock = (v) => {
+  const s = String(v || '').trim();
+  let m = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12 && Number(m[2]) < 60) return `${m[1].padStart(2, '0')}:${m[2]} ${m[3].toUpperCase()}`;
+  m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m && Number(m[1]) < 24 && Number(m[2]) < 60) {
+    const h = Number(m[1]);
+    return `${String(h % 12 || 12).padStart(2, '0')}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+  }
+  const err = new Error('Working hours must be times like 09:00 or 06:30 PM');
+  err.status = 400;
+  throw err;
+};
+/** Schedule fields from a request body (only those present). */
+const scheduleFrom = (b) => {
+  const out = {};
+  if (b.workingDays !== undefined) out.workingDays = cleanDays(b.workingDays);
+  if (b.workingHours !== undefined && b.workingHours !== null) {
+    out.workingHours = { start: toClock(b.workingHours.start), end: toClock(b.workingHours.end) };
+  }
+  if (b.emergencyService !== undefined) out.emergencyService = Boolean(b.emergencyService);
+  if (b.experienceYears !== undefined) out.totalExperienceYears = Math.min(60, Math.max(0, Number(b.experienceYears) || 0));
+  return out;
+};
+
+/**
+ * POST /api/vendor/engineers
+ * Add an engineer to this vendor. The engineer is linked to the vendor and
+ * vendor-approved, but stays PENDING until WBI verifies their documents —
+ * routing never offers work to an unverified engineer.
+ */
+exports.createEngineer = async (req, res) => {
+  try {
+    const vid = getVendorId(req);
+    const b = req.body || {};
+    const name = String(b.name || '').trim();
+    const phone = String(b.phone || '').replace(/[^0-9]/g, '').slice(-10);
+    if (name.length < 2) return res.status(400).json({ success: false, message: 'Engineer name is required' });
+    if (!PHONE_RX.test(phone)) return res.status(400).json({ success: false, message: 'A valid 10-digit mobile number is required' });
+    const email = b.email ? String(b.email).trim().toLowerCase() : undefined;
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, message: 'Email is invalid' });
+    }
+    const skills = cleanList(b.skills);
+    if (!skills.length) return res.status(400).json({ success: false, message: 'At least one skill / service is required' });
+
+    const existing = await Engineer.findOne({ $or: [{ phone }, ...(email ? [{ email }] : [])] }).select('vendorId').lean();
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: String(existing.vendorId || '') === String(vid)
+          ? 'This engineer is already in your team'
+          : 'An engineer account already exists for this phone/email. Share your company invite link so they can join your team.'
+      });
+    }
+
+    const cities = cleanList(b.cities);
+    const city = b.city ? String(b.city).trim() : cities[0] || '';
+    if (!city) return res.status(400).json({ success: false, message: 'A base city is required so routing knows where the engineer works' });
+    const schedule = scheduleFrom(b);
+    const engineer = await Engineer.create({
+      name,
+      phone,
+      ...(email ? { email } : {}),
+      roleType: 'Engineer',
+      engineerType: 'vendor_engineer',
+      registrationType: 'Company / Firm Employee',
+      vendorId: vid,
+      vendorApprovalStatus: 'approved',
+      approvalStatus: 'pending',
+      verificationStatus: 'pending',
+      isActive: true,
+      primarySkill: skills[0],
+      secondarySkills: skills.slice(1),
+      serviceCategories: cleanList(b.serviceCategories).length ? cleanList(b.serviceCategories) : skills,
+      address: { city },
+      workLocations: {
+        primaryArea: city,
+        availableCities: cities,
+        serviceRadius: Math.min(200, Math.max(1, Number(b.serviceRadiusKm) || 10))
+      },
+      workingDays: [],
+      ...schedule
+    });
+
+    await syncLinkedEngineers(vid).catch(() => {});
+    const { logAudit } = require('../../utils/auditLogger');
+    await logAudit({
+      actionType: 'VENDOR_ENGINEER_ADDED',
+      eventMessage: `Vendor ${vid} added engineer ${engineer.name}`,
+      actorId: vid,
+      actorRole: 'vendor',
+      targetId: engineer._id,
+      targetType: 'Engineer',
+      changes: { name, phone, skills }
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Engineer added. They can start receiving jobs once WBI verifies their documents.',
+      data: { id: String(engineer._id), name: engineer.name, phone: engineer.phone, status: 'PENDING' }
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, message: 'An engineer with this phone or email already exists' });
+    }
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
+    console.error('createEngineer error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to add engineer' });
+  }
+};
+
+/**
+ * PATCH /api/vendor/engineers/:id
+ * Update the operational profile of one of THIS vendor's engineers:
+ * skills, coverage and working days. Identity fields are locked once WBI
+ * has verified the engineer.
+ */
+exports.updateEngineerProfile = async (req, res) => {
+  try {
+    const vid = getVendorId(req);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid engineer id' });
+    }
+    // Accept an Engineer id or this vendor's roster id.
+    let engineer = await Engineer.findById(req.params.id);
+    if (!engineer) {
+      const roster = await VendorWorkforceEngineer.findOne({ _id: req.params.id, vendorId: vid }).select('linkedEngineerId').lean();
+      if (roster?.linkedEngineerId) engineer = await Engineer.findById(roster.linkedEngineerId);
+    }
+    if (!engineer) return res.status(404).json({ success: false, message: 'Engineer not found' });
+    if (String(engineer.vendorId || '') !== String(vid)) {
+      return res.status(403).json({ success: false, message: 'This engineer does not belong to your organisation' });
+    }
+
+    const b = req.body || {};
+    const changes = {};
+    if (b.skills !== undefined) {
+      const skills = cleanList(b.skills);
+      if (!skills.length) return res.status(400).json({ success: false, message: 'At least one skill is required' });
+      engineer.primarySkill = skills[0];
+      engineer.secondarySkills = skills.slice(1);
+      // Same rule as create: without explicit categories the skill list is the
+      // service list, so removing a skill also stops matching jobs for it.
+      if (b.serviceCategories === undefined) engineer.serviceCategories = skills;
+      changes.skills = skills;
+    }
+    if (b.serviceCategories !== undefined) {
+      engineer.serviceCategories = cleanList(b.serviceCategories);
+      changes.serviceCategories = engineer.serviceCategories;
+    }
+    if (b.cities !== undefined || b.serviceRadiusKm !== undefined || b.city !== undefined) {
+      if (b.cities !== undefined) engineer.set('workLocations.availableCities', cleanList(b.cities));
+      if (b.city !== undefined) {
+        engineer.set('workLocations.primaryArea', String(b.city).trim());
+        engineer.set('address.city', String(b.city).trim());
+      }
+      if (b.serviceRadiusKm !== undefined) {
+        engineer.set('workLocations.serviceRadius', Math.min(200, Math.max(1, Number(b.serviceRadiusKm) || 10)));
+      }
+      changes.coverage = {
+        cities: engineer.workLocations?.availableCities,
+        city: engineer.workLocations?.primaryArea,
+        radiusKm: engineer.workLocations?.serviceRadius
+      };
+    }
+    const schedule = scheduleFrom(b);
+    Object.entries(schedule).forEach(([k, v]) => {
+      engineer.set(k, v);
+      changes[k] = v;
+    });
+    if (b.name !== undefined || b.email !== undefined) {
+      if (engineer.approvalStatus === 'approved') {
+        return res.status(409).json({ success: false, message: 'Name and email of a verified engineer can only be changed by WBI support' });
+      }
+      if (b.name !== undefined) engineer.name = String(b.name).trim();
+      if (b.email !== undefined) engineer.email = String(b.email).trim().toLowerCase() || undefined;
+      changes.identity = { name: engineer.name, email: engineer.email };
+    }
+    if (!Object.keys(changes).length) {
+      return res.status(400).json({ success: false, message: 'Nothing to update' });
+    }
+    await engineer.save();
+    await syncLinkedEngineers(vid).catch(() => {});
+
+    const { logAudit } = require('../../utils/auditLogger');
+    await logAudit({
+      actionType: 'VENDOR_ENGINEER_UPDATED',
+      eventMessage: `Vendor ${vid} updated engineer ${engineer.name}`,
+      actorId: vid,
+      actorRole: 'vendor',
+      targetId: engineer._id,
+      targetType: 'Engineer',
+      changes
+    });
+    return res.status(200).json({ success: true, message: 'Engineer updated', data: { id: String(engineer._id), ...changes } });
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ success: false, message: error.message });
+    console.error('updateEngineerProfile error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update engineer' });
   }
 };

@@ -5,6 +5,22 @@ import {
 } from 'react-icons/fi';
 import api from '../../../../services/api';
 import toast from 'react-hot-toast';
+import CompanyOperations, { AccountStatusBadge } from './CompanyOperations';
+
+// Verification tabs filter on verificationStatus; "Suspended" is the
+// operational status an admin sets after approval.
+const TABS = [
+  { id: 'pending', label: 'Pending Review', params: { verificationStatus: 'pending' } },
+  { id: 'approved', label: 'Approved Partners', params: { verificationStatus: 'approved' } },
+  { id: 'suspended', label: 'Suspended', params: { accountStatus: 'SUSPENDED' } },
+  { id: 'rejected', label: 'Rejected Profiles', params: { verificationStatus: 'rejected' } }
+];
+const DETAIL_TABS = [
+  { id: 'profile', label: 'Profile & documents' },
+  { id: 'operations', label: 'Operations' },
+  { id: 'users', label: 'Users' },
+  { id: 'activity', label: 'Activity' }
+];
 
 const B2BManagement = () => {
   const [companies, setCompanies] = useState([]);
@@ -14,6 +30,7 @@ const B2BManagement = () => {
   
   // Inspect dialog
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const [detailTab, setDetailTab] = useState('profile');
   
   // Rejection dialog
   const [showRejectModal, setShowRejectModal] = useState(false);
@@ -23,17 +40,18 @@ const B2BManagement = () => {
   const fetchCompanies = async () => {
     setLoading(true);
     try {
+      const tab = TABS.find((t) => t.id === selectedStatus) || TABS[0];
       const res = await api.get('/admin/b2b-companies', {
-        params: {
-          verificationStatus: selectedStatus,
-          search: searchQuery
-        }
+        params: { ...tab.params, search: searchQuery || undefined, limit: 100 }
       });
       if (res.data.success) {
-        setCompanies(res.data.data || []);
+        const list = res.data.data || [];
+        setCompanies(list);
+        // Keep the open panel in step with the refreshed record.
+        setSelectedCompany((cur) => (cur ? list.find((c) => c._id === cur._id) || cur : cur));
       }
     } catch (err) {
-      toast.error('Failed to load B2B companies list');
+      toast.error(err.response?.data?.message || 'Failed to load B2B companies list');
     } finally {
       setLoading(false);
     }
@@ -57,7 +75,7 @@ const B2BManagement = () => {
         fetchCompanies();
       }
     } catch (err) {
-      toast.error('Failed to approve company');
+      toast.error(err.response?.data?.message || 'Failed to approve company');
     }
   };
 
@@ -83,7 +101,7 @@ const B2BManagement = () => {
         fetchCompanies();
       }
     } catch (err) {
-      toast.error('Failed to reject company');
+      toast.error(err.response?.data?.message || 'Failed to reject company');
     }
   };
 
@@ -101,8 +119,8 @@ const B2BManagement = () => {
       {/* Header and Counters */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-5">
         <div>
-          <h2 className="text-xl font-black text-gray-800">B2B Onboarding approvals</h2>
-          <p className="text-xs text-gray-500 mt-1">Review new partner company accounts, verify documents, and approve or reject applications.</p>
+          <h2 className="text-xl font-black text-gray-800">B2B Companies</h2>
+          <p className="text-xs text-gray-500 mt-1">Approve new partner companies, then manage their status, commercial controls, users and activity.</p>
         </div>
       </div>
 
@@ -110,11 +128,7 @@ const B2BManagement = () => {
       <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         {/* Switch tabs */}
         <div className="flex gap-2">
-          {[
-            { id: 'pending', label: 'Pending Review' },
-            { id: 'approved', label: 'Approved Partners' },
-            { id: 'rejected', label: 'Rejected Profiles' }
-          ].map(tab => (
+          {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => { setSelectedStatus(tab.id); setSelectedCompany(null); }}
@@ -176,7 +190,7 @@ const B2BManagement = () => {
                       className={`hover:bg-gray-50/50 cursor-pointer transition-colors ${
                         selectedCompany?._id === c._id ? 'bg-blue-50/30' : ''
                       }`}
-                      onClick={() => setSelectedCompany(c)}
+                      onClick={() => { setSelectedCompany(c); setDetailTab('profile'); }}
                     >
                       <td className="p-4">
                         <div className="flex items-center gap-3">
@@ -212,10 +226,13 @@ const B2BManagement = () => {
                         }`}>
                           {c.verificationStatus}
                         </span>
+                        {c.accountStatus && c.accountStatus !== 'PENDING' && (
+                          <div className="mt-1"><AccountStatusBadge status={c.accountStatus} /></div>
+                        )}
                       </td>
                       <td className="p-4 text-right">
                         <button 
-                          onClick={(e) => { e.stopPropagation(); setSelectedCompany(c); }}
+                          onClick={(e) => { e.stopPropagation(); setSelectedCompany(c); setDetailTab('profile'); }}
                           className="text-blue-600 hover:text-blue-800 text-[10px] font-black uppercase tracking-wider"
                         >
                           Inspect &rarr;
@@ -245,6 +262,18 @@ const B2BManagement = () => {
               </button>
             </div>
 
+            <div className="flex flex-wrap gap-1.5" role="tablist">
+              {DETAIL_TABS.map((t) => (
+                <button key={t.id} type="button" role="tab" aria-selected={detailTab === t.id} onClick={() => setDetailTab(t.id)}
+                  className={`text-[11px] font-bold px-3 py-1.5 rounded-lg ${detailTab === t.id ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {detailTab !== 'profile' ? (
+              <CompanyOperations company={selectedCompany} tab={detailTab} onChanged={fetchCompanies} />
+            ) : (<>
             <div className="grid grid-cols-2 gap-3 text-xs text-gray-600 leading-relaxed font-semibold">
               <div className="col-span-2 bg-gray-50 rounded-xl p-3 border border-gray-100">
                 <p className="font-bold text-gray-800 text-sm">{selectedCompany.companyName}</p>
@@ -327,6 +356,7 @@ const B2BManagement = () => {
                 <span>Rejected application. Rejection reason: "{selectedCompany.rejectionReason}"</span>
               </div>
             )}
+            </>)}
 
           </div>
         )}

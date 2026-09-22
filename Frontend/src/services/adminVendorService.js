@@ -36,8 +36,8 @@ const adminVendorService = {
   /**
    * Suspend vendor
    */
-  suspendVendor: async (id) => {
-    const response = await api.post(`/admin/vendors/${id}/suspend`);
+  suspendVendor: async (id, reason) => {
+    const response = await api.post(`/admin/vendors/${id}/suspend`, { reason });
     return response.data;
   },
 

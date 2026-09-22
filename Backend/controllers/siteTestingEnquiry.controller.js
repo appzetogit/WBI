@@ -1,6 +1,9 @@
 const SiteTestingEnquiry = require('../models/SiteTestingEnquiry');
 const { queueOpportunityFromEnquiry, buildAssignmentMetaFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
 
+/** The signed-in actor, whatever the auth middleware called the field. */
+const actorId = (req) => req.user?._id || req.user?.id || null;
+
 // CREATE an enquiry (Public App)
 exports.createEnquiry = async (req, res) => {
   try {
@@ -119,7 +122,6 @@ exports.broadcastToVendors = async (req, res) => {
     const UserService = require('../models/UserService');
     
     const B2BCompany = require('../models/B2BCompany');
-    const B2BWallet = require('../models/B2BWallet');
     
     // Fallback B2B User & Service for Enterprise Jobs
     let user = await User.findOne({ email: 'b2b-enterprise@appzeto.com' });
@@ -138,22 +140,34 @@ exports.broadcastToVendors = async (req, res) => {
       });
     }
 
-    let b2bWallet = await B2BWallet.findOne({ companyId: b2bCompany._id });
-    if (!b2bWallet) {
-      b2bWallet = await B2BWallet.create({ companyId: b2bCompany._id, balance: 100000 }); // Pre-fund with 1 Lakh for testing
-    }
+    const walletLedger = require('../services/b2bWalletLedger.service');
+    // The wallet starts empty: money only ever enters through a top-up that
+    // writes a ledger row. It is never pre-funded here.
+    await walletLedger.ensureWallet(b2bCompany._id);
 
     const estimatedQuote = 5000;
 
-    // Check if sufficient funds
-    if (b2bWallet.balance < estimatedQuote) {
-      return res.status(400).json({ success: false, message: 'Insufficient funds in B2B Wallet for Escrow. Please top-up.' });
+    // Freeze (escrow) the funds — the ledger refuses if they are not there.
+    let reservation;
+    try {
+      reservation = await walletLedger.reserve({
+        companyId: b2bCompany._id,
+        amount: estimatedQuote,
+        reservationId: `SITE-${enquiry._id}`,
+        idempotencyKey: `site-testing:${enquiry._id}`,
+        remark: `Site testing escrow — enquiry ${enquiry._id}`,
+        actor: { actorId: actorId(req) || null, role: req.user?.role || 'admin' }
+      });
+    } catch (err) {
+      if (err.code === 'INSUFFICIENT_FUNDS') {
+        return res.status(402).json({
+          success: false,
+          message: 'Insufficient funds in the B2B wallet for escrow. Please top up.',
+          ...err.details
+        });
+      }
+      throw err;
     }
-
-    // Freeze (Escrow) the funds
-    b2bWallet.balance -= estimatedQuote;
-    b2bWallet.escrowBalance += estimatedQuote;
-    await b2bWallet.save();
 
     let service = await UserService.findOne({ serviceName: 'Enterprise Site Testing' });
     if (!service) {
@@ -198,7 +212,12 @@ exports.broadcastToVendors = async (req, res) => {
     enquiry.status = 'Testing Scheduled';
     await enquiry.save();
 
-    res.status(200).json({ success: true, message: 'Broadcasted to Vendor Radar successfully', booking: newBooking });
+    res.status(200).json({
+      success: true,
+      message: 'Broadcasted to Vendor Radar successfully',
+      booking: newBooking,
+      escrow: { amount: estimatedQuote, wallet: reservation.balance }
+    });
   } catch (error) {
     console.error('Error broadcasting enquiry:', error);
     res.status(500).json({ success: false, message: 'Server Error' });

@@ -405,7 +405,10 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         await setHomeOfferBanners([...offerBanners, { id: `hofr-${Date.now()}`, ...offerBannerForm }]);
       }
       resetOfferBannerForm();
-    } catch (error) {}
+    } catch (error) {
+      console.error('Home content save failed:', error);
+      toast.error(error?.response?.data?.message || error?.message || 'Could not save. Please try again.');
+    }
   };
 
   // Promo handlers
@@ -424,7 +427,10 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         await patchHome({ promoCarousel: [...promos, { id: `hprm-${Date.now()}`, ...promoForm }] });
       }
       resetPromoForm();
-    } catch (error) { }
+    } catch (error) {
+      console.error('Home content save failed:', error);
+      toast.error(error?.response?.data?.message || error?.message || 'Could not save. Please try again.');
+    }
   };
 
   // Curated handlers
@@ -443,7 +449,10 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         await patchHome({ curatedServices: [...curated, { id: `hcur-${Date.now()}`, ...curatedForm }] });
       }
       resetCuratedForm();
-    } catch (error) { }
+    } catch (error) {
+      console.error('Home content save failed:', error);
+      toast.error(error?.response?.data?.message || error?.message || 'Could not save. Please try again.');
+    }
   };
 
   // Noteworthy handlers
@@ -462,7 +471,10 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         await patchHome({ newAndNoteworthy: [...noteworthy, { id: `hnnw-${Date.now()}`, ...noteworthyForm }] });
       }
       resetNoteworthyForm();
-    } catch (error) { }
+    } catch (error) {
+      console.error('Home content save failed:', error);
+      toast.error(error?.response?.data?.message || error?.message || 'Could not save. Please try again.');
+    }
   };
 
   // Most Booked handlers
@@ -481,7 +493,10 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         await patchHome({ mostBooked: [...booked, { id: `hmb-${Date.now()}`, ...bookedForm }] });
       }
       resetBookedForm();
-    } catch (error) { }
+    } catch (error) {
+      console.error('Home content save failed:', error);
+      toast.error(error?.response?.data?.message || error?.message || 'Could not save. Please try again.');
+    }
   };
 
   // Category Section handlers
@@ -512,7 +527,10 @@ const HomePage = ({ catalog, setCatalog, selectedCity }) => {
         });
       }
       resetCategorySectionForm();
-    } catch (error) { }
+    } catch (error) {
+      console.error('Home content save failed:', error);
+      toast.error(error?.response?.data?.message || error?.message || 'Could not save. Please try again.');
+    }
   };
 
   // Card handlers for category sections

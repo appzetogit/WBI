@@ -291,13 +291,53 @@ const getWorkerJobs = async (req, res) => {
  * Get worker earnings
  */
 const getWorkerEarnings = async (req, res) => {
-  // Placeholder for now, can be expanded if we track granular worker earnings
-  res.status(200).json({
-    success: true,
-    data: {
-      totalEarnings: 0
+  try {
+    const mongoose = require('mongoose');
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid worker id' });
     }
-  });
+    const workerId = new mongoose.Types.ObjectId(id);
+    const worker = await Worker.findById(workerId).select('name wallet').lean();
+    if (!worker) return res.status(404).json({ success: false, message: 'Worker not found' });
+
+    const Transaction = require('../../models/Transaction');
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+
+    const [byType, transactions, total, completedJobs] = await Promise.all([
+      Transaction.aggregate([
+        { $match: { workerId, status: 'completed' } },
+        { $group: { _id: '$type', amount: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]),
+      Transaction.find({ workerId })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('type amount status paymentMethod description referenceId balanceBefore balanceAfter bookingId createdAt')
+        .lean(),
+      Transaction.countDocuments({ workerId }),
+      Booking.countDocuments({ workerId, status: 'completed' })
+    ]);
+
+    const sum = (types) => byType.filter((r) => types.includes(r._id)).reduce((a, r) => a + r.amount, 0);
+    res.status(200).json({
+      success: true,
+      data: {
+        balance: worker.wallet?.balance || 0,
+        totalEarnings: worker.wallet?.totalEarnings || sum(['earnings_credit', 'credit']),
+        paidOut: sum(['worker_payment', 'withdrawal', 'settlement']),
+        deductions: sum(['commission', 'platform_fee', 'penalty', 'tds_deduction', 'debit']),
+        completedJobs,
+        byType: byType.map((r) => ({ type: r._id, amount: r.amount, count: r.count })),
+        transactions
+      },
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (error) {
+    console.error('Get worker earnings error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch worker earnings.' });
+  }
 };
 
 /**
@@ -315,32 +355,61 @@ const payWorker = async (req, res) => {
       });
     }
 
-    const worker = await Worker.findById(id);
-    if (!worker) {
+    const amt = Math.round(parseFloat(amount) * 100) / 100;
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid worker id' });
+    }
+
+    // Atomic credit, then a ledger row carrying the balances either side, so
+    // every rupee in a worker's wallet is explained by a transaction.
+    const before = await Worker.findOneAndUpdate(
+      { _id: id },
+      { $inc: { 'wallet.balance': amt } },
+      { new: false }
+    ).select('name wallet');
+    if (!before) {
       return res.status(404).json({
         success: false,
         message: 'Worker not found'
       });
     }
+    const balanceBefore = before.wallet?.balance || 0;
+    const balanceAfter = Math.round((balanceBefore + amt) * 100) / 100;
 
-    // Update wallet balance
-    // Assuming balance is amount owed to Admin? 
-    // Usually admin pays worker, so worker balance increases or decreases?
-    // In this system, vendor owes admin (negative balance).
-    // For workers, positive balance probably means earnings they can withdraw.
-    // If admin pays them, it should reduce their pending balance or just reflect as a transaction.
-    // If the user says "pay worker", it usually means adding money to their wallet or clearing dues.
+    const Transaction = require('../../models/Transaction');
+    const txn = await Transaction.create({
+      workerId: before._id,
+      type: 'worker_payment',
+      amount: amt,
+      status: 'completed',
+      paymentMethod: 'bank_transfer',
+      description: notes ? String(notes).slice(0, 500) : 'Manual payment recorded by admin',
+      referenceId: reference ? String(reference).slice(0, 120) : null,
+      balanceBefore,
+      balanceAfter,
+      metadata: { recordedBy: req.user?._id || req.user?.id || null, source: 'admin_manual' }
+    });
 
-    if (!worker.wallet) worker.wallet = { balance: 0 };
-    worker.wallet.balance += parseFloat(amount);
-
-    await worker.save();
+    const { logAudit } = require('../../utils/auditLogger');
+    await logAudit({
+      actionType: 'ADMIN_WORKER_PAYMENT',
+      actorId: req.user?._id || req.user?.id || null,
+      actorRole: 'admin',
+      targetType: 'Worker',
+      targetId: before._id,
+      oldValue: { balance: balanceBefore },
+      newValue: { balance: balanceAfter, amount: amt, transactionId: txn._id, reference: reference || null },
+      reason: notes || '',
+      req
+    });
 
     res.status(200).json({
       success: true,
-      message: `Successfully recorded payment of ₹${amount} to ${worker.name}`,
+      message: `Successfully recorded payment of ₹${amt} to ${before.name}`,
       data: {
-        balance: worker.wallet.balance
+        balance: balanceAfter,
+        transactionId: txn._id
       }
     });
   } catch (error) {

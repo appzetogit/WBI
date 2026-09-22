@@ -1,0 +1,13 @@
+Customer Name,Phone,Email,Address,City,State,Pincode,Latitude,Longitude,Service,Sub Service,Priority,Preferred Date,Preferred Time
+Store 1 Manager,9876543201,store1@example.test,"Shop 1, Vijay Nagar",Indore,Madhya Pradesh,452001,22.7206,75.8587,AC Repair,Gas Refill,High,25/09/2026,10:00-12:00
+Store 2 Manager,9876543202,store2@example.test,"Shop 2, Vijay Nagar",Indore,Madhya Pradesh,452002,22.7216,75.85969999999999,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 3 Manager,9876543203,store3@example.test,"Shop 3, Vijay Nagar",Indore,Madhya Pradesh,452003,22.7226,75.8607,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 4 Manager,9876543204,store4@example.test,"Shop 4, Vijay Nagar",Indore,Madhya Pradesh,452004,22.7236,75.8617,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 5 Manager,9876543205,store5@example.test,"Shop 5, Vijay Nagar",Indore,Madhya Pradesh,452005,22.7246,75.86269999999999,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 6 Manager,9876543206,store6@example.test,"Shop 6, Vijay Nagar",Indore,Madhya Pradesh,452006,22.7256,75.8637,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 7 Manager,9876543207,store7@example.test,"Shop 7, Vijay Nagar",Indore,Madhya Pradesh,452007,22.7266,75.8647,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 8 Manager,9876543208,store8@example.test,"Shop 8, Vijay Nagar",Indore,Madhya Pradesh,452008,22.7276,75.86569999999999,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 9 Manager,9876543209,store9@example.test,"Shop 9, Vijay Nagar",Indore,Madhya Pradesh,452009,22.7286,75.8667,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Store 10 Manager,9876543210,store10@example.test,"Shop 10, Vijay Nagar",Indore,Madhya Pradesh,452010,22.7296,75.8677,AC Repair,Gas Refill,Medium,25/09/2026,10:00-12:00
+Bad Phone Row,12345,,"Shop X, Palasia",Indore,Madhya Pradesh,452001,22.7196,75.8577,AC Repair,,Medium,25/09/2026,
+Bad Pincode Row,9876500099,,"Shop Y, Palasia",Indore,Madhya Pradesh,45200,22.7196,75.8577,AC Repair,,Medium,25/09/2026,

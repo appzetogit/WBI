@@ -69,7 +69,7 @@ const EngineerDetailsDrawer = ({ engineerId, onClose }) => {
                 <div className="w-12 h-12 rounded-full bg-gray-200 animate-pulse" />
               ) : (
                 <img 
-                  src={engData?.profilePhoto || 'https://via.placeholder.com/150'} 
+                  src={engData?.profilePhoto || 'data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect width=%2240%22 height=%2240%22 fill=%22%23E6F4F2%22/%3E%3Ccircle cx=%2220%22 cy=%2216%22 r=%227%22 fill=%22%2310AFA5%22/%3E%3Cpath d=%22M6 36c2-8 8-11 14-11s12 3 14 11%22 fill=%22%2310AFA5%22/%3E%3C/svg%3E'} 
                   alt="Profile" 
                   className="w-12 h-12 rounded-full object-cover border border-gray-200"
                 />
@@ -81,7 +81,7 @@ const EngineerDetailsDrawer = ({ engineerId, onClose }) => {
                 {engData && (
                   <p className="text-xs font-semibold text-gray-500 mt-1 flex items-center gap-2">
                     <span className="text-yellow-500 flex items-center gap-1">
-                      <FiStar className="fill-current" /> {engData.rating?.toFixed(1) || '0.0'}
+                      <FiStar className="fill-current" /> {engData.rating != null ? Number(engData.rating).toFixed(1) : 'Not rated'}
                     </span>
                     <span>• ID: {engData._id?.slice(-6).toUpperCase()}</span>
                   </p>

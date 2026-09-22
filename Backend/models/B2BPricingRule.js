@@ -43,6 +43,27 @@ const b2bPricingRuleSchema = new mongoose.Schema({
     default: null,
     index: true
   },
+  /**
+   * Which level of the pricing chain this rule belongs to. Resolution order is
+   * fixed: CONTRACT override → COMPANY profile → DEFAULT matrix.
+   */
+  level: {
+    type: String,
+    enum: ['CONTRACT', 'COMPANY', 'DEFAULT'],
+    default: 'DEFAULT',
+    index: true
+  },
+  contractId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'B2BContract',
+    default: null,
+    index: true
+  },
+  /** Named profile this rule belongs to (B2BCompany.pricingProfile). */
+  pricingProfile: { type: String, default: null, trim: true, index: true },
+  /** ServiceConfig.categoryCode — the only routing/pricing identifier. null = any. */
+  serviceKey: { type: String, default: null, uppercase: true, trim: true, index: true },
+  subServiceKey: { type: String, default: null, uppercase: true, trim: true },
   /** Free-text service name as it appears on B2BJob.service. null = any. */
   service: { type: String, default: null, trim: true, index: true },
   subService: { type: String, default: null, trim: true },
@@ -72,6 +93,18 @@ const b2bPricingRuleSchema = new mongoose.Schema({
   serviceCharge: { type: Number, default: 0, min: 0 },
   /** Applied only when the job matched this rule on a geographic dimension. */
   geographicSurcharge: { type: Number, default: 0, min: 0 },
+  /** Charge per job priority (B2BJob.priority). */
+  priorityCharges: {
+    Low: { type: Number, default: 0, min: 0 },
+    Medium: { type: Number, default: 0, min: 0 },
+    High: { type: Number, default: 0, min: 0 }
+  },
+  /** Charge for a tightened SLA commitment. */
+  slaCharge: { type: Number, default: 0, min: 0 },
+  /** Charge for emergency jobs. */
+  emergencyCharge: { type: Number, default: 0, min: 0 },
+  /** Charge when the preferred slot falls outside business hours. */
+  afterHoursCharge: { type: Number, default: 0, min: 0 },
   additionalCharges: [additionalChargeSchema],
   volumeDiscounts: [volumeDiscountSchema],
 
@@ -98,5 +131,7 @@ const b2bPricingRuleSchema = new mongoose.Schema({
 // Resolution always filters on active + effective window, then scopes.
 b2bPricingRuleSchema.index({ isActive: 1, companyId: 1, service: 1, priority: -1 });
 b2bPricingRuleSchema.index({ isActive: 1, effectiveFrom: 1, effectiveTo: 1 });
+b2bPricingRuleSchema.index({ isActive: 1, level: 1, serviceKey: 1, priority: -1 });
+b2bPricingRuleSchema.index({ isActive: 1, contractId: 1, serviceKey: 1 });
 
 module.exports = mongoose.model('B2BPricingRule', b2bPricingRuleSchema);
