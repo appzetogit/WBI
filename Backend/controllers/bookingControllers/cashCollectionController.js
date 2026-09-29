@@ -143,7 +143,8 @@ exports.initiateCashCollection = async (req, res) => {
     }
 
     // Allow cash, pay_at_home, online (if user changes mind), AND plan_benefit (for final bill flow)
-    const allowedMethods = ['cash', 'pay_at_home', 'plan_benefit', 'online'];
+    // 'razorpay' is what one-time bookings are created with before any payment is captured
+    const allowedMethods = ['cash', 'pay_at_home', 'plan_benefit', 'online', 'razorpay'];
     if (!allowedMethods.includes(booking.paymentMethod)) {
       return res.status(400).json({ success: false, message: 'This booking is not eligible for cash collection' });
     }

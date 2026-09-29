@@ -22,8 +22,9 @@ class MatchingService {
    */
   async startMatching(bookingId) {
     try {
+      // serviceId stays a raw id: one-time bookings store a OneTimeService id, which
+      // populating via the 'Service' ref would null out and break worker matching.
       const booking = await Booking.findById(bookingId)
-        .populate({ path: 'serviceId', strictPopulate: false })
         .populate({ path: 'subServiceId', strictPopulate: false })
         .populate({ path: 'userId', select: 'name phone', strictPopulate: false });
       if (!booking) throw new Error('Booking not found');
@@ -557,7 +558,7 @@ class MatchingService {
   async continueMatching(bookingId) {
     try {
       const booking = await Booking.findById(bookingId)
-        .populate('serviceId subServiceId')
+        .populate('subServiceId')
         .populate('userId', 'name phone');
       if (!booking || booking.status !== 'searching_worker') {
         return;

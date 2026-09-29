@@ -2,6 +2,7 @@ const Worker = require('../../models/Worker');
 const Transaction = require('../../models/Transaction');
 const Booking = require('../../models/Booking');
 const Withdrawal = require('../../models/Withdrawal');
+const { holdBalance, releaseHold, resolvePayoutDestination } = require('../../services/fieldWithdrawalGuard.service');
 
 /**
  * Get worker wallet with ledger balance
@@ -231,31 +232,47 @@ const getWalletSummary = async (req, res) => {
 const requestWithdrawal = async (req, res) => {
   try {
     const workerId = req.user.id;
-    const { amount, bankDetails } = req.body;
+    const { method, upiId } = req.body;
+    const amount = Number(req.body.amount);
     
     const worker = await Worker.findById(workerId);
     if (!worker) return res.status(404).json({ success: false, message: 'Worker not found' });
 
-    if (!amount || amount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid withdrawal amount' });
     }
 
-    if (worker.wallet.balance < amount) {
-      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    const destination = await resolvePayoutDestination({
+      ownerId: workerId,
+      method,
+      upiId,
+      savedUpiId: worker.bankDetails?.upiId
+    });
+    if (!destination.ok) {
+      return res.status(destination.status).json({ success: false, message: destination.message });
     }
 
-    // Deduct available balance
-    worker.wallet.balance -= amount;
-    worker.wallet.pendingBalance += amount;
-    await worker.save();
+    // Atomic hold: concurrent requests cannot both spend the same balance
+    const held = await holdBalance(Worker, workerId, amount);
+    if (!held) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
+    worker.wallet = held.wallet;
 
-    const withdrawal = await Withdrawal.create({
-      workerId,
-      amount,
-      status: 'pending',
-      bankDetails,
-      requestDate: new Date()
-    });
+    let withdrawal;
+    try {
+      withdrawal = await Withdrawal.create({
+        workerId,
+        amount,
+        method: destination.method,
+        status: 'pending',
+        bankDetails: destination.payoutDetails,
+        requestDate: new Date()
+      });
+    } catch (createErr) {
+      await releaseHold(Worker, workerId, amount);
+      throw createErr;
+    }
 
     const transaction = await Transaction.create({
       workerId,
@@ -271,7 +288,7 @@ const requestWithdrawal = async (req, res) => {
     // Notify admins
     const { createNotification } = require('../notificationControllers/notificationController');
     const Admin = require('../../models/Admin');
-    const admins = await Admin.find({ role: { $in: ['Super Admin', 'Finance'] } });
+    const admins = await Admin.find({ role: { $in: ['super_admin', 'admin'] }, isActive: { $ne: false } });
     
     for (const admin of admins) {
       await createNotification({

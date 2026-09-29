@@ -57,7 +57,7 @@ const authenticate = async (req, res, next) => {
         user = await Vendor.findById(decoded.userId).select('-password').lean();
         
         // Allow unapproved vendors to access specific onboarding routes
-        const vendorAllowedPaths = ['/activate-account', '/vendors/profile'];
+        const vendorAllowedPaths = ['/activate-account', '/vendors/profile', '/api/kyc/'];
         const isVendorAllowedPath = vendorAllowedPaths.some(p => req.originalUrl.includes(p));
 
         if (user && user.approvalStatus !== 'approved' && !isVendorAllowedPath) {
@@ -77,6 +77,10 @@ const authenticate = async (req, res, next) => {
         break;
       case USER_ROLES.WORKER:
         user = await Worker.findById(decoded.userId).select('-password').lean();
+        // Suspension sets isActive=false — an existing session must stop working too
+        if (user && user.isActive === false) {
+          return res.status(403).json({ success: false, message: 'Account is deactivated. Contact support.' });
+        }
         // SINGLE DEVICE LOGOUT Logic
         if (user && user.loginSessionId && decoded.loginSessionId && user.loginSessionId !== decoded.loginSessionId) {
           return res.status(401).json({ success: false, message: 'Account logged in on another device. Please login again.' });
@@ -85,6 +89,9 @@ const authenticate = async (req, res, next) => {
       case USER_ROLES.ENGINEER:
         const Engineer = require('../models/Engineer');
         user = await Engineer.findById(decoded.userId).select('-password').lean();
+        if (user && user.isActive === false) {
+          return res.status(403).json({ success: false, message: 'Account is deactivated. Contact support.' });
+        }
         // SINGLE DEVICE LOGOUT Logic
         if (user && user.loginSessionId && decoded.loginSessionId && user.loginSessionId !== decoded.loginSessionId) {
           return res.status(401).json({ success: false, message: 'Account logged in on another device. Please login again.' });

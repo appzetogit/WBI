@@ -75,7 +75,9 @@ engineerPaymentSchema.index({ engineerDraftId: 1, status: 1 });
 // Unique when present — blocks duplicate joining-fee capture for same Razorpay payment id
 engineerPaymentSchema.index(
   { razorpayPaymentId: 1 },
-  { unique: true, sparse: true, partialFilterExpression: { razorpayPaymentId: { $type: 'string' } } }
+  // No `sparse` here: MongoDB rejects sparse combined with partialFilterExpression,
+  // and the partial filter already skips null ids.
+  { unique: true, partialFilterExpression: { razorpayPaymentId: { $type: 'string' } } }
 );
 
 module.exports = mongoose.model('EngineerPayment', engineerPaymentSchema);

@@ -510,6 +510,33 @@ const loadRoutingCatalog = () => {
 };
 
 /**
+ * The admin's company controls: a company restricted to certain services or
+ * locations may only raise jobs inside them. Empty lists mean unrestricted.
+ * 'zone' entries cannot be judged from a row, so they never block on their own.
+ */
+const companyAccessIssues = (mapped, company) => {
+  const issues = [];
+  if (!company) return issues;
+  const allowedServices = (company.allowedServices || []).map((s) => String(s).toUpperCase().trim()).filter(Boolean);
+  if (allowedServices.length && mapped.serviceKey && !allowedServices.includes(String(mapped.serviceKey).toUpperCase())) {
+    issues.push(issue('service', mapped.service, `"${mapped.service}" is not enabled for your company`, 'Ask your account manager to enable this service'));
+  }
+  const norm = (v) => String(v || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const judged = (company.allowedLocations || []).filter((l) => l && l.value && ['city', 'pincode', 'state'].includes(l.type || 'city'));
+  if (judged.length) {
+    const inside = judged.some((l) => {
+      const type = l.type || 'city';
+      if (type === 'pincode') return String(mapped.pincode || '').replace(/[^0-9]/g, '') === String(l.value).replace(/[^0-9]/g, '');
+      return norm(type === 'state' ? mapped.state : mapped.city) === norm(l.value);
+    });
+    if (!inside) {
+      issues.push(issue('city', mapped.city, 'this location is outside the areas enabled for your company', `Allowed: ${judged.map((l) => l.value).join(', ')}`));
+    }
+  }
+  return issues;
+};
+
+/**
  * Persist what routing needs on the row: the catalog service key, sub-service
  * key, config id and SLA due date. Resolved once here, never inferred later.
  */
@@ -640,6 +667,7 @@ const processValidation = async (batchId, app) => {
 
     // 3. Set up batching variables
     const serviceCatalog = await loadRoutingCatalog();
+    const accessCompany = await B2BCompany.findById(batch.companyId).select('allowedServices allowedLocations').lean();
     const VendorServiceCoverage = require('../models/VendorServiceCoverage');
     const coverageCache = new Map();
     const hasCoverage = async (row) => {
@@ -748,6 +776,7 @@ const processValidation = async (batchId, app) => {
       mapped.latitude = finalLat;
       mapped.longitude = finalLng;
       enrichRowForRouting(mapped, serviceCatalog);
+      issues.push(...companyAccessIssues(mapped, accessCompany));
 
       // Final schema gate — never let a row that would fail Mongoose
       // "validate" count as valid just because field presence checks passed.
@@ -1442,6 +1471,12 @@ const processJobCreation = async (batchId, app) => {
     if (createdCount > 0) {
       const EscrowLedger = require('../models/EscrowLedger');
       const perJob = parseFloat(Number(batch.perJobCharge).toFixed(2));
+      // Hold each job's own quoted price: perJobCharge is the batch average, and
+      // using it would over/under-charge every job that was priced differently.
+      const jobCharges = new Map(
+        (await B2BJob.find({ _id: { $in: jobIdsList } }).select('charge').lean())
+          .map((j) => [String(j._id), Number(j.charge)])
+      );
       for (const jobMongoId of jobIdsList) {
         try {
           const exists = await EscrowLedger.findOne({
@@ -1449,12 +1484,14 @@ const processJobCreation = async (batchId, app) => {
             sourceId: jobMongoId
           }).select('_id').lean();
           if (exists) continue;
+          const ownCharge = jobCharges.get(String(jobMongoId));
+          const held = parseFloat((ownCharge > 0 ? ownCharge : perJob).toFixed(2));
           await EscrowLedger.create({
             paymentId: jobMongoId,
             sourceType: 'b2b_job',
             sourceId: jobMongoId,
-            grossAmount: perJob,
-            heldAmount: perJob,
+            grossAmount: held,
+            heldAmount: held,
             releasedAmount: 0,
             status: 'held',
             releaseReason: `b2b_bulk:${batch.batchId}`

@@ -82,6 +82,35 @@ async function onPaymentCaptured(payment) {
     return;
   }
 
+  // B2B wallet top-up: the checkout page normally calls verify-topup-payment,
+  // but if the tab closes after capture the money must still reach the wallet.
+  if (payment.order_id) {
+    const B2BWalletTransaction = require('../../models/B2BWalletTransaction');
+    const topup = await B2BWalletTransaction.findOne({
+      razorpayOrderId: payment.order_id,
+      type: 'topup',
+      status: 'pending'
+    });
+    if (topup) {
+      const walletLedger = require('../../services/b2bWalletLedger.service');
+      try {
+        await walletLedger.topUp({
+          companyId: topup.companyId,
+          amount: topup.amount,
+          paymentMethod: topup.paymentMethod || 'razorpay',
+          paymentMode: razorpayService.isTestMode() ? 'DEMO' : null,
+          razorpay: { orderId: payment.order_id, paymentId: payment.id },
+          remark: 'Wallet top-up confirmed by Razorpay webhook',
+          applyToTransactionId: topup._id
+        });
+      } catch (err) {
+        // verify-topup-payment got there first — nothing left to credit
+        if (err.code !== 'TXN_NOT_PENDING') throw err;
+      }
+      return;
+    }
+  }
+
   if (notes.bookingId) {
     const booking = await Booking.findById(notes.bookingId);
     if (booking && booking.paymentStatus !== 'success' && booking.paymentStatus !== 'Success') {

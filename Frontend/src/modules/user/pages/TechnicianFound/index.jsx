@@ -416,17 +416,24 @@ const TechnicianFound = () => {
           </div>
           <h2 className={styles.workerName}>{workerObj.name}</h2>
 
+          {/* Real figures only — a new technician is shown as New, never with invented stats */}
           <div className={styles.ratingRow}>
             <span className={styles.starIcon}>★</span>
-            <span className={styles.ratingText}>{workerObj.rating || '4.9'}</span>
-            <span className={styles.reviewsText}>
-              ({workerObj.totalReviews > 0 ? workerObj.totalReviews : '2.1K'}+)
-            </span>
+            {workerObj.totalReviews > 0 ? (
+              <>
+                <span className={styles.ratingText}>{workerObj.rating}</span>
+                <span className={styles.reviewsText}>({workerObj.totalReviews})</span>
+              </>
+            ) : (
+              <span className={styles.ratingText}>New</span>
+            )}
           </div>
 
-          <div className={styles.experienceText}>
-            Experience: {workerObj.experience || '6+'} years
-          </div>
+          {workerObj.experience ? (
+            <div className={styles.experienceText}>
+              Experience: {workerObj.experience} years
+            </div>
+          ) : null}
         </div>
 
         <div className={styles.statsContainer}>
@@ -442,7 +449,7 @@ const TechnicianFound = () => {
           <div className={styles.statDivider}></div>
           <div className={styles.statBox}>
             <div className={styles.statValue}>
-              {workerObj.totalJobs > 0 ? workerObj.totalJobs : '1250'}+
+              {workerObj.completedJobs || workerObj.totalJobs || 0}
             </div>
             <div className={styles.statLabel}>Jobs Done</div>
           </div>

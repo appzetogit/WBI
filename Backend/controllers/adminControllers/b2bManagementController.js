@@ -304,7 +304,12 @@ const verifyCompany = async (req, res) => {
       return res.status(404).json({ success: false, message: 'B2B Company not found' });
     }
 
-    company.verificationStatus = 'verified'; // or approved
+    // Same end state as approveCompany: panels and tabs only understand 'approved'
+    company.verificationStatus = 'approved';
+    if (!['SUSPENDED', 'INACTIVE'].includes(company.accountStatus)) {
+      company.accountStatus = 'ACTIVE';
+      company.isActive = true;
+    }
     company.rejectionReason = null;
     company.verifiedOn = new Date();
     company.verifiedBy = req.user?.email || 'Admin Team';

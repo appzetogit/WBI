@@ -15,6 +15,11 @@ const REGISTRATION_SMS_TEMPLATE_VERSION = '2026-07-21-unified-dlt-otp';
  */
 const sendSMS = async (phone, message, options = {}) => {
   try {
+    // QA/bypass phones are test accounts — never spend a real SMS on them
+    if (isOtpBypassPhone(phone)) {
+      console.log(`[SMS] Bypass phone — SMS not sent for ${phone}`);
+      return { success: true, bypassed: true };
+    }
     const senderId =
       options.senderId || process.env.SMS_INDIA_HUB_SENDER_ID;
     if (!process.env.SMS_INDIA_HUB_API_KEY || !senderId) {

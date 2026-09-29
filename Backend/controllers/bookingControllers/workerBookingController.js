@@ -504,11 +504,11 @@ const completeJob = async (req, res) => {
     const { id } = req.params;
     const { workPhotos, workDoneDetails, customerSignature, completionReport } = req.body;
 
+    // Only the assigned worker/engineer may complete — a merely notified worker never won the job.
     const booking = await Booking.findOne({
       _id: id,
       $or: [
         { workerId },
-        { notifiedWorkers: workerId },
         { engineerId: workerId }
       ]
     });
@@ -520,7 +520,22 @@ const completeJob = async (req, res) => {
       });
     }
 
-    const isPrepaid = booking.paymentStatus === 'paid' || booking.paymentStatus === 'success' || booking.paymentMethod === 'online' || booking.paymentMethod === 'razorpay';
+    // Work can only be completed once the visit OTP is verified (or to re-submit a done job).
+    const completableStatuses = [
+      BOOKING_STATUS.VISITED,
+      BOOKING_STATUS.SERVICE_STARTED,
+      BOOKING_STATUS.IN_PROGRESS,
+      BOOKING_STATUS.WORK_DONE
+    ];
+    if (!completableStatuses.includes(booking.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Job cannot be completed from status "${booking.status}". Verify the visit OTP first.`
+      });
+    }
+
+    // Prepaid means money was actually captured — the chosen method alone is not a payment.
+    const isPrepaid = booking.paymentStatus === 'paid' || booking.paymentStatus === 'success';
 
     // Update booking status
     if (isPrepaid) {
