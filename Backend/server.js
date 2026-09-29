@@ -424,6 +424,8 @@ app.use('/api/engineers/freelancer-pool', require('./routes/engineer-routes/free
 
 // B2B routes
 app.use('/api/b2b', require('./routes/b2b-routes/auth.routes'));
+app.use('/api/b2b/disputes', require('./routes/shared/disputeParty.routes').b2bDisputeRoutes);
+app.use('/api/users/disputes', require('./routes/shared/disputeParty.routes').userDisputeRoutes);
 app.use('/api/b2b/onboarding', require('./routes/b2b-routes/enterpriseOnboarding.routes'));
 app.use('/api/b2b/company-profile', require('./routes/b2b-routes/profile.routes'));
 app.use('/api/b2b/bulk-jobs', require('./routes/b2b-routes/bulkJobs.routes'));
@@ -439,6 +441,14 @@ app.use('/api/b2b/fcm-tokens', require('./routes/b2b-routes/fcmToken.routes'));
 // Admin Auth routes (mounted first to prevent generic /api/admin middleware interception)
 app.use('/api/admin/auth', require('./routes/admin-routes/adminAuth.routes'));
 app.use('/api/admin', rateLimiter.adminApiLimiter);
+// Every /api/admin route: authentication, admin RBAC and audit logging (see middleware/adminAccess.js)
+app.use('/api/admin', require('./middleware/adminAccess').adminAccess);
+app.use('/api/admin', require('./routes/admin-routes/rbacAudit.routes'));
+app.use('/api/admin', require('./routes/admin-routes/vendorOfferingAdmin.routes'));
+app.use('/api/admin', require('./routes/admin-routes/disputeAdmin.routes'));
+app.use('/api/admin', require('./routes/admin-routes/adminOps.routes'));
+app.use('/api/admin', require('./routes/admin-routes/adminPeople.routes'));
+app.use('/api/admin', require('./routes/admin-routes/locationAdmin.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bManagement.routes'));
 app.use('/api/admin/b2b-onboarding', require('./routes/admin-routes/b2bEnterpriseOnboarding.routes'));
 app.use('/api/admin', require('./routes/admin-routes/b2bBulkJobAdmin.routes'));

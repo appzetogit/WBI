@@ -233,6 +233,13 @@ const register = async (req, res) => {
     // Start Mongoose Transaction Session
     const session = await mongoose.startSession();
     session.startTransaction(TXN_OPTS);
+    // Several validation branches return early; never leave the transaction or session open
+    res.once('finish', () => {
+      if (session.hasEnded) return;
+      const close = () => session.endSession();
+      if (session.inTransaction()) session.abortTransaction().catch(() => {}).finally(close);
+      else close();
+    });
 
     try {
       // Check existing

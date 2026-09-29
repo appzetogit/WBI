@@ -829,10 +829,19 @@ const Bookings = () => {
                           <button
                             type="button"
                             onClick={async () => {
+                              // Real refund: amount (blank = everything refundable) + reason for the audit log
+                              const refundable = Number(selectedBooking.finalAmount || 0) - Number(selectedBooking.refundedAmount || 0);
+                              const amountText = window.prompt(`Refund amount in ₹ (max ₹${refundable.toFixed(2)}; blank = full)`, '');
+                              if (amountText === null) return;
+                              const reason = window.prompt('Reason for the refund:');
+                              if (!reason) return;
                               try {
                                 toast.loading('Initiating refund...', { id: 'payment' });
-                                await adminBookingService.paymentAction(selectedBooking._id, 'refund');
-                                toast.success('Payment refunded!', { id: 'payment' });
+                                const res = await adminBookingService.paymentAction(selectedBooking._id, 'refund', {
+                                  amount: amountText.trim() === '' ? undefined : Number(amountText),
+                                  reason
+                                });
+                                toast.success(res?.message || 'Refund issued', { id: 'payment' });
                                 setActiveModal(null);
                                 fetchData();
                               } catch (err) {

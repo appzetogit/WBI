@@ -284,11 +284,13 @@ const findEligibleWorkers = async (booking, radiusKm = 100) => {
     } else if (city && city !== 'unknown' && normalizeName(worker.address?.city) === city) {
       distance = radiusKm;
       withinRange = true;
-    } else if (!center || !coords) {
-      // In local dev/testing or when coordinates are omitted, allow wave broadcast
+    } else if (!center) {
+      // Booking has no coordinates at all: fall back to a wave broadcast
       distance = radiusKm;
       withinRange = true;
     }
+    // A worker without coordinates (and not in the booking's city) is never
+    // matched to a located booking — otherwise they would get jobs anywhere.
 
     if (!withinRange) continue;
 

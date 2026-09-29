@@ -257,6 +257,18 @@ const bookingSchema = new mongoose.Schema({
     default: null,
     index: true
   },
+  // Refunds issued against this booking (admin → Razorpay or customer wallet)
+  refundedAmount: { type: Number, default: 0 },
+  refunds: [{
+    amount: Number,
+    method: { type: String, enum: ['razorpay', 'wallet'] },
+    refundId: String,
+    status: { type: String, enum: ['pending', 'processed', 'failed'], default: 'pending' },
+    reason: String,
+    disputeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Dispute', default: null },
+    by: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    at: { type: Date, default: Date.now }
+  }],
   razorpayPaymentId: {
     type: String,
     default: null
@@ -508,5 +520,36 @@ bookingSchema.index({ notifiedWorkers: 1, status: 1 });
 bookingSchema.index({ 'potentialVendors.vendorId': 1 });
 // Dashboard: $or on { vendorId: null, serviceCategory: ..., status: ... }
 bookingSchema.index({ vendorId: 1, serviceCategory: 1, status: 1 });
+
+// Every status change lands on the booking timeline (admin "Timeline" view),
+// even from code paths that don't write one themselves. Skips a status the
+// controller already recorded in the last minute.
+const TIMELINE_TITLES = {
+  searching_worker: 'Searching for professionals', worker_assigned: 'Professional assigned', assigned: 'Professional assigned',
+  accepted: 'Booking accepted', journey_started: 'Professional on the way', arrived: 'Professional arrived',
+  visited: 'Visit verified with OTP', service_started: 'Service started', in_progress: 'Work in progress',
+  work_done: 'Work completed', completed: 'Booking completed', paid: 'Payment received', cancelled: 'Booking cancelled',
+  refunded: 'Payment refunded', disputed: 'Dispute raised', admin_action_required: 'Needs admin action', scheduled: 'Booking scheduled'
+};
+bookingSchema.pre('save', function (next) {
+  this.$locals.statusChanged = this.isModified('status');
+  next();
+});
+bookingSchema.post('save', async function (doc) {
+  if (!doc.$locals?.statusChanged || !doc.status) return;
+  try {
+    const BookingTimeline = mongoose.models.BookingTimeline || require('./BookingTimeline');
+    const recent = await BookingTimeline.exists({ bookingId: doc._id, status: doc.status, createdAt: { $gte: new Date(Date.now() - 60 * 1000) } });
+    if (recent) return;
+    await BookingTimeline.create({
+      bookingId: doc._id,
+      status: doc.status,
+      title: TIMELINE_TITLES[doc.status] || `Status: ${doc.status.replace(/_/g, ' ')}`,
+      actorRole: 'system'
+    });
+  } catch (err) {
+    console.warn('[Booking] timeline hook:', err.message);
+  }
+});
 
 module.exports = mongoose.model('Booking', bookingSchema);

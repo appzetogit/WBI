@@ -73,6 +73,7 @@ const login = async (req, res) => {
         name: admin.name,
         email: admin.email,
         role: admin.role,
+        permissions: await require('../../services/adminRbac.service').effectivePermissions(admin),
         cityId: admin.cityId,
         cityName: admin.cityName
       },
@@ -162,6 +163,7 @@ const getProfile = async (req, res) => {
         name: admin.name,
         email: admin.email,
         role: admin.role,
+        permissions: await require('../../services/adminRbac.service').effectivePermissions(admin),
         cityId: admin.cityId,
         cityName: admin.cityName
       }

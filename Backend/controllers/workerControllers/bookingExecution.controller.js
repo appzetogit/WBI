@@ -210,14 +210,16 @@ exports.completeService = async (req, res) => {
 
     // Finalize amount
     // Base logic: basePrice + tax + extraCharges - discount
+    // Same components the customer was quoted: services + visit + platform fee + tax
     let total = booking.basePrice || 0;
-    booking.extraCharges.forEach(ec => {
+    total += (booking.visitingCharges || 0) + (booking.platformFee || 0);
+    (booking.extraCharges || []).forEach(ec => {
       total += ec.total;
     });
     total += (booking.tax || 0);
     total -= (booking.discount || 0);
-    
-    booking.finalAmount = Math.max(total, 0);
+
+    booking.finalAmount = Math.max(Math.round(total * 100) / 100, 0);
     booking.userPayableAmount = booking.finalAmount;
 
     booking.status = BOOKING_STATUS.WORK_DONE;

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { FiSearch, FiUser, FiPhone, FiMail, FiCheckCircle, FiSlash, FiCheck, FiTrash2 } from 'react-icons/fi';
+import { FiSearch, FiUser, FiPhone, FiMail, FiCheckCircle, FiSlash, FiCheck, FiTrash2, FiEye } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { adminUserService } from '../../../../services/adminUserService';
+import UserDetailModal from './UserDetailModal';
 
 const AllUsers = () => {
   const [users, setUsers] = useState([]);
@@ -15,6 +16,7 @@ const AllUsers = () => {
 
   // Debounce search
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [viewUserId, setViewUserId] = useState(null);
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 500);
     return () => clearTimeout(timer);
@@ -52,12 +54,14 @@ const AllUsers = () => {
   }, [page, debouncedSearch, statusFilter]);
 
   const handleStatusToggle = async (userId, currentStatus) => {
-    if (!window.confirm(`Are you sure you want to ${currentStatus ? 'block' : 'activate'} this user?`)) {
+    // The reason is stored in the audit log with the old/new status
+    const reason = window.prompt(`Reason to ${currentStatus ? 'block' : 'activate'} this user:`);
+    if (!reason) {
       return;
     }
 
     try {
-      const response = await adminUserService.toggleUserStatus(userId, !currentStatus);
+      const response = await adminUserService.toggleUserStatus(userId, !currentStatus, reason);
       if (response.success) {
         toast.success(response.message);
         setUsers(users.map(user =>
@@ -181,6 +185,13 @@ const AllUsers = () => {
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1.5">
                         <button
+                          onClick={() => setViewUserId(user._id)}
+                          className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="View details"
+                        >
+                          <FiEye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => handleStatusToggle(user._id, user.isActive)}
                           className={`p-1.5 rounded-lg transition-colors ${user.isActive
                             ? 'text-red-500 hover:bg-red-50'
@@ -231,6 +242,7 @@ const AllUsers = () => {
           </div>
         )}
       </div>
+      {viewUserId && <UserDetailModal userId={viewUserId} onClose={() => setViewUserId(null)} onChanged={() => setPage((p) => p)} />}
     </div>
   );
 };

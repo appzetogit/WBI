@@ -597,6 +597,8 @@ const vendorSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  // Platform commission % for this vendor's B2B payouts; null = category/platform default
+  commissionOverride: { type: Number, default: null, min: 0, max: 100 },
   totalReviews: {
     type: Number,
     default: 0

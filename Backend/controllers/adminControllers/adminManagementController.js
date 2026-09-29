@@ -126,10 +126,11 @@ const updateAdminRole = async (req, res) => {
     const { id } = req.params;
     const { role } = req.body;
 
-    if (!['super_admin', 'admin'].includes(role)) {
+    const { ADMIN_ROLE_KEYS } = require('../../config/adminPermissions');
+    if (!ADMIN_ROLE_KEYS.includes(role)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid role. Must be super_admin or admin'
+        message: `Invalid role. Must be one of: ${ADMIN_ROLE_KEYS.join(', ')}`
       });
     }
 

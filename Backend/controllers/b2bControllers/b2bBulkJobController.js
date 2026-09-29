@@ -105,7 +105,7 @@ const getTemplateSpec = async (req, res) => {
     const ServiceConfig = require('../../models/ServiceConfig');
     const [cfg, company, services] = await Promise.all([
       getB2BConfig(),
-      B2BCompany.findById(companyId).select('allowedServices').lean(),
+      B2BCompany.findById(companyId).select('allowedServices bulkUploadLimit').lean(),
       ServiceConfig.find({ isActive: { $ne: false } }).select('categoryName categoryCode').sort({ categoryName: 1 }).lean()
     ]);
     const allowedKeys = (company?.allowedServices || []).map((s) => String(s).toUpperCase());
@@ -119,7 +119,7 @@ const getTemplateSpec = async (req, res) => {
       data: {
         columns: b2bBulkJobService.templateSpec(),
         limits: {
-          maxRows: bulk.maxRows || 1000,
+          maxRows: company?.bulkUploadLimit || bulk.maxRows || 1000,
           maxFileSizeMb: bulk.maxFileSizeMb || 10,
           allowedExtensions: bulk.allowedExtensions?.length ? bulk.allowedExtensions : ['.xlsx', '.xls', '.csv'],
           rejectUnknownColumns: Boolean(bulk.rejectUnknownColumns),
@@ -280,12 +280,17 @@ const uploadFile = async (req, res) => {
       totalRows: 0,
       walletBalanceAtUpload: wallet.balance,
       perJobCharge: rule.perJobCharge,
-      createdBy: companyId
+      createdBy: companyId,
+      uploadedBy: {
+        userId: req.user?._id || req.user?.id || companyId,
+        role: req.user?.isCompanyLogin === false ? (req.user?.accessRole || 'B2B_USER') : 'COMPANY_ADMIN',
+        name: req.user?.fullName || req.user?.name || req.user?.companyName || ''
+      }
     });
 
     // Log Action
     await AuditLog.create({
-      actionType: 'BANK_DETAILS_UPDATE', // Reusing available enum value to satisfy schema validator constraint
+      actionType: 'B2B_BULK_UPLOAD',
       actorId: companyId,
       actorRole: 'company',
       targetId: batch._id,
@@ -358,7 +363,8 @@ const getHistory = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      batches,
+      // Server file paths never leave the API
+      batches: batches.map((d) => { const { fileUrl, ...b } = d.toObject ? d.toObject() : d; return b; }),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -396,7 +402,7 @@ const getBatchDetails = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      batch,
+      batch: (({ fileUrl, ...b }) => b)(batch.toObject ? batch.toObject() : batch),
       preview: {
         totalRows: batch.totalRows,
         validRows: batch.validRows,

@@ -162,7 +162,8 @@ const OneTimeServiceCheckout = () => {
       if (res.data.success) {
         const addrList = res.data.data;
         setAddresses(addrList);
-        setSelectedAddress(null); // Force explicit selection
+        // Preselect only the address the user marked as default; otherwise they choose
+        setSelectedAddress(addrList.find((a) => a.isDefault) || null);
       } else {
         setApiFailed(true);
       }

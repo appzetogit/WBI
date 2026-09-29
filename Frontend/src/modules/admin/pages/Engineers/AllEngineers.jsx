@@ -10,6 +10,8 @@ import adminEngineerService from '../../../../services/adminEngineerService';
 import verificationService from '../../../../services/verificationService';
 import { formatEngineerServiceLabel } from '../../utils/adminHelpers';
 
+import EngineerAdminControls from '../../components/people/EngineerAdminControls';
+
 const display = (value) => {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -104,7 +106,9 @@ const AllEngineers = () => {
   const navigate = useNavigate();
   const [engineers, setEngineers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'pending', 'approved', 'rejected'
+  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'pending', 'approved', 'rejected', 'suspended'
+  const [filterType, setFilterType] = useState('all'); // vendor_engineer | freelancer
+  const [filterAvailability, setFilterAvailability] = useState('all'); // online | offline
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEngineer, setSelectedEngineer] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -148,7 +152,9 @@ const AllEngineers = () => {
             other: engineer.otherDocuments?.[0]
           },
           createdAt: engineer.createdAt,
-          isActive: engineer.isActive
+          isActive: engineer.isActive,
+          engineerType: engineer.engineerType || 'freelancer',
+          online: String(engineer.status || '').toUpperCase() === 'ONLINE' || String(engineer.status || '').toUpperCase() === 'BUSY'
         }));
         setEngineers(transformedEngineers);
       } else {
@@ -165,14 +171,16 @@ const AllEngineers = () => {
   const filteredEngineers = useMemo(() => {
     return engineers.filter(engineer => {
       const matchesStatus = filterStatus === 'all' || engineer.approvalStatus === filterStatus;
+      const matchesType = filterType === 'all' || engineer.engineerType === filterType;
+      const matchesAvailability = filterAvailability === 'all' || (filterAvailability === 'online' ? engineer.online : !engineer.online);
       const matchesSearch =
         engineer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         engineer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
         engineer.phone.includes(searchQuery) ||
         engineer.serviceCategory.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesStatus && matchesSearch;
+      return matchesStatus && matchesType && matchesAvailability && matchesSearch;
     });
-  }, [engineers, filterStatus, searchQuery]);
+  }, [engineers, filterStatus, filterType, filterAvailability, searchQuery]);
 
   const handleApprove = async (engineerId) => {
     try {
@@ -415,7 +423,17 @@ const AllEngineers = () => {
             />
           </div>
           <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            {['all', 'pending', 'approved', 'rejected'].map((status) => (
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="px-2 py-2 rounded-lg text-xs font-bold bg-gray-100 text-gray-600">
+              <option value="all">All types</option>
+              <option value="vendor_engineer">Vendor engineers</option>
+              <option value="freelancer">Freelancers</option>
+            </select>
+            <select value={filterAvailability} onChange={(e) => setFilterAvailability(e.target.value)} className="px-2 py-2 rounded-lg text-xs font-bold bg-gray-100 text-gray-600">
+              <option value="all">Online + offline</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+            </select>
+            {['all', 'pending', 'approved', 'rejected', 'suspended'].map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status)}
@@ -627,6 +645,8 @@ const AllEngineers = () => {
                 <DetailField label="Referral Code">{display(selectedEngineer.referralCode)}</DetailField>
               </div>
             </div>
+
+            <EngineerAdminControls kind="engineers" person={selectedEngineer} onSaved={() => reloadEngineerDetails(selectedEngineer.id)} />
 
             {/* Skills & categories */}
             <div>

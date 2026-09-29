@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 import AnimatedPage from '../../../components/common/AnimatedPage';
 import DigitalVendorLayout from '../components/layout/DigitalVendorLayout';
+import { VendorSocketProvider } from '../context/VendorSocketContext';
 import ErrorBoundary from '../components/common/ErrorBoundary';
 import ProtectedRoute from '../../../components/auth/ProtectedRoute';
 import PublicRoute from '../../../components/auth/PublicRoute';
@@ -203,7 +204,7 @@ const VendorRoutes = () => {
             <Route path="/" element={<ProtectedRoute userType="vendor"><VendorHomeRedirect suffix="dashboard" /></ProtectedRoute>} />
 
             {/* Digital Solution specific routes (Main Vendor Layout now) */}
-            <Route element={<ProtectedRoute userType="vendor"><DigitalVendorLayout /></ProtectedRoute>}>
+            <Route element={<ProtectedRoute userType="vendor"><VendorSocketProvider><DigitalVendorLayout /></VendorSocketProvider></ProtectedRoute>}>
               <Route path="digital-solution/dashboard" element={<VendorHomeRedirect suffix="dashboard" />} />
               <Route path="digital-solution/requests" element={<AnimatedPage><Requests /></AnimatedPage>} />
               <Route path="digital-solution/requests/*" element={<AnimatedPage><Requests /></AnimatedPage>} />

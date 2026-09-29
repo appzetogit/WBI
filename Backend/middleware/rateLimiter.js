@@ -29,10 +29,28 @@ const createRedisStore = (prefix) => {
   }
 };
 
+/**
+ * Signed-in callers are limited per account, anonymous ones per IP. Keying
+ * everything by IP made a whole office (one NAT address) share one budget.
+ * An unverifiable token falls back to the IP, so it can't mint fresh buckets.
+ */
+const userOrIpKey = (req) => {
+  const header = req.headers?.authorization || '';
+  if (header.startsWith('Bearer ')) {
+    try {
+      const { verifyAccessToken } = require('../utils/tokenService');
+      const decoded = verifyAccessToken(header.slice(7));
+      if (decoded?.userId) return `u:${decoded.userId}`;
+    } catch (_) { /* fall through to IP */ }
+  }
+  return req.ip;
+};
+
 const baseOpts = {
   standardHeaders: true,
   legacyHeaders: false,
-  passOnStoreError: !isProd
+  passOnStoreError: !isProd,
+  keyGenerator: userOrIpKey
 };
 
 /** General API — default 100 req/min/IP (Phase 9) */
@@ -40,7 +58,7 @@ const rateLimiter = rateLimit({
   ...baseOpts,
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
-  message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  message: { success: false, message: 'Too many requests, please try again later.' },
   store: createRedisStore('global')
 });
 

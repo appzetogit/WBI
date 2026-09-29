@@ -47,6 +47,7 @@ const OperationsTab = ({ company, onChanged }) => {
     slaProfile: company.slaProfile || '',
     billingMode: company.billingMode || 'LIVE',
     creditLimit: '',
+    bulkUploadLimit: company.bulkUploadLimit != null ? String(company.bulkUploadLimit) : '',
     reason: ''
   });
   const [savingControls, setSavingControls] = useState(false);
@@ -114,6 +115,7 @@ const OperationsTab = ({ company, onChanged }) => {
         slaProfile: controls.slaProfile || null,
         billingMode: controls.billingMode,
         creditLimit: controls.creditLimit === '' ? undefined : Number(controls.creditLimit),
+        bulkUploadLimit: controls.bulkUploadLimit === '' ? null : Number(controls.bulkUploadLimit),
         reason: controls.reason.trim()
       });
       toast.success(res.data?.message || 'Controls saved');
@@ -207,6 +209,10 @@ const OperationsTab = ({ company, onChanged }) => {
           <div>
             <span className={label}>Credit limit (₹)</span>
             <input type="number" min="0" value={controls.creditLimit} onChange={(e) => setControls({ ...controls, creditLimit: e.target.value })} className={input} />
+          </div>
+          <div>
+            <span className={label}>Bulk upload limit (rows)</span>
+            <input type="number" min="1" max="10000" placeholder="Platform default" value={controls.bulkUploadLimit} onChange={(e) => setControls({ ...controls, bulkUploadLimit: e.target.value })} className={input} />
           </div>
         </div>
         <input value={controls.reason} onChange={(e) => setControls({ ...controls, reason: e.target.value })} className={input}

@@ -1,143 +1,262 @@
-# TASKY Admin — Gap Analysis & End-to-End Test Report
+# TASKY Admin — Spec Coverage, Fixes & Testing Guide
 
-**Date:** 29 Sep 2026 · **Environment:** local backend (`:5000`) + Vite frontend (`:5173`) against the **dev** Atlas DB, Redis local, Razorpay **test mode**, `USE_MOCK_KYC=true`.
+**Updated:** 29 Sep 2026 · **Tested on:** local backend `:5000` + Vite frontend `:5173`, dev Atlas DB, local Redis, Razorpay **test mode**, `USE_MOCK_KYC=true`.
 
-## 1. Summary
+**Result:** 351 automated checks (API + real browser). **336 pass, 0 fail**; 8 are expected (per-company report endpoints that need `companyId`), 7 are earlier failing checks replaced by passing re-tests after the fixes.
 
-| | |
+Legend: ✅ present & tested · 🟡 partial · ❌ not built · ➖ not applicable · **NEW** = added in this round
+
+---
+
+## Part A — Section-by-section checklist
+
+### 1. Dashboard  (`/admin/dashboard`)
+| Item | Status | Where |
+|---|---|---|
+| Total Users / Vendors / Workers | ✅ | stat cards (`/admin/dashboard/stats`) |
+| Total B2B, Engineers (vendor vs freelancer) | ✅ | Platform overview section |
+| Active / Pending / Completed / Cancelled jobs | ✅ | stat cards + **NEW** All Jobs buckets |
+| Revenue, Commission | ✅ | stat cards, revenue chart |
+| Escrow balance, Vendor wallet, Engineer earnings | ✅ | Platform overview |
+| Pending withdrawals | ✅ | **NEW** tile (count, amount, >24h) |
+| Pending verification | ✅ **NEW** | tile: vendors / engineers / workers / B2B / documents |
+| Refunds | ✅ **NEW** | tile (last 30 days) |
+| Disputes | ✅ **NEW** | tile (open / in review) |
+| Recent transactions | ✅ **NEW** | B2C + B2B feed |
+| Recent jobs | 🟡 | recent B2C bookings only (B2B via All Jobs) |
+| System alerts | ✅ **NEW** | escalated B2B jobs, auto-assign failures, stale withdrawals, stuck uploads, open disputes |
+
+### 2. User management  (`/admin/users`)
+| Item | Status | Notes |
+|---|---|---|
+| All / Active / Blocked users | ✅ | status filter |
+| Pending verification, Approve, Reject | ➖ | customers have no verification step (OTP sign-up) |
+| Details → Profile | ✅ **NEW** | 👁 View → Profile tab |
+| Details → Documents | ➖ | customers don't upload documents |
+| Details → Addresses, Refunds, Activity | ✅ **NEW** | tabs in user details |
+| Details → Service history, Wallet | ✅ | Bookings / Wallet tabs |
+| Details → Payments | 🟡 | payment status per booking + wallet transactions; no separate list |
+| Block / Unblock | ✅ | asks a reason; blocks live sessions; audit-logged |
+| Edit | ✅ **NEW** | name, email |
+
+### 3. B2B management  (`/admin/b2b`, `/admin/b2b-companies`)
+| Item | Status | Notes |
+|---|---|---|
+| All / Pending / Active / Suspended companies | ✅ | tabs |
+| Company profile, GST, CIN, Documents, Contacts | ✅ | inspect company |
+| Locations, Allowed services | ✅ | controls — **now enforced** at bulk validation |
+| Pricing | ✅ | pricing rules, contracts, pricing profile |
+| Wallet, Transactions, Bulk jobs, Active jobs, Job history | ✅ | Corporate Wallets, Transactions, bulk jobs, All Jobs |
+| Wallet: balance, add money, locked, escrow, transactions | ✅ | admin adjustment (reason, audit), Razorpay top-up (webhook-safe) |
+| Controls: approve, suspend, service access, location access, pricing | ✅ | company operations panel |
+| Controls: wallet limits | 🟡 | credit limit only |
+| Controls: bulk upload limit | ✅ **NEW** | per company, overrides platform default |
+| Bulk pipeline (upload → validation → pricing → wallet check → lock → escrow → dispatch → vendor → engineer) | ✅ | every stage visible; admin can act on batches, escalations (retry / assign / route to vendor), submissions |
+
+### 4. Vendor management  (`/admin/vendors`)
+| Item | Status | Notes |
+|---|---|---|
+| All / Pending / Active / Suspended | ✅ | |
+| Profile, GST/KYC, Documents | ✅ | vendor details |
+| Services, Locations, Pincodes | ✅ | approve service + coverage (city / pincode) |
+| Subservices | 🟡 | via vendor catalog / offerings |
+| Engineers, Jobs, Wallet, Earnings, Withdrawals | ✅ | details, bookings, earnings, settlements |
+| Commission | ✅ **NEW** | per-vendor override (reason required, audit) — applied to B2B payouts |
+| Performance | ✅ **NEW** | completion / cancellation rate, SLA, avg time, rating, engineers |
+| Approve / Reject / Suspend / Service access | ✅ | |
+| Location access | 🟡 | API (`PUT /api/vendors/:id/service-coverage/:serviceKey`, admin token); no admin form |
+| Pricing | 🟡 | vendor catalog prices; no per-vendor price book |
+| Engineer assignment | ✅ **NEW** | assign / remove vendor from engineer controls |
+| Service offerings review | ✅ **NEW** | Control Center → Vendor Offerings (approve / changes / reject) |
+
+### 5. Engineers & workers  (`/admin/engineers`, `/admin/workers`)
+| Item | Status | Notes |
+|---|---|---|
+| Vendor engineers / Freelancers | ✅ **NEW** filter | |
+| Workers | ✅ | own section |
+| Pending / Active / Suspended | ✅ | status tabs |
+| Offline | ✅ **NEW** filter | online / offline |
+| Details: profile, documents, skills, services, location, availability, vendor, jobs, earnings, withdrawals | ✅ | details modal + **NEW** admin controls |
+| Pincodes | 🟡 | single service pincode + work locations |
+| Performance | 🟡 | rating & completed jobs; no scorecard |
+| Approve / reject, block / unblock | ✅ | suspension now ends live sessions |
+| Assign vendor, change skills, change location, change availability, force offline | ✅ **NEW** | admin controls panel |
+| Change service eligibility | 🟡 | API (`serviceCategories`, `subServices`); panel edits skills only |
+| View jobs / earnings, manage withdrawals | ✅ | |
+
+### 6. Services  (User Catalog, One-Time Services, Service Management)
+| Item | Status | Notes |
+|---|---|---|
+| Categories, Services, Subservices, Service types, Skills | ✅ | create / update / disable from admin |
+| Pricing | ✅ | packages + per-service pricing rule — **now applied at checkout** |
+| SLA, Tax/GST, Commission | ✅ | service config, settings, category commission, vendor override |
+| Locations | ✅ | cities + **NEW** service areas |
+| Assignment rules | 🟡 | assignment config page; matcher still enforces minimum radius / broadcast mode in code |
+| "Not hardcoded" | 🟡 | several parallel catalogs (Category, Service, OneTimeService, ServiceConfig…) — consolidation still open |
+
+### 7. Job management  (**NEW** Control Center → All Jobs)
+| Item | Status |
 |---|---|
-| Automated checks run | **265** (API + real browser UI via headless Chrome) |
-| Passing | **251** |
-| Open findings from the run | **6** (+ design gaps listed in §4) |
-| Expected / by-design | 8 (per-company B2B report endpoints need `companyId`) |
-| Bugs found **and fixed** during testing | **14** (10 of them money- or security-critical) |
+| All / New / Pending / Assigned / Accepted / En Route / Checked In / In Progress / Completed / Cancelled / Disputed / Failed | ✅ **NEW** — one list over B2C bookings + B2B jobs with counts |
+| Job details: customer, B2B/vendor, service, location, pricing, assignment, engineer, photos/proof, payment, escrow, commission | ✅ (in the B2C booking and B2B job screens) |
+| Timeline | ✅ — **now records every status change** |
+| Activity log | ✅ booking logs + audit log |
+| Reassign / cancel / intervene | ✅ B2C (assign, reassign, cancel, refund); B2B (retry, assign, route to vendor, approve / reject submission) · 🟡 no admin "cancel B2B job" button (company or escrow refund) |
+| Single unified job detail page | 🟡 list is unified; clicking opens the module's own screen |
 
-Every flow asked for was exercised end to end, through the API **and** the UI:
-onboarding (user, vendor, vendor-engineer, freelancer engineer, worker, B2B company), B2C service booking (book → dispatch → accept → OTP visit → complete → cash with OTP → rating), B2B (wallet → bulk upload → validation → pricing → reserve/escrow → dispatch → engineer → completion → admin approval → release; plus the vendor route B2B → Vendor → Engineer), withdrawals (engineer and vendor, incl. admin approve / reject / mark-paid), a real Razorpay test-mode payment, and admin controls/RBAC.
+### 8. Payments  (`/admin/payments`, Control Center → Refunds)
+| Item | Status |
+|---|---|
+| All / successful / pending / failed payments, transactions | ✅ |
+| Refunds | ✅ **NEW** — real refunds (Razorpay for online, customer wallet for cash), partial allowed, reason required, listed with totals |
+| Escrow, Commission, Vendor payments, Engineer earnings, Withdrawals | ✅ |
 
-**Before these fixes, the core B2C flow was broken:** every instant one-time booking was auto-cancelled with "No nearby technicians", and a worker could complete any job at any stage and get paid without the customer paying.
+### 9. Wallet & escrow
+| Item | Status |
+|---|---|
+| B2B, vendor, engineer wallets; escrow; transactions; deposits; withdrawals; refunds; commission | ✅ |
+| Flow: B2B wallet → lock → escrow → completion → admin release → commission → vendor / engineer | ✅ tested end to end, reconciliation drift 0 |
+| Rules configurable | ✅ service payment rules, platform %, vendor override, **NEW** freelancer payout % |
+| Single vendor wallet | 🟡 `Vendor.wallet` (B2C) and `VendorFinanceWallet` (B2B) both exist |
 
----
+### 10. Location & assignment  (**NEW** Control Center → Locations)
+| Item | Status |
+|---|---|
+| Countries, States | ✅ **NEW** (one-click India seed) |
+| Cities | ✅ |
+| Pincodes, Service areas | ✅ **NEW** |
+| Vendor coverage | ✅ |
+| Engineer coverage | 🟡 coverage lookup lists engineers by city / pincode; no radius editor |
+| Coverage lookup (who serves pincode X for service Y) | ✅ **NEW** |
+| Matching inputs: service, pincode, location, skill, availability, vendor coverage | ✅ |
 
-## 2. Spec coverage (16 sections)
+### 11. Verification / KYC  (`/admin/verifications`, GST / CIN screens)
+| Item | Status |
+|---|---|
+| B2B, vendors, engineers, workers | ✅ |
+| Users | ➖ |
+| Aadhaar / PAN / bank, GST, CIN, business docs, skill documents | ✅ |
+| Pending → review → approve / reject with reason | ✅ |
 
-Legend: ✅ built & working · 🟡 partial · ❌ missing
+### 12. Notifications  (`/admin/notifications`, **NEW** Control Center → Notification Templates)
+| Item | Status |
+|---|---|
+| Push / FCM, SMS, email, events, delivery logs | ✅ |
+| Templates | ✅ **NEW** — per event: on/off, channels, title & message with `{{variables}}` |
 
-| # | Section | Status | What exists | What is missing / wrong |
-|---|---|---|---|---|
-| 1 | Dashboard | 🟡 | Users/vendors/workers/bookings counts, revenue, commission, pending withdrawals & settlements, B2B overview (companies, jobs by status, wallet, escrow), engineers split vendor/freelancer, SLA & first-time-fix, recent bookings | Pending-KYC count, refunds, disputes, recent transactions feed, system alerts; B2C and B2B jobs are separate numbers, not one "Active/Pending/Completed" view |
-| 2 | User management | 🟡 | List/search, details (profile, bookings, wallet), block/unblock (enforced on live sessions), delete | No pending-verification / approve / reject state for users, no documents, addresses, refunds or activity tabs, admin cannot edit profile, **block/unblock is not audit-logged** |
-| 3 | B2B management | ✅ | Status tabs, approve/reject, document & bank verification, suspend, controls (services, locations, pricing profile, SLA profile, credit limit, billing mode), company users, activity, wallets (adjust, refund, reconcile, reverse), pricing rules, contracts, invoices, reports, support, escalations, bulk-job admin view | Service/location access was **not enforced** (fixed). Unknown service codes are still accepted in controls. Bulk upload limit is global only (not per company). No wallet spend limits other than credit limit. No platform-wide B2B report |
-| 3b | B2B bulk pipeline | ✅ | Upload → validation → pricing → wallet reserve → escrow → dispatch (vendor marketplace or freelancer waves) → engineer → completion → admin approval → release; visible to admin at each stage | Per-job escrow amount was wrong (fixed). Captured top-ups could be lost if the tab closed (fixed) |
-| 4 | Vendor management | 🟡 | Status tabs, details (docs, bank, stats), approve/reject/suspend, KYC & bank status, service approval, coverage (city/pincode), bookings, earnings, settlements ledger, cash limit, block, withdrawals | No per-vendor commission, no admin-side engineer assignment control, no performance scorecard. `VendorServiceOffering` has **no admin approval endpoint** (feature can't complete). Two vendor wallets in parallel (`Vendor.wallet` and `VendorFinanceWallet`) |
-| 5 | Engineers & workers | 🟡 | Separate sections; engineer type freelancer / vendor-engineer; approve/reject/suspend (now enforced on sessions); selfie, video & vehicle review; jobs; earnings; pay; joining-fee coupons; registration config | No "Offline" filter or availability control, no admin assign/change of vendor, skills, service eligibility or location. Withdrawal rules (min, OTP, daily limit) are not applied to engineer/worker (they are for vendors). Dispatch ignores the online session, and workers with no coordinates match any city |
-| 6 | Services | 🟡 | Categories, services, sub-services, skills, 24 service configs (C01–C24) with forms/registration/dashboard/permissions/audit/rollback, assignment configs, one-time services, brands, plans | **Several parallel catalogs** (Category, Service, UserService, OneTimeService, ServiceCategory, ServiceConfig) with duplicates ("Electrical" vs "Electrical Services"; empty "AC / HVAC", "Networking"…) — this caused the dispatch bug. Hardcoded pricing fallbacks (commission 20%, platform fee ₹29, visit ₹49; service page shows ₹49 fee, review charges ₹30 + ₹20). Assignment config is overridden in code (radius floors, mode forced to broadcast) |
-| 7 | Job management | 🟡 | B2C: list, detail, timeline, matching, assign/reassign, cancel, status, notes, payment, logs. B2B: escalations, submissions approve/reject, manual assign, route to vendor | No unified Jobs list across B2C/B2B/project jobs; 3+ overlapping state machines; **no dispute workflow** (only enum values); B2C timeline records 2 events for a full job |
-| 8 | Payments | 🟡 | Overview, GST/TDS/COD/revenue reports, transactions, payment config + audit, settlements | No B2C refunds screen, no failed-payments view, no unified escrow view |
-| 9 | Wallet & escrow | 🟡 | B2B ledger with reserve/charge/release/refund and reconciliation (drift 0 in tests); engineer, worker, vendor wallets | Money stored as floats (₹1646.3600000000004). Wallet logic duplicated per role |
-| 10 | Location & assignment | 🟡 | Cities CRUD, vendor coverage (city/pincode), B2B allowed locations (now enforced), wave/radius matching | No country/state/pincode master, service areas, engineer coverage management; matching rules not admin-controllable in practice |
-| 11 | Verification / KYC | ✅ | GST & CIN verification, DigiLocker, PAN/Aadhaar/bank, admin verification queue (approve/reject/re-upload), config, logs | KYC endpoints were unauthenticated (fixed). Registration-time KYC/penny-drop queue jobs are simulated placeholders (`setTimeout`) |
-| 12 | Notifications | 🟡 | Orchestrator (in-app, push, email, SMS), delivery logs, event list, announcements | Templates and channels hardcoded in `eventCatalog.js` (not admin-editable). Worker/engineer withdrawal alerts went to non-existent roles (fixed). Workers get each offer 4× over the socket |
-| 13 | System settings | 🟡 | Fees, GST, payout %, TDS, cash limit, cancellation penalty, search/wave, withdrawal rules, company & invoice, B2B platform config, vendor settings, payment config | Payment-gateway/Cloudinary secrets are stored in the settings document and returned to any admin (currently empty). Any admin can change settings. Rules not applied consistently |
-| 14 | Roles & permissions | ❌ | Only `super_admin` / `admin`; admin-management is super-admin only | No Operations/Finance/Support/Verification roles, no permission keys (`users.read`, `wallet.manage`, …). Any admin can move B2B money and change platform settings. Most `/api/admin/*` routes are protected only because `b2bManagement.routes.js` happens to run `router.use(authenticate, isAdmin)` for the whole prefix. The B2B side already has a real permission model (`checkB2BPermission`) to copy |
-| 15 | Reports & analytics | 🟡 | Bookings, vendors, workers, engineers, revenue, customers, payment reports, per-company B2B reports + Excel/PDF export | Refund, withdrawal and commission reports; platform-wide B2B report; B2C service performance |
-| 16 | Audit logs | 🟡 | `AuditLog` model with actor, old/new value and reason; used by B2B wallet, escrow, onboarding, payment config, service config | No central audit viewer; user/vendor/worker/engineer status changes, settings and admin-role changes are not (or inconsistently) logged |
+### 13. System settings  (`/admin/settings`)
+| Item | Status |
+|---|---|
+| General, payment gateway (secrets now masked), tax/GST, commission, wallet, withdrawal rules, notification, service, platform | ✅ |
+| SLA, assignment rules | ✅ (service config, assignment config) |
+| Escrow | 🟡 release trigger lives in service payment rules |
+| Job rules | 🟡 search / wave settings |
+| Cancellation rules | 🟡 penalty amount only |
+| Refund rules | ❌ refunds are manual (admin / dispute), no automatic policy |
+| **NEW** fields | one-time platform fee, B2B freelancer payout % |
 
----
+### 14. Roles & permissions  (**NEW** Control Center → Roles & Permissions)
+| Item | Status |
+|---|---|
+| Super Admin, Operations, Finance, Support, Verification Admin (+ legacy Admin) | ✅ **NEW** |
+| Permissions (`users.read/update`, `vendors.read/approve`, `b2b.read/approve`, `jobs.read/assign`, `payments.read/refund`, `wallet.read/manage`, `services.create/update/disable`, …40 keys) | ✅ **NEW** |
+| Enforced on the backend (not just hidden buttons) | ✅ **NEW** — one guard on every `/api/admin` route |
+| Editable per role + extra grants per admin | ✅ **NEW** |
 
-## 3. Bugs found and fixed
+### 15. Reports  (`/admin/reports`, **NEW** Control Center → Finance & B2B Reports)
+| Item | Status |
+|---|---|
+| User, vendor, engineer, job, revenue, payment | ✅ |
+| B2B | ✅ per company + **NEW** all companies |
+| Commission, refund, withdrawal | ✅ **NEW** |
+| Service performance | 🟡 B2B per company; B2C top services on dashboard |
 
-### Money & dispatch (critical)
-| # | Bug | Fix | File |
-|---|---|---|---|
-| 1 | Every instant one-time booking auto-cancelled ("No nearby technicians"): `Booking.serviceId` refs `Service`, but one-time bookings store a `OneTimeService` id → populate returned `null` → matcher found no workers | Stop populating `serviceId` in the matcher; eligibility resolves the service itself | `Backend/services/matchingService.js` |
-| 2 | Worker could complete a job from **any** status (no OTP) and a merely *notified* worker could complete someone else's job | Only the assigned worker/engineer; only after visit OTP (`visited`/`service_started`/`in_progress`/`work_done`) | `Backend/controllers/bookingControllers/workerBookingController.js` |
-| 3 | Every one-time booking counted as "prepaid" (`paymentMethod==='razorpay'` is set at booking time) → booking marked completed and worker wallet credited with **no payment collected** | Prepaid only when `paymentStatus` is paid/success | same |
-| 4 | Cash collection rejected every one-time booking (`razorpay` not an allowed method) | Allow `razorpay` (unpaid) bookings to switch to cash | `Backend/controllers/bookingControllers/cashCollectionController.js` |
-| 5 | B2B escrow held the **batch average** per job, so a ₹1,231.80 job was charged ₹963.41 and a ₹695.02 job was over-charged | Hold each job's own price | `Backend/services/b2bBulkJobService.js` |
-| 6 | Engineer/worker withdrawals: **3 parallel requests withdrew ₹930 from a ₹310 balance**; rejecting them later minted money | Atomic balance hold (`findOneAndUpdate` with `$gte`) | `Backend/services/fieldWithdrawalGuard.service.js` (new), both wallet controllers |
-| 7 | Engineer/worker withdrawals paid out to **any bank/UPI in the request body**; any well-formed UPI skipped bank verification | Payout goes to the verified `BankAccount` or the UPI saved on the profile | same |
-| 8 | Razorpay-captured B2B top-up never credited if the browser closed before the verify call | Payments webhook now credits pending top-ups (idempotent with the verify call) | `Backend/controllers/paymentControllers/razorpayPaymentsWebhook.controller.js` |
-
-### Security & access
-| # | Bug | Fix | File |
-|---|---|---|---|
-| 9 | `/api/kyc/*` had **no auth**: anyone could mark any real account's PAN/Aadhaar/bank verified, read its KYC status, or change admin KYC document rules | Real accounts need the owner (or admin); draft registrations (temp ids) stay public; `/admin/document-rules` is admin-only | `Backend/routes/kyc.routes.js`, `Backend/middleware/authMiddleware.js` |
-| 10 | Suspended workers/engineers kept full API access on existing sessions | `authenticate` rejects `isActive:false` workers/engineers | `Backend/middleware/authMiddleware.js` |
-| 11 | B2B company "allowed services / locations" controls were stored but **not enforced** (a C12/Indore-only company could book CCTV jobs in Mumbai) | Enforced during bulk validation | `Backend/services/b2bBulkJobService.js` |
-
-### Data integrity & UX
-| # | Bug | Fix | File |
-|---|---|---|---|
-| 12 | `EngineerPayment` unique index (duplicate joining-fee credit guard) could never be built (`sparse` + `partialFilterExpression`) | Removed `sparse`; index built on dev DB | `Backend/models/EngineerPayment.js` |
-| 13 | `PATCH /admin/b2b-companies/:id/verify` set `verificationStatus:'verified'`, so the company vanished from every admin tab and the B2B app kept sending it to onboarding | Same end state as `/approve` | `Backend/controllers/adminControllers/b2bManagementController.js` |
-| 14 | Customer app showed **invented technician stats** for every new technician (★4.9, "2.1K+ reviews", "6+ years", "1250+ jobs"; 4.8 on the track screen) | Show real values or "New" | `TechnicianFound`, `BookingTrack`, `VendorSearchModal` |
-
-Also: generic `sendSMS` now skips QA/bypass phones (no real SMS to test numbers), and worker/engineer withdrawal alerts now reach real admin roles.
-
----
-
-## 4. Open issues (not fixed) — recommended order
-
-**P0 — money / security**
-1. **Admin RBAC** (§14): add roles + permission keys and enforce them on routes (wallet adjustment, settings, refunds, approvals). Today any `admin` can move B2B money and change platform settings.
-2. Protect every admin router explicitly instead of relying on `router.use` inside `b2bManagement.routes.js` (reordering mounts would expose category CRUD, uploads and `/banners/debug-db` publicly).
-3. Apply withdrawal rules (min/max, daily limit, OTP) to engineer/worker withdrawals like the vendor flow does.
-4. Dispatch: honour the online session in `isWorkerOnline`, and stop matching workers without coordinates to every city.
-5. Engineer resend-OTP returns the customer OTP (`debugOtp`) whenever `NODE_ENV !== 'production'` — and `.env` has `NODE_ENV=devlopment` (typo). Make sure production is exactly `production`.
-6. Notified-but-not-assigned workers can still add notes/media/materials/expenses to a job.
-7. Payment & Cloudinary secrets are stored in `Settings` and returned by `GET /admin/settings`.
-
-**P1 — business correctness**
-8. Freelancer payout: with no vendor, the 60% "vendor share" silently stays with the platform (engineer got ₹312 of a ₹1,231.80 job; a vendor got 81%). Needs an explicit business rule.
-9. Pricing shown ≠ charged: service page says platform fee ₹49; review charges ₹30 + ₹20 visit. `completeService` (other code path) also drops platform fee & visit charge from the final bill.
-10. Single catalog: consolidate the parallel service catalogs; remove empty/duplicate categories.
-11. Audit: log every admin status/settings/role/finance change with old/new/reason, and add an audit viewer.
-12. Dispute workflow, refunds screen, unified Jobs list.
-13. Two vendor wallets (`Vendor.wallet` vs `VendorFinanceWallet`) — pick one.
-14. Money as floats — store paise (integers) or round at write.
-15. `VendorServiceOffering` has no admin approval endpoint.
-16. Company controls accept non-existent service codes.
-
-**P2 — polish**
-17. Malformed ids return 500 across admin details endpoints (should be 400).
-18. Validation errors on B2B register return 500 with raw Mongoose messages.
-19. `GET /b2b/bulk-jobs/:batchId` with the human batch id returns 500 (only Mongo `_id` works); `uploadedBy` is empty and the absolute server file path is exposed.
-20. Vendor portal crashes on `/vendor/digital-solution/*` deep links for non-digital vendors (`useVendorSocket must be used within a VendorSocketProvider`).
-21. Checkout doesn't preselect the default address; B2B upload page claims "No row limit" (limit is 1,000); payment OTP card falls back to "0000".
-22. Rate limits: admin 200 req/min/IP and the general API limit are easy to hit from one office IP (all B2B staff behind one NAT).
-23. Engineer `register` leaks Mongo sessions on early returns; KYC/penny-drop queue jobs are placeholders.
-24. Dev DB data: duplicate rows block the unique indexes on `B2BEnterpriseOnboarding.companyId` and `VendorTeamMember(vendorId, employeeId)`.
+### 16. Audit logs  (**NEW** Control Center → Audit Logs)
+| Item | Status |
+|---|---|
+| Admin → action → entity → old value → new value → timestamp → reason | ✅ **NEW** — every admin write; before/after snapshots for users, vendors, workers, engineers, B2B companies, wallets, admins, withdrawals, bookings, disputes, settings |
+| Financial & permission changes | ✅ wallet adjustments, commission, roles, settings |
 
 ---
 
-## 5. E2E results by module
+## Part B — How to test each flow
 
-| Module | Pass | Fail | Notes |
-|---|---:|---:|---|
-| Admin auth + 104 admin list endpoints | 3 | 0 | 8 B2B report endpoints need `companyId` (by design) |
-| Onboarding — user | 10 | 0 | OTP, register, refresh token, admin view |
-| Onboarding — vendor | 12 | 0 | Pending login blocked, approve, reject, suspend |
-| Onboarding — engineer | 14 | 1 | Coupon 100% joining fee, freelancer + vendor-engineer (company code); fail = 500 on malformed id |
-| Onboarding — worker | 7 | 0 | |
-| Onboarding — B2B company | 11 | 0 | GST verify (mock), duplicate GST blocked, approval |
-| Service booking (B2C) | 32 | 0 | Price tamper blocked (server recalculates ₹234.82), full lifecycle, OTPs not leaked to worker |
-| B2B wallet + bulk upload | 15 | 1 | Access controls enforced; fail = unknown service code accepted |
-| B2B jobs → escrow → engineer → release | 21 | 0 | Reconciliation drift 0 |
-| B2B vendor route | 13 | 0 | Vendor coverage, request, assign own engineer, payout to vendor |
-| KYC security | 7 | 0 | |
-| Withdrawals — engineer | 11 | 0 | Race & payout-hijack now blocked |
-| Withdrawals — vendor | 12 | 0 | OTP, verified bank, fees/TDS, admin approve → paid → receipt |
-| Admin controls & RBAC | 13 | 3 | Fails = no audit on user block; any admin can adjust wallets / change settings |
-| UI — admin panel | 30 | 0 | Login, 28 pages, approve vendor from table |
-| UI — customer booking | 5 | 0 | OTP login → service → package → address → review → book → live "technician found" → start code |
-| UI — worker / engineer / vendor / B2B | 35 | 1 | Razorpay test payment (netbanking) credits wallet; bulk upload via file picker creates job; fail = vendor deep-link crash |
+### Setup (once)
+1. `Backend/.env` already has `ALLOW_OTP_BYPASS=true` and `OTP_BYPASS_PHONES=9000000101…9000000140`. Those numbers always use OTP **123456** and never receive SMS. Use them for test accounts.
+2. Start: `cd Backend && npm run dev` · `cd Frontend && npm run dev` · Redis must be running.
+3. Admin: log in at `http://localhost:5173/admin/login` with a super admin.
+4. Razorpay test mode: pick **Netbanking → any bank → Success** in the checkout.
+5. `USE_MOCK_KYC=true` makes GST / PAN / bank checks return test data. A GSTIN ending in `Z0` = "not found", `Z1` = cancelled, `Z2` = suspended.
+
+### 1. Onboarding
+| Who | UI steps | Check |
+|---|---|---|
+| Customer | `/user/login` → phone → OTP → name | Admin → Users shows them; 👁 View opens details |
+| Vendor | `/vendor/signup` (or `POST /api/vendors/auth/register`) | login says "under review" → Admin → Vendors → approve → vendor logs in; reject / suspend block login |
+| Freelancer engineer | `/engineer/signup` (joining fee: pay via Razorpay test, or 100 % coupon from Admin → Engineers → Coupons) | Admin → Engineers → approve |
+| Vendor engineer | signup with the vendor's company code (vendor panel → Engineers) | vendor approves → admin approves |
+| Worker | `/worker/signup`, choose a one-time service | Admin → Workers → approve |
+| B2B company | `/b2b/login` → Register → verify GST → details (TAN required) | Admin → B2B → Company Approvals → approve → set controls (services, locations, credit, bulk limit) |
+
+### 2. B2C service booking
+1. Worker app open (logged in) = online. Set a location via Admin → Workers → View → Admin controls if needed.
+2. Customer: `/user/service/electrical` → problem → package → address → **Book Now** → review (price = package + visit + platform fee + GST) → **Book Service**.
+3. Worker: accept → Start journey → Reached. The customer sees the **start code** on *Track*. The worker enters it.
+4. Worker completes (photo) → bill → collects cash; the customer shares the payment OTP. (Or the customer pays online from Booking Details.)
+5. Customer rates. Admin → Bookings shows the timeline (every status) and payment.
+6. Negative checks: completing before the OTP → blocked; a tampered price → recalculated; another user can't open the booking.
+
+### 3. B2B bulk jobs
+1. Admin credits the wallet (B2B → Corporate Wallets → adjust, reason required) **or** the company tops up (Wallet & Billing → Add Funds → Razorpay test).
+2. Company: Bulk Operations → Upload (CSV/XLSX from Templates) → validation (rows outside allowed services / cities / bad phones are rejected) → Review & Confirm.
+3. Check escrow: Wallet shows *reserved*; each job holds its own price.
+4. Dispatch: a freelancer (engineer app online, located nearby, matching skills) gets the offer, **or** a vendor with coverage gets it under Requests → accept → assign own engineer.
+5. Engineer: accept → travel → arrive (the customer gets the start OTP by SMS) → start with OTP + before photo → complete with after photo.
+6. Admin → B2B → Submissions → approve → payout (freelancer wallet or vendor finance wallet). The company wallet reconciliation shows drift 0.
+7. Cancel a pending job → escrow returns to available.
+
+### 4. Withdrawals
+- **Engineer / worker:** verify bank (profile → bank → verify) → withdraw ≥ minimum (Settings). The payout always goes to the verified account. Admin → Settlements → approve → mark paid (UTR). Reject returns the exact amount.
+- **Vendor:** Finance → add bank → verify → request OTP → withdraw (fees and TDS shown) → admin approve → mark paid → receipt.
+- Negative checks: below minimum / over the daily limit / unverified UPI → rejected; parallel requests can't overdraw.
+
+### 5. Disputes & refunds (NEW)
+- Customer: Booking Details → **Report a problem**. B2B: Jobs → job → Support tab → Report a problem.
+- Admin → Control Center → Disputes → open → add note (in review) → **Resolve** (full / partial refund, rework, no action) or Reject.
+- Refund goes to: Razorpay (online B2C), customer wallet (cash B2C), company wallet (B2B). See Control Center → Refunds.
+- Direct refund: Admin → Bookings → booking → Payment → Refund (amount + reason).
+
+### 6. Admin controls & RBAC (NEW)
+- Control Center → Roles & Permissions: change an admin to *Support Admin* → log in as them → Settings, Plans, Audit Logs are hidden; opening them by URL is refused; the API returns `403 PERMISSION_DENIED`.
+- Every change you make appears in Control Center → Audit Logs (old → new, reason).
+
+### 7. API test harness
+All flows above are scripted (`qa/*.js`, using the same endpoints as the apps) and were run for this report. Ask to have them moved into `Backend/tests/e2e/` if you want them in the repo and CI.
 
 ---
 
-## 6. Test environment notes
+## Part C — What changed (this round and the previous one)
 
-- **`Backend/.env` changes:** added `ALLOW_OTP_BYPASS=true` and `OTP_BYPASS_PHONES=9000000101…9000000140` (dev-only QA numbers: OTP `123456`, no SMS sent). `USE_DEFAULT_OTP` was temporarily `true` during the run and is back to `false`.
-- **QA data in the dev DB** (all named `QA-E2E …`, phones `90000001xx`, emails `qa-e2e-*@wbi.test`): super admin `qa-e2e-admin@wbi.test`, ops admin `qa-e2e-opsadmin@wbi.test`, user, 3 vendors, 2 engineers, 1 worker, B2B company "ACME ENTERPRISES PRIVATE LIMITED", coupon `QAE2E100`, bookings, B2B jobs (all closed or cancelled), withdrawals. Deactivate the QA admin accounts before this DB is ever promoted.
-- **Indexes created on the dev DB:** `B2BWalletTransaction.idempotencyKey`, `EngineerCoupon.code`, `EngineerPayment.razorpayPaymentId`, `B2BBulkUploadRow(batchId,rowNumber)`, `DigiLockerSession.transactionId`. Run `npm run verify:indexes` against production too.
-- Pre-existing lint errors (unused variables, hook deps) in the touched frontend files were left as-is.
+**Security & money:** admin RBAC + central guard (auth no longer depends on route order) · audit log for all admin writes · KYC endpoints need the owner or an admin for real accounts · suspended workers / engineers lose live sessions · withdrawal double-spend and payout-to-any-account fixed · withdrawal min / max / daily limit for engineers & workers · per-job escrow amount · B2B top-up credited by webhook if the tab closes · wallet balances rounded to paise · payment / Cloudinary secrets masked · the engineer resend-OTP no longer echoes the customer OTP unless dev OTPs are explicitly on · notified-but-unassigned workers can't edit jobs · workers with no location no longer match every city.
+
+**Business correctness:** instant bookings no longer auto-cancel (matcher bug) · completion requires the visit OTP and real payment · cash collection works for online-created bookings · one pricing source for the service page and checkout (per-service rule → settings) · the final bill keeps platform fee + visit charge · B2B company service / location access enforced, unknown service codes rejected, per-company bulk limit · vendors can't self-approve offerings; admin review queue added · configurable freelancer payout % and one-time platform fee · per-vendor commission.
+
+**Features:** Control Center (All Jobs, Disputes, Refunds, Finance & B2B reports, Vendor Offerings, Locations, Notification Templates, Audit Logs, Roles) · dashboard alerts & queues · user details (profile edit, addresses, activity, refunds) · engineer / worker admin controls · vendor commission & performance · real refunds · disputes for customers and B2B · complete booking timeline · real technician ratings (no invented stats).
+
+**Smaller:** malformed ids → 400 · B2B register validation → 400 · batch lookup by human id, uploader recorded, server paths hidden · vendor digital-solution pages no longer crash · default address preselected · no "0000" OTP placeholder · rate limits per signed-in user instead of per office IP · engineer register closes its DB transaction · empty categories hidden in engineer signup.
+
+---
+
+## Part D — Still open (recommended next)
+
+1. **Catalog consolidation** — merge the parallel service catalogs (biggest structural debt).
+2. **One vendor wallet** — merge `Vendor.wallet` and `VendorFinanceWallet`.
+3. **Refund & cancellation rules** — automatic policy (time windows, penalties) instead of manual refunds only.
+4. **Assignment rules** — let the admin config fully control radius / mode (the matcher still applies minimums).
+5. Unified job detail page; admin cancel for B2B jobs; engineer performance scorecard; admin form for vendor location coverage.
+6. Registration KYC / penny-drop queue jobs are still placeholders (real checks happen in the signup KYC step).
+7. `NODE_ENV=devlopment` typo in `Backend/.env`; set production to exactly `production`.
+8. Dev-DB duplicates block two unique indexes (`B2BEnterpriseOnboarding.companyId`, `VendorTeamMember(vendorId, employeeId)`); run `npm run verify:indexes` on production.
+9. Cosmetic: workers receive each offer 4× over the socket; the first "searching" timeline entry can appear twice.
+
+**QA data** in the dev DB is named `QA-E2E…` (phones `90000001xx`, emails `qa-e2e-*@wbi.test`), including admins `qa-e2e-admin@wbi.test` (super admin) and `qa-e2e-opsadmin@wbi.test`. Deactivate these before the DB is ever promoted.

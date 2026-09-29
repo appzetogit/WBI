@@ -8,6 +8,8 @@
  *    whatever the request body names.
  */
 const BankAccount = require('../models/BankAccount');
+const Settings = require('../models/Settings');
+const Withdrawal = require('../models/Withdrawal');
 const { decrypt } = require('../utils/encryption');
 
 const UPI_ID_REGEX = /^[a-zA-Z0-9._-]{2,256}@[a-zA-Z0-9._-]{2,64}$/i;
@@ -70,4 +72,31 @@ const resolvePayoutDestination = async ({ ownerId, method, upiId, savedUpiId }) 
   };
 };
 
-module.exports = { holdBalance, releaseHold, resolvePayoutDestination, UPI_ID_REGEX };
+/**
+ * Platform withdrawal rules from Settings (the same ones vendor withdrawals use):
+ * enabled switch, min / max per request and a daily cap per account.
+ * @param {'engineerId'|'workerId'} ownerField
+ */
+const checkWithdrawalRules = async ({ amount, ownerField, ownerId }) => {
+  const s = (await Settings.findOne({ type: 'global' }).lean()) || {};
+  if (s.withdrawalEnabled === false) {
+    return { ok: false, status: 403, message: 'Withdrawals are currently disabled. Please try again later.' };
+  }
+  const min = Number(s.minWithdrawalAmount ?? 100);
+  const max = Number(s.maxWithdrawalAmount ?? 500000);
+  if (amount < min) return { ok: false, status: 400, message: `Minimum withdrawal amount is ₹${min}` };
+  if (amount > max) return { ok: false, status: 400, message: `Maximum withdrawal amount is ₹${max}` };
+  const daily = Number(s.dailyWithdrawalLimit ?? 1000000);
+  const since = new Date();
+  since.setHours(0, 0, 0, 0);
+  const [today] = await Withdrawal.aggregate([
+    { $match: { [ownerField]: new (require('mongoose').Types.ObjectId)(String(ownerId)), createdAt: { $gte: since }, status: { $nin: ['rejected', 'failed', 'cancelled'] } } },
+    { $group: { _id: null, total: { $sum: '$amount' } } }
+  ]);
+  if ((today?.total || 0) + amount > daily) {
+    return { ok: false, status: 400, message: `Daily withdrawal limit of ₹${daily} reached. Remaining today: ₹${Math.max(0, daily - (today?.total || 0))}` };
+  }
+  return { ok: true };
+};
+
+module.exports = { holdBalance, releaseHold, resolvePayoutDestination, checkWithdrawalRules, UPI_ID_REGEX };

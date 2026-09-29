@@ -587,7 +587,7 @@ const updateCompanyControls = async (req, res) => {
     const { companyId } = req.params;
     const {
       allowedServices, allowedLocations, pricingProfile, slaProfile,
-      billingMode, creditLimit, reason
+      billingMode, creditLimit, bulkUploadLimit, reason
     } = req.body || {};
 
     // Validate everything before writing anything, so a bad field never
@@ -611,14 +611,28 @@ const updateCompanyControls = async (req, res) => {
     };
 
     if (Array.isArray(allowedServices)) {
-      company.allowedServices = allowedServices
-        .map((s) => String(s || '').toUpperCase().trim())
-        .filter(Boolean);
+      const codes = allowedServices.map((s) => String(s || '').toUpperCase().trim()).filter(Boolean);
+      // Unknown codes would silently lock the company out of every service
+      const ServiceConfig = require('../../models/ServiceConfig');
+      const known = new Set((await ServiceConfig.find({ categoryCode: { $in: codes } }).select('categoryCode').lean())
+        .map((c) => String(c.categoryCode).toUpperCase()));
+      const unknown = codes.filter((c) => !known.has(c));
+      if (unknown.length) {
+        return res.status(400).json({ success: false, message: `Unknown service code(s): ${unknown.join(', ')}` });
+      }
+      company.allowedServices = codes;
     }
     if (Array.isArray(allowedLocations)) {
       company.allowedLocations = allowedLocations
         .filter((l) => l && l.value)
         .map((l) => ({ type: l.type || 'city', value: String(l.value).trim() }));
+    }
+    if (bulkUploadLimit !== undefined) {
+      const lim = bulkUploadLimit === null || bulkUploadLimit === '' ? null : Number(bulkUploadLimit);
+      if (lim !== null && (!Number.isInteger(lim) || lim < 1 || lim > 10000)) {
+        return res.status(400).json({ success: false, message: 'bulkUploadLimit must be a whole number between 1 and 10000' });
+      }
+      company.bulkUploadLimit = lim;
     }
     if (pricingProfile !== undefined) company.pricingProfile = pricingProfile || null;
     if (slaProfile !== undefined) company.slaProfile = slaProfile || null;
@@ -664,6 +678,7 @@ const updateCompanyControls = async (req, res) => {
       newValue: {
         allowedServices: company.allowedServices,
         allowedLocations: company.allowedLocations,
+        bulkUploadLimit: company.bulkUploadLimit,
         pricingProfile: company.pricingProfile,
         slaProfile: company.slaProfile,
         billingMode: company.billingMode,
@@ -680,6 +695,7 @@ const updateCompanyControls = async (req, res) => {
         id: company._id,
         allowedServices: company.allowedServices,
         allowedLocations: company.allowedLocations,
+        bulkUploadLimit: company.bulkUploadLimit,
         pricingProfile: company.pricingProfile,
         slaProfile: company.slaProfile,
         billingMode: company.billingMode,

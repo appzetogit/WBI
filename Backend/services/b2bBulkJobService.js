@@ -641,7 +641,8 @@ const processValidation = async (batchId, app) => {
     const totalRows = rawRows.length;
     const { getB2BConfig } = require('./b2bPlatformConfig.service');
     const config = await getB2BConfig();
-    const maxRows = config.bulkUpload?.maxRows || 1000;
+    const companyLimit = (await B2BCompany.findById(batch.companyId).select('bulkUploadLimit').lean())?.bulkUploadLimit;
+    const maxRows = companyLimit || config.bulkUpload?.maxRows || 1000;
 
     if (totalRows === 0) {
       throw new Error('The uploaded file is empty or contains no parseable job rows');

@@ -102,7 +102,8 @@ const getRegistrationConfig = async (req, res) => {
       config: {
         isRegistrationEnabled: registrationConfig.isRegistrationEnabled,
         steps: registrationConfig.steps.filter(s => s.isActive).sort((a,b) => a.stepNumber - b.stepNumber),
-        categories: categories.map(c => ({ 
+        // Categories with no sub-services can't be selected meaningfully — hide them
+        categories: categories.filter(c => subServices.some(s => s.categoryId?.toString() === c._id.toString())).map(c => ({ 
           id: c._id.toString(), 
           _id: c._id.toString(), 
           title: c.name, 

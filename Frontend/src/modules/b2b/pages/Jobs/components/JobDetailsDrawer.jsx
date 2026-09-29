@@ -8,6 +8,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import api from '../../../../../services/api';
+import ReportProblem from '../../../../user/components/disputes/ReportProblem';
 
 const JobDetailsDrawer = ({ jobId, onClose }) => {
   const [activeTab, setActiveTab] = useState('details');
@@ -363,11 +364,9 @@ const JobDetailsDrawer = ({ jobId, onClose }) => {
                     <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
                       <FiMessageCircle className="w-8 h-8 text-gray-300" />
                     </div>
-                    <h3 className="text-sm font-bold text-gray-700">Need Help?</h3>
-                    <p className="text-xs text-gray-500 mt-1 mb-6">Create a support ticket specifically for this job.</p>
-                    <button className="px-6 py-2 bg-[#10AFA5] text-white text-sm font-bold rounded-lg shadow-sm">
-                      Raise Ticket
-                    </button>
+                    <h3 className="text-sm font-bold text-gray-700">Problem with this job?</h3>
+                    <p className="text-xs text-gray-500 mt-1 mb-6">Report it and our team will review it — refunds go back to your wallet.</p>
+                    <ReportProblem source="b2b" sourceId={jobId} className="px-6" />
                   </div>
                 )}
 

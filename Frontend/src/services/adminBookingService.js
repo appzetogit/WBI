@@ -122,9 +122,9 @@ export const adminBookingService = {
   },
 
   // Payment action (refund, hold, release)
-  paymentAction: async (bookingId, action) => {
+  paymentAction: async (bookingId, action, extra = {}) => {
     try {
-      const response = await api.patch(`/admin/bookings/${bookingId}/payment-action`, { action });
+      const response = await api.patch(`/admin/bookings/${bookingId}/payment-action`, { action, ...extra });
       return response.data;
     } catch (error) {
       throw error.response?.data || { message: 'Failed to perform payment action' };

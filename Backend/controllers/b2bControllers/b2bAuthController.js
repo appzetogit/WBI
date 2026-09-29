@@ -343,10 +343,23 @@ const registerCompany = async (req, res) => {
     });
   } catch (error) {
     console.error('B2B Registration Error:', error);
+    if (error.name === 'ValidationError') {
+      const fields = Object.values(error.errors || {}).map((e) => ({
+        field: e.path,
+        message: e.kind === 'required' ? `${e.path} is required` : `${e.path} is invalid`
+      }));
+      return res.status(400).json({
+        success: false,
+        message: `Please check: ${fields.map((f) => f.field).join(', ')}`,
+        errors: fields
+      });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: 'A B2B company is already registered with these details' });
+    }
     return res.status(500).json({
       success: false,
-      message: 'Failed to register company. Please try again.',
-      error: error.message
+      message: 'Failed to register company. Please try again.'
     });
   }
 };

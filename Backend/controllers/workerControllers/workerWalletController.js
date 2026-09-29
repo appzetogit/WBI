@@ -2,7 +2,7 @@ const Worker = require('../../models/Worker');
 const Transaction = require('../../models/Transaction');
 const Booking = require('../../models/Booking');
 const Withdrawal = require('../../models/Withdrawal');
-const { holdBalance, releaseHold, resolvePayoutDestination } = require('../../services/fieldWithdrawalGuard.service');
+const { holdBalance, releaseHold, resolvePayoutDestination, checkWithdrawalRules } = require('../../services/fieldWithdrawalGuard.service');
 
 /**
  * Get worker wallet with ledger balance
@@ -240,6 +240,11 @@ const requestWithdrawal = async (req, res) => {
 
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid withdrawal amount' });
+    }
+
+    const rules = await checkWithdrawalRules({ amount, ownerField: 'workerId', ownerId: workerId });
+    if (!rules.ok) {
+      return res.status(rules.status).json({ success: false, message: rules.message });
     }
 
     const destination = await resolvePayoutDestination({

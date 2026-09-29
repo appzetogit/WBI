@@ -35,6 +35,10 @@ async function resolvePaymentRules(categoryCode, configSnapshot = null, fallback
     if (!hasOwnGstPercent(configSnapshot.paymentRules) && fallbackGstPercent != null) {
       merged.gstPercent = fallbackGstPercent;
     }
+    if (merged.freelancerSharePercent == null) {
+      const s = await Settings.findOne().select('b2bFreelancerPayoutPercent').lean();
+      if (s?.b2bFreelancerPayoutPercent != null) merged.freelancerSharePercent = Number(s.b2bFreelancerPayoutPercent);
+    }
     return merged;
   }
   const cfg = await ServiceConfig.findOne({
@@ -55,7 +59,11 @@ async function resolvePaymentRules(categoryCode, configSnapshot = null, fallback
   ) {
     merged.gstPercent = fallbackGstPercent;
   }
-  const settings = await Settings.findOne().select('platformFeePercentage servicePayoutPercentage').lean();
+  const settings = await Settings.findOne().select('platformFeePercentage servicePayoutPercentage b2bFreelancerPayoutPercent').lean();
+  // Explicit rule for freelancers (no vendor on the job): % of net they receive
+  if (settings?.b2bFreelancerPayoutPercent != null && merged.freelancerSharePercent == null) {
+    merged.freelancerSharePercent = Number(settings.b2bFreelancerPayoutPercent);
+  }
   if (settings?.platformFeePercentage != null && merged.platformCommissionPercent == null) {
     merged.platformCommissionPercent = Number(settings.platformFeePercentage);
   }
@@ -654,6 +662,11 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
         (executingVendorId ? ` (vendor ${executingVendorId})` : ` (engineer ${job.assignedTo})`)
     );
   }
+  // Per-vendor commission negotiated by admin overrides the category/platform rate
+  if (mode === 'vendor_marketplace' && executingVendorId) {
+    const v = await Vendor.findById(executingVendorId).select('commissionOverride').lean();
+    if (v?.commissionOverride != null) rules.platformCommissionPercent = Number(v.commissionOverride);
+  }
   const split = computeSplit(remaining, rules);
 
   let creditedTo = null;
@@ -706,7 +719,11 @@ async function releaseB2BJobEscrowPayment({ jobId, actor = { id: null, role: 'sy
     if (!engineerId) {
       return { ok: false, reason: 'engineer_not_assigned', status: 428 };
     }
-    creditAmount = split.engineerShare;
+    // No vendor on the job: the freelancer rule applies when configured,
+    // otherwise the engineer share of the vendor/engineer split (legacy default).
+    creditAmount = rules.freelancerSharePercent != null
+      ? Math.round((split.net * Number(rules.freelancerSharePercent)) / 100)
+      : split.engineerShare;
 
     const engineer = await Engineer.findById(engineerId);
     if (!engineer) {

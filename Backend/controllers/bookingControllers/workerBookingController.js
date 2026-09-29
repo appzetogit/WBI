@@ -998,7 +998,6 @@ const addWorkerNotes = async (req, res) => {
       _id: id,
       $or: [
         { workerId },
-        { notifiedWorkers: workerId },
         { engineerId: workerId }
       ]
     });
@@ -1081,7 +1080,6 @@ const uploadJobMedia = async (req, res) => {
       _id: id,
       $or: [
         { workerId },
-        { notifiedWorkers: workerId },
         { engineerId: workerId }
       ]
     });
@@ -1126,7 +1124,6 @@ const addJobMaterials = async (req, res) => {
       _id: id,
       $or: [
         { workerId },
-        { notifiedWorkers: workerId },
         { engineerId: workerId }
       ]
     });
@@ -1256,7 +1253,6 @@ const addJobExpenses = async (req, res) => {
       _id: id,
       $or: [
         { workerId },
-        { notifiedWorkers: workerId },
         { engineerId: workerId }
       ]
     });

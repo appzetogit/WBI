@@ -6,6 +6,8 @@ import CardShell from '../UserCategories/components/CardShell';
 import Modal from '../UserCategories/components/Modal';
 import adminWorkerService from '../../../../services/adminWorkerService';
 
+import EngineerAdminControls from '../../components/people/EngineerAdminControls';
+
 const AllWorkers = () => {
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -367,6 +369,7 @@ const AllWorkers = () => {
       >
         {selectedWorker && (
           <div className="space-y-6">
+            <EngineerAdminControls kind="workers" person={selectedWorker} />
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Name</label>

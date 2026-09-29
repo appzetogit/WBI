@@ -14,6 +14,7 @@ import ForgotPassword from '../pages/ForgotPassword';
 // Lazy load admin pages for code splitting
 const Dashboard = lazy(() => import('../pages/Dashboard'));
 const Settings = lazy(() => import('../pages/Settings'));
+const ControlCenter = lazy(() => import('../pages/ControlCenter'));
 const UserCategories = lazy(() => import('../pages/UserCategories'));
 const ServiceCategories = lazy(() => import('../pages/ServiceCategories'));
 const OneTimeServices = lazy(() => import('../pages/OneTimeServices'));
@@ -179,6 +180,7 @@ const AdminRoutes = () => {
           <Route path="payments/workers" element={<Navigate to="/admin/workers/payments" replace />} />
           <Route path="payments/vendors" element={<Navigate to="/admin/vendors/payments" replace />} />
           <Route path="settings/*" element={<AnimatedPage><Settings /></AnimatedPage>} />
+          <Route path="control-center/*" element={<AnimatedPage><ControlCenter /></AnimatedPage>} />
         </Route>
       </Routes>
     </AnimatePresence>

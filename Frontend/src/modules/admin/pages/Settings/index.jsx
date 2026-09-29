@@ -29,6 +29,8 @@ const AdminSettings = () => {
     isOnlinePaymentEnabled: true,
     payoutProvider: 'manual',
     withdrawalEnabled: true,
+    oneTimePlatformFee: 30,
+    b2bFreelancerPayoutPercent: '',
     minWithdrawalAmount: 100,
     maxWithdrawalAmount: 500000,
     dailyWithdrawalLimit: 1000000,
@@ -140,6 +142,8 @@ const AdminSettings = () => {
             isOnlinePaymentEnabled: res.settings.isOnlinePaymentEnabled !== undefined ? res.settings.isOnlinePaymentEnabled : true,
             payoutProvider: res.settings.payoutProvider || 'manual',
             withdrawalEnabled: res.settings.withdrawalEnabled !== false,
+            oneTimePlatformFee: res.settings.oneTimePlatformFee ?? 30,
+            b2bFreelancerPayoutPercent: res.settings.b2bFreelancerPayoutPercent ?? '',
             minWithdrawalAmount: res.settings.minWithdrawalAmount ?? 100,
             maxWithdrawalAmount: res.settings.maxWithdrawalAmount ?? 500000,
             dailyWithdrawalLimit: res.settings.dailyWithdrawalLimit ?? 1000000,
@@ -227,7 +231,8 @@ const AdminSettings = () => {
     const stringFields = ['payoutProvider', 'settlementSchedule'];
     setFinancialSettings(prev => ({
       ...prev,
-      [name]: stringFields.includes(name) ? value : Number(value)
+      // Blank freelancer payout = use the engineer share of the split (not 0%)
+      [name]: stringFields.includes(name) ? value : (name === 'b2bFreelancerPayoutPercent' && value === '' ? '' : Number(value))
     }));
   };
 
@@ -688,6 +693,18 @@ const AdminSettings = () => {
                           </select>
                         </div>
                         <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1.5">One-time platform fee (₹)</label>
+                          <input type="number" min="0" name="oneTimePlatformFee" value={financialSettings.oneTimePlatformFee} onChange={handleFinancialChange}
+                            className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg" />
+                          <p className="text-[10px] text-gray-400 mt-1">Used when a service has no pricing rule of its own</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1.5">B2B freelancer payout (% of net)</label>
+                          <input type="number" min="0" max="100" name="b2bFreelancerPayoutPercent" value={financialSettings.b2bFreelancerPayoutPercent} onChange={handleFinancialChange}
+                            placeholder="Default: engineer share" className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg" />
+                          <p className="text-[10px] text-gray-400 mt-1">What a freelancer (no vendor) receives from a B2B job, after platform fee and GST</p>
+                        </div>
+                        <div>
                           <label className="block text-xs font-semibold text-gray-500 uppercase mb-1.5">Min Withdrawal (₹)</label>
                           <input type="number" name="minWithdrawalAmount" value={financialSettings.minWithdrawalAmount} onChange={handleFinancialChange}
                             className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg" />
@@ -1012,6 +1029,10 @@ const AdminSettings = () => {
                           <select value={newAdmin.role} onChange={e => setNewAdmin(p => ({ ...p, role: e.target.value }))}
                             className="px-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
                             <option value="admin">Admin</option>
+                            <option value="operations_admin">Operations Admin</option>
+                            <option value="finance_admin">Finance Admin</option>
+                            <option value="support_admin">Support Admin</option>
+                            <option value="verification_admin">Verification Admin</option>
                             <option value="super_admin">Super Admin</option>
                           </select>
 
@@ -1069,7 +1090,7 @@ const AdminSettings = () => {
                               ? 'bg-amber-50 text-amber-700 border-amber-100'
                               : 'bg-blue-50 text-blue-700 border-blue-100'
                               }`}>
-                              {admin.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                              {String(admin.role || 'admin').split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ')}
                             </span>
                           </td>
                           <td className="px-6 py-4">

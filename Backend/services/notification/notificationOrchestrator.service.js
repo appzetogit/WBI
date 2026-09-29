@@ -171,7 +171,17 @@ async function emit(eventKey, opts = {}) {
   }
 
   const data = opts.data || {};
-  const channels = opts.channels || eventDef.channels || ['in_app'];
+  // Admin template override (Notifications → Templates): off switch, channels, text
+  let override = null;
+  try {
+    const { getOverrides } = require('./notificationTemplate.service');
+    override = (await getOverrides()).get(eventKey) || null;
+  } catch (_) { /* templates are optional */ }
+  if (override && override.enabled === false) {
+    logMetric('skipped', { eventKey, reason: 'disabled_by_admin' });
+    return { success: true, delivered: 0, reason: 'disabled_by_admin' };
+  }
+  const channels = opts.channels || (override?.channels?.length ? override.channels : null) || eventDef.channels || ['in_app'];
   const scheduleAt = opts.scheduleAt ? new Date(opts.scheduleAt) : null;
   const scheduleDelay =
     scheduleAt && scheduleAt.getTime() > Date.now()
@@ -218,8 +228,13 @@ async function emit(eventKey, opts = {}) {
         continue;
       }
 
-      const title = typeof eventDef.title === 'function' ? eventDef.title(data) : eventDef.title;
-      const message = typeof eventDef.message === 'function' ? eventDef.message(data) : eventDef.message;
+      const { render } = require('./notificationTemplate.service');
+      const title = override?.title
+        ? render(override.title, data)
+        : (typeof eventDef.title === 'function' ? eventDef.title(data) : eventDef.title);
+      const message = override?.message
+        ? render(override.message, data)
+        : (typeof eventDef.message === 'function' ? eventDef.message(data) : eventDef.message);
       const actionUrl =
         typeof eventDef.actionUrl === 'function'
           ? eventDef.actionUrl(data, recipient.role)

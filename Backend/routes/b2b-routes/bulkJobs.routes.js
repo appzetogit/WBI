@@ -73,6 +73,18 @@ router.get('/stats', authenticate, isApprovedB2B, checkB2BPermission('uploads.re
 router.get('/sample', authenticate, isApprovedB2B, checkB2BPermission('uploads.read'), b2bBulkJobController.downloadSample);
 router.get('/template-spec', authenticate, isApprovedB2B, checkB2BPermission('uploads.read'), b2bBulkJobController.getTemplateSpec);
 router.get('/validation-errors', authenticate, isApprovedB2B, checkB2BPermission('uploads.read'), b2bBulkJobController.getValidationErrors);
+// Accept the human batch id (BATCH-…) anywhere the Mongo _id is expected.
+// Controllers still scope every lookup to the caller's company.
+router.param('batchId', async (req, res, next, value) => {
+  const mongoose = require('mongoose');
+  if (mongoose.Types.ObjectId.isValid(value)) return next();
+  const B2BBatch = require('../../models/B2BBatch');
+  const found = await B2BBatch.findOne({ batchId: String(value) }).select('_id').lean();
+  if (!found) return res.status(404).json({ success: false, message: 'Batch not found' });
+  req.params.batchId = String(found._id);
+  return next();
+});
+
 router.post('/upload', authenticate, isApprovedB2B, checkB2BPermission('uploads.create'), uploadSpreadsheet, handleMulterError, b2bBulkJobController.uploadFile);
 router.get('/history', authenticate, isApprovedB2B, checkB2BPermission('uploads.read'), b2bBulkJobController.getHistory);
 router.get('/:batchId/routing-summary', authenticate, isApprovedB2B, checkB2BPermission('uploads.read'), b2bBulkJobController.getRoutingSummary);

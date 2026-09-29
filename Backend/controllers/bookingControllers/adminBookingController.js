@@ -632,7 +632,20 @@ const paymentAction = async (req, res) => {
     }
 
     if (action === 'refund') {
-      booking.paymentStatus = 'refunded';
+      // Real refund: Razorpay for online payments, customer wallet for cash
+      const { refundBooking } = require('../../services/bookingRefund.service');
+      try {
+        const out = await refundBooking({
+          bookingId: booking._id,
+          amount: req.body.amount,
+          reason: req.body.reason,
+          adminId: req.user?._id,
+          toWallet: req.body.toWallet === true
+        });
+        return res.status(200).json({ success: true, message: `Refund of ₹${out.refund.amount} issued (${out.refund.method})`, data: out.booking, refund: out.refund });
+      } catch (err) {
+        return res.status(err.status || 500).json({ success: false, message: err.message });
+      }
     } else if (action === 'hold') {
       booking.paymentStatus = 'held';
     } else if (action === 'release') {

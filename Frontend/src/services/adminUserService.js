@@ -32,9 +32,9 @@ export const adminUserService = {
   },
 
   // Block/Unblock user
-  toggleUserStatus: async (id, isActive) => {
+  toggleUserStatus: async (id, isActive, reason) => {
     try {
-      const response = await api.put(`/admin/users/${id}/status`, { isActive });
+      const response = await api.put(`/admin/users/${id}/status`, { isActive, reason });
       return response.data;
     } catch (error) {
       throw error.response?.data || { message: 'Failed to update user status' };

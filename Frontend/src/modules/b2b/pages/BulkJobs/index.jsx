@@ -24,6 +24,12 @@ const BulkJobs = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [creationProgress, setCreationProgress] = useState(0);
   const [liveStats, setLiveStats] = useState(null);
+  // Real per-upload limits for this company (row cap can differ per company)
+  const { data: uploadLimits } = useQuery({
+    queryKey: ['b2b-bulk-template-spec'],
+    queryFn: async () => (await api.get('/b2b/bulk-jobs/template-spec')).data?.data?.limits,
+    staleTime: 5 * 60 * 1000
+  });
 
   // 1. Fetch Stats summary
   const { data: statsData } = useQuery({
@@ -961,7 +967,7 @@ const BulkJobs = () => {
             <ul className="text-xs font-semibold text-gray-500 space-y-2.5">
               <li className="flex items-start gap-2">
                 <FiCheck className="text-teal-500 w-4 h-4 shrink-0 mt-0.5" />
-                <span>No row limit — supports large enterprise batches of any size.</span>
+                <span>Up to {(uploadLimits?.maxRows || 1000).toLocaleString('en-IN')} rows and {uploadLimits?.maxFileSizeMb || 10} MB per file.</span>
               </li>
               <li className="flex items-start gap-2">
                 <FiCheck className="text-teal-500 w-4 h-4 shrink-0 mt-0.5" />

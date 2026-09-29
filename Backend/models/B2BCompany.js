@@ -110,6 +110,8 @@ const b2bCompanySchema = new mongoose.Schema({
     type: { type: String, enum: ['city', 'pincode', 'state', 'zone'], default: 'city' },
     value: { type: String, trim: true }
   }],
+  /** Max rows per bulk upload for this company; null = platform default (B2B settings). */
+  bulkUploadLimit: { type: Number, default: null, min: 1, max: 10000 },
   /** Named pricing profile used when no contract override applies. */
   pricingProfile: { type: String, default: null, trim: true },
   /** Named SLA profile; its thresholds are stamped onto each job. */

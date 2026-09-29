@@ -158,7 +158,15 @@ exports.updateVendorServiceOffering = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cannot edit an active service directly. Change status to DRAFT first.' });
     }
 
-    Object.assign(offering, req.body);
+    // Approval, ownership and activation are never set by the vendor directly:
+    // approval comes from an admin, activation goes through /activate.
+    const { approvalStatus, approvalReason, approvedBy, approvedAt, vendorId: _v, _id, deletedAt, ...changes } = req.body || {};
+    if (changes.status && !['DRAFT', 'INACTIVE'].includes(changes.status)) delete changes.status;
+    Object.assign(offering, changes);
+    // Editing content re-opens review
+    if (offering.approvalStatus === 'APPROVED' && Object.keys(changes).some((k) => !['status', 'isFeatured'].includes(k))) {
+      offering.approvalStatus = 'NOT_SUBMITTED';
+    }
     await offering.save();
 
     return res.status(200).json({

@@ -243,11 +243,14 @@ async function postEntry({
   if (ledgerType === 'REFUND') inc.totalSpent = -magnitude;
 
   const run = async (session) => {
-    const updated = await B2BWallet.findOneAndUpdate(
-      filter,
-      { $inc: inc, $set: { lastUpdatedAt: new Date() } },
-      { new: true, session }
-    );
+    // Pipeline update so every stored balance is rounded to paise in the same
+    // atomic write (plain $inc accumulated float noise like 4341.570000000001).
+    const set = { lastUpdatedAt: new Date() };
+    for (const [field, delta] of Object.entries(inc)) {
+      const next = { $add: [{ $ifNull: [`$${field}`, 0] }, delta] };
+      set[field] = field === 'ledgerSequence' ? next : { $round: [next, 2] };
+    }
+    const updated = await B2BWallet.findOneAndUpdate(filter, [{ $set: set }], { new: true, session });
     if (!updated) {
       if (reservedDelta < 0) {
         throw new WalletError('Reserved balance is lower than the amount being released', {

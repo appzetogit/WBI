@@ -194,7 +194,11 @@ const settingsSchema = new mongoose.Schema({
     enum: ['Instant', 'T+1', 'T+2', 'Weekly'],
     default: 'T+1'
   },
-  gstOnPlatformFee: { type: Number, default: 18, min: 0, max: 100 }
+  gstOnPlatformFee: { type: Number, default: 18, min: 0, max: 100 },
+  // B2B freelancer payout (% of net after platform fee + GST). null = engineer share of the vendor/engineer split
+  b2bFreelancerPayoutPercent: { type: Number, default: null, min: 0, max: 100 },
+  // Flat platform fee on one-time bookings when the service has no pricing rule
+  oneTimePlatformFee: { type: Number, default: 30, min: 0 }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Settings', settingsSchema);

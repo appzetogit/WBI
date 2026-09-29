@@ -21,11 +21,19 @@ import {
   FiShield
 } from "react-icons/fi";
 import adminMenu from "../../config/adminMenu.json";
+import { hasAdminPermission } from "../../utils/adminPermissions";
+
+const CONTROL_CENTER_PERMS = {
+  "All Jobs": "jobs.read", "Disputes": "disputes.read", "Refunds": "payments.read",
+  "Finance & B2B Reports": "reports.read", "Vendor Offerings": "vendors.read", "Locations": "services.read",
+  "Notification Templates": "notifications.read", "Audit Logs": "audit.read", "Roles & Permissions": "admins.manage",
+};
 import dashboardService from "../../services/dashboardService";
 
 // Icon mapping for menu items
 const iconMap = {
   Dashboard: FiHome,
+  "Control Center": FiShield,
   Users: FiUsers,
   Vendors: FiBriefcase,
   Workers: FiUser,
@@ -61,6 +69,17 @@ const iconMap = {
 // Helper function to convert child name to route path
 const getChildRoute = (parentRoute, childName) => {
   const routeMap = {
+    "/admin/control-center": {
+      "All Jobs": "/admin/control-center/jobs",
+      "Disputes": "/admin/control-center/disputes",
+      "Refunds": "/admin/control-center/refunds",
+      "Finance & B2B Reports": "/admin/control-center/reports",
+      "Vendor Offerings": "/admin/control-center/vendor-offerings",
+      "Locations": "/admin/control-center/locations",
+      "Notification Templates": "/admin/control-center/notification-templates",
+      "Audit Logs": "/admin/control-center/audit-logs",
+      "Roles & Permissions": "/admin/control-center/roles",
+    },
     "/admin/users": {
       "All Users": "/admin/users/all",
       "User Bookings": "/admin/users/bookings",
@@ -230,11 +249,14 @@ const AdminSidebar = ({ isOpen, onClose }) => {
     }
   }, []);
 
-  // Filter menu items by role
-  const filteredMenu = useMemo(() => adminMenu.filter(item => {
-    if (!item.allowedRoles) return true;
-    return item.allowedRoles.includes(adminUser.role);
-  }), [adminUser.role]);
+  // Show only what this admin's permissions allow (the API enforces the same rules).
+  // Control Center children are filtered by the tab permissions it declares.
+  const filteredMenu = useMemo(() => adminMenu
+    .filter((item) => hasAdminPermission(item.permission))
+    .map((item) => (item.title === 'Control Center'
+      ? { ...item, children: item.children.filter((c) => hasAdminPermission(CONTROL_CENTER_PERMS[c])) }
+      : item))
+    .filter((item) => item.title !== 'Control Center' || item.children.length), [adminUser.role]);
 
   // Fetch pending counts for badges
   useEffect(() => {

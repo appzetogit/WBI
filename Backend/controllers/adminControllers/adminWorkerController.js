@@ -26,6 +26,11 @@ const getAllWorkers = async (req, res) => {
     if (isActive !== undefined) {
       query.isActive = isActive === 'true';
     }
+    // Availability filter: online / offline / busy (status is set by the app socket)
+    if (req.query.availability) {
+      const a = String(req.query.availability).toUpperCase();
+      query.status = a === 'OFFLINE' ? { $in: ['OFFLINE', 'offline', null] } : a;
+    }
 
     // Search by name, email, phone
     if (search) {

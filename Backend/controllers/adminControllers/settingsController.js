@@ -1,6 +1,19 @@
 const Settings = require('../../models/Settings');
 const Vendor = require('../../models/Vendor');
 
+// Gateway/storage secrets never leave the server in full
+const SECRET_FIELDS = ['razorpayKeySecret', 'razorpayWebhookSecret', 'cloudinaryApiSecret'];
+const MASK = '••••••••';
+const maskSecrets = (doc) => {
+  const out = doc.toObject ? doc.toObject() : { ...doc };
+  for (const f of SECRET_FIELDS) {
+    if (out[f]) out[f] = `${MASK}${String(out[f]).slice(-4)}`;
+  }
+  return out;
+};
+// A masked value echoed back by the settings form means "unchanged"
+const isMasked = (v) => typeof v === 'string' && v.startsWith(MASK);
+
 // Get Global Settings
 exports.getSettings = async (req, res, next) => {
   try {
@@ -13,7 +26,7 @@ exports.getSettings = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      settings
+      settings: maskSecrets(settings)
     });
   } catch (error) {
     console.error('Error fetching settings:', error);
@@ -54,6 +67,8 @@ exports.updateSettings = async (req, res, next) => {
       // Vendor payout policy
       payoutProvider,
       withdrawalEnabled,
+      b2bFreelancerPayoutPercent,
+      oneTimePlatformFee,
       minWithdrawalAmount,
       maxWithdrawalAmount,
       dailyWithdrawalLimit,
@@ -99,13 +114,13 @@ exports.updateSettings = async (req, res, next) => {
       if (vendorCashLimit !== undefined) settings.vendorCashLimit = vendorCashLimit; // Add this
       if (cancellationPenalty !== undefined) settings.cancellationPenalty = cancellationPenalty;
       if (razorpayKeyId !== undefined) settings.razorpayKeyId = razorpayKeyId;
-      if (razorpayKeySecret !== undefined) settings.razorpayKeySecret = razorpayKeySecret;
-      if (razorpayWebhookSecret !== undefined) settings.razorpayWebhookSecret = razorpayWebhookSecret;
+      if (razorpayKeySecret !== undefined && !isMasked(razorpayKeySecret)) settings.razorpayKeySecret = razorpayKeySecret;
+      if (razorpayWebhookSecret !== undefined && !isMasked(razorpayWebhookSecret)) settings.razorpayWebhookSecret = razorpayWebhookSecret;
       if (cloudinaryCloudName !== undefined) settings.cloudinaryCloudName = cloudinaryCloudName;
       if (cloudinaryApiKey !== undefined) settings.cloudinaryApiKey = cloudinaryApiKey;
-      if (cloudinaryApiSecret !== undefined) settings.cloudinaryApiSecret = cloudinaryApiSecret;
+      if (cloudinaryApiSecret !== undefined && !isMasked(cloudinaryApiSecret)) settings.cloudinaryApiSecret = cloudinaryApiSecret;
 
-      if (cloudinaryApiSecret !== undefined) settings.cloudinaryApiSecret = cloudinaryApiSecret;
+      if (cloudinaryApiSecret !== undefined && !isMasked(cloudinaryApiSecret)) settings.cloudinaryApiSecret = cloudinaryApiSecret;
 
       // Billing update
       if (companyName !== undefined) settings.companyName = companyName;
@@ -133,6 +148,11 @@ exports.updateSettings = async (req, res, next) => {
 
       if (payoutProvider !== undefined) settings.payoutProvider = payoutProvider;
       if (withdrawalEnabled !== undefined) settings.withdrawalEnabled = withdrawalEnabled;
+      if (oneTimePlatformFee !== undefined) settings.oneTimePlatformFee = Number(oneTimePlatformFee);
+      if (b2bFreelancerPayoutPercent !== undefined) {
+        settings.b2bFreelancerPayoutPercent = b2bFreelancerPayoutPercent === '' || b2bFreelancerPayoutPercent === null
+          ? null : Number(b2bFreelancerPayoutPercent);
+      }
       if (minWithdrawalAmount !== undefined) settings.minWithdrawalAmount = minWithdrawalAmount;
       if (maxWithdrawalAmount !== undefined) settings.maxWithdrawalAmount = maxWithdrawalAmount;
       if (dailyWithdrawalLimit !== undefined) settings.dailyWithdrawalLimit = dailyWithdrawalLimit;
@@ -168,7 +188,7 @@ exports.updateSettings = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'System settings updated successfully',
-      settings
+      settings: maskSecrets(settings)
     });
   } catch (error) {
     console.error('Error updating settings:', error);

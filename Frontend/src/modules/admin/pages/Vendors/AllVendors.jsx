@@ -6,6 +6,8 @@ import Modal from '../UserCategories/components/Modal';
 import DocumentPreviewModal from '../../../../components/documents/DocumentPreviewModal';
 import adminVendorService from '../../../../services/adminVendorService';
 
+import VendorCommercials from '../../components/people/VendorCommercials';
+
 const display = (value) => {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -586,6 +588,11 @@ const AllVendors = () => {
                 <DetailField label="Email Verified">{display(selectedVendor.isEmailVerified)}</DetailField>
                 <DetailField label="Phone Verified">{display(selectedVendor.isPhoneVerified)}</DetailField>
               </div>
+            </div>
+
+            <div>
+              <SectionTitle>Commission & Performance</SectionTitle>
+              <VendorCommercials vendorId={selectedVendor.id || selectedVendor._id} />
             </div>
 
             {(selectedVendor.stats && (selectedVendor.stats.totalBookings > 0 || selectedVendor.stats.totalEarnings > 0)) && (

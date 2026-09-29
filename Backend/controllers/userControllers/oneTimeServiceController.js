@@ -53,7 +53,7 @@ exports.getServiceDetailsOptimized = async (req, res) => {
       description: service.description || service.subtitle || '',
       iconUrl: service.iconUrl || '',
       imageUrl: service.imageUrl || service.image || '',
-      rating: service.rating || 4.8,
+      rating: service.rating || null,
       reviewCount: service.totalReviews || 0,
       estimatedTime: service.estimatedTime || service.estimatedDuration || '60 mins',
       startingPrice: service.startingPrice || 0,
@@ -69,7 +69,7 @@ exports.getServiceDetailsOptimized = async (req, res) => {
       brands: brands,
       problems: problems,
       packages: packages,
-      pricing: pricingRule || { platformFee: 49, gstPercent: 18, discount: 0 }
+      pricing: await require('../../services/oneTimePricing.service').resolveOneTimePricing(service._id)
     });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });

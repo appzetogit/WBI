@@ -624,12 +624,15 @@ exports.resendStartOtp = async (req, res) => {
       }
     }
 
+    // The customer's OTP is only ever echoed back when static dev OTPs are
+    // explicitly enabled — a mistyped NODE_ENV must not leak it to the engineer.
+    const exposeOtp = process.env.NODE_ENV !== 'production' && process.env.USE_DEFAULT_OTP === 'true';
     res.status(200).json({
       success: true,
-      message: process.env.NODE_ENV !== 'production'
+      message: exposeOtp
         ? `Start OTP sent to customer phone. (DEV OTP: ${otp})`
         : 'Start OTP sent to customer phone',
-      debugOtp: process.env.NODE_ENV !== 'production' ? otp : undefined
+      debugOtp: exposeOtp ? otp : undefined
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to resend OTP' });

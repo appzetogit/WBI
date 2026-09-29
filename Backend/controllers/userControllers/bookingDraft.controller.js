@@ -47,19 +47,20 @@ const calculatePricing = async (draft) => {
     });
   }
 
-  // Fetch admin settings dynamically
-  const settings = await Settings.findOne({ type: 'global' });
-  const visitCharge = settings ? settings.visitedCharges : 199;
-  const platformFee = 30; // Assuming fixed fee or could be derived from settings.platformFeePercentage if needed
+  // Same charges the service page shows (per-service pricing rule → Settings)
+  const { resolveOneTimePricing } = require('../../services/oneTimePricing.service');
+  const pricingCfg = await resolveOneTimePricing(draft.serviceId?._id || draft.serviceId);
+  const visitCharge = pricingCfg.visitCharge;
+  const platformFee = pricingCfg.platformFee;
   let surgeCharge = 0;
   let emergencyCharge = 0;
   let convenienceFee = 0;
-  let discount = 0;
+  let discount = pricingCfg.discount;
   let couponDiscount = 0;
 
   const subtotal = packageTotal + visitCharge + platformFee + surgeCharge + emergencyCharge + convenienceFee;
-  const gstRate = settings ? settings.serviceGstPercentage / 100 : 0.18;
-  const gst = subtotal * gstRate;
+  const gstRate = pricingCfg.gstPercent / 100;
+  const gst = Math.round(subtotal * gstRate * 100) / 100;
 
   // Apply Coupon if valid
   if (draft.couponId) {
@@ -92,7 +93,7 @@ const calculatePricing = async (draft) => {
     surgeCharge,
     emergencyCharge,
     convenienceFee,
-    finalAmount: Math.max(0, finalAmount),
+    finalAmount: Math.max(0, Math.round(finalAmount * 100) / 100),
     itemCount: draft.packageIds.length
   };
 };

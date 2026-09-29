@@ -21,8 +21,13 @@ const adminSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['super_admin', 'admin'],
+    enum: ['super_admin', 'admin', 'operations_admin', 'finance_admin', 'support_admin', 'verification_admin'],
     default: 'admin'
+  },
+  // Extra grants on top of the role (see config/adminPermissions.js)
+  permissions: {
+    type: [String],
+    default: []
   },
   cityId: {
     type: mongoose.Schema.Types.ObjectId,

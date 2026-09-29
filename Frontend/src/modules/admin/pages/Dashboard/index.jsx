@@ -13,6 +13,7 @@ import CustomerGrowthAreaChart from '../../components/dashboard/CustomerGrowthAr
 import TopServices from '../../components/dashboard/TopServices';
 import RecentBookings from '../../components/dashboard/RecentBookings';
 import PlatformOverviewSection from '../../components/dashboard/PlatformOverviewSection';
+import ControlCenterWidgets from '../../components/dashboard/ControlCenterWidgets';
 import {
   getDashboardStats,
   getRevenueAnalytics,
@@ -330,6 +331,8 @@ const AdminDashboard = () => {
           />
         </div>
       </div>
+
+      <ControlCenterWidgets />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {statsCards.map((card, index) => {

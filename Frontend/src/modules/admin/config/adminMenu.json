@@ -2,32 +2,38 @@
   {
     "title": "Dashboard",
     "route": "/admin/dashboard",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "dashboard.read"
+  },
+  {
+    "title": "Control Center",
+    "route": "/admin/control-center",
+    "permission": null,
+    "children": [
+      "All Jobs",
+      "Disputes",
+      "Refunds",
+      "Finance & B2B Reports",
+      "Vendor Offerings",
+      "Locations",
+      "Notification Templates",
+      "Audit Logs",
+      "Roles & Permissions"
+    ]
   },
   {
     "title": "Users",
     "route": "/admin/users",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "All Users",
       "User Bookings",
       "User Analytics"
-    ]
+    ],
+    "permission": "users.read"
   },
   {
     "title": "B2B",
     "route": "/admin/b2b",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "Unassigned Jobs Queue",
       "Company Approvals",
@@ -39,15 +45,12 @@
       "Reports",
       "Support Tickets",
       "Settings"
-    ]
+    ],
+    "permission": "b2b.read"
   },
   {
     "title": "Vendors",
     "route": "/admin/vendors",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "All Vendors",
       "Vendor Bookings",
@@ -63,201 +66,151 @@
       "GST Verifications",
       "CIN Verifications",
       "CGPE Suite"
-    ]
+    ],
+    "permission": "vendors.read"
   },
   {
     "title": "Workers",
     "route": "/admin/workers",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "All Workers",
       "Worker Jobs",
       "Worker Analytics",
       "Worker Payments",
       "Document Verification"
-    ]
+    ],
+    "permission": "workforce.read"
   },
   {
     "title": "Engineers",
     "route": "/admin/engineers",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "All Engineers",
       "Engineer Jobs",
       "Engineer Analytics",
       "Engineer Payments",
       "Document Verification"
-    ]
+    ],
+    "permission": "workforce.read"
   },
   {
     "title": "Bookings",
     "route": "/admin/bookings",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "All Bookings",
       "Booking Tracking",
       "Booking Notifications"
-    ]
+    ],
+    "permission": "jobs.read"
   },
   {
     "title": "Scrap Items",
     "route": "/admin/scrap",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "content.read"
   },
   {
     "title": "Payments",
     "route": "/admin/payments",
-    "allowedRoles": [
-      "super_admin"
-    ],
     "children": [
       "Payment Overview",
       "User Payments",
       "Admin Revenue",
       "Payment Reports",
       "Payment Config"
-    ]
+    ],
+    "permission": "payments.read"
   },
   {
     "title": "User Catalog",
     "route": "/admin/user-categories",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "Home",
       "Manage Categories",
       "Manage Brands",
       "Manage Services"
-    ]
+    ],
+    "permission": "services.read"
   },
   {
     "title": "One-Time Services",
     "route": "/admin/one-time-services",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "services.read"
   },
   {
     "title": "Banners & Offers",
     "route": "/admin/banners",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "content.read"
   },
   {
     "title": "Home Content",
     "route": "/admin/home-content",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "content.read"
   },
   {
     "title": "Premium Services",
     "route": "/admin/service-categories",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "services.read"
   },
   {
     "title": "Reports",
     "route": "/admin/reports",
-    "allowedRoles": [
-      "super_admin"
-    ],
     "children": [
       "Revenue Report",
       "Booking Report",
       "Payment Report"
-    ]
+    ],
+    "permission": "reports.read"
   },
   {
     "title": "Reviews",
     "route": "/admin/reviews",
-    "allowedRoles": [
-      "super_admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "content.read"
   },
   {
     "title": "Plans",
     "route": "/admin/plans",
-    "allowedRoles": [
-      "super_admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "services.read"
   },
   {
     "title": "Settings",
     "route": "/admin/settings",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "settings.read"
   },
   {
     "title": "CMS Content",
     "route": "/admin/cms-content",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "content.read"
   },
   {
     "title": "Trust Videos",
     "route": "/admin/trust-videos",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
-    "children": []
+    "children": [],
+    "permission": "content.read"
   },
   {
     "title": "Digital Solutions",
     "route": "/admin/digital-solutions",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "Web Development",
       "App Development",
       "CRM",
       "Digital Marketing",
       "UI/UX Design"
-    ]
+    ],
+    "permission": "content.read"
   },
   {
     "title": "Security Solutions",
     "route": "/admin/security-solutions",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "Installation & Dismantle",
       "Preventive maintenance",
@@ -265,15 +218,12 @@
       "Site Testing",
       "Panel installation",
       "Automated power monitoring"
-    ]
+    ],
+    "permission": "content.read"
   },
   {
     "title": "Banking Solutions",
     "route": "/admin/banking-solutions",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "ATM Service",
       "ATM Cassette Service",
@@ -282,15 +232,12 @@
       "POS Service",
       "VSAT Service",
       "Barcode Reader Service"
-    ]
+    ],
+    "permission": "content.read"
   },
   {
     "title": "Energy Solutions",
     "route": "/admin/energy-solutions",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "Diesel Generator Service",
       "Battery Service",
@@ -299,21 +246,19 @@
       "AC Power System Service",
       "DC Power System Service",
       "Power System Testing"
-    ]
+    ],
+    "permission": "content.read"
   },
   {
     "title": "Healthcare Solutions",
     "route": "/admin/healthcare-solutions",
-    "allowedRoles": [
-      "super_admin",
-      "admin"
-    ],
     "children": [
       "Medical Equipment Services",
       "Quality Control Test",
       "Electrical Safety Test",
       "Preventive Maintenance",
       "Annual Maintenance Contract (AMC)"
-    ]
+    ],
+    "permission": "content.read"
   }
 ]

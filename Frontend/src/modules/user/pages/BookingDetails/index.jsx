@@ -37,6 +37,7 @@ import { useSocket } from '../../../../context/SocketContext';
 import ReviewCard from '../../components/booking/ReviewCard';
 import NotificationBell from '../../components/common/NotificationBell';
 import api from '../../../../services/api';
+import ReportProblem from '../../components/disputes/ReportProblem';
 
 const toAssetUrl = (url) => {
   if (!url) return '';
@@ -1651,6 +1652,11 @@ const BookingDetails = () => {
               <FiMail className="w-6 h-6 text-gray-700" />
               <span className="text-sm font-bold text-gray-700">Email Help</span>
             </button>
+
+            {/* Dispute: available once the professional has been assigned */}
+            {!['pending', 'searching', 'searching_worker', 'requested', 'cancelled'].includes(booking.status?.toLowerCase()) && (
+              <ReportProblem sourceId={booking._id} className="col-span-2" />
+            )}
 
             {/* Cancel */}
             {!['cancelled', 'completed', 'work_done'].includes(booking.status?.toLowerCase()) && (
