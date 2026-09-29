@@ -34,3 +34,12 @@ data/
 
 # Firebase Config
 config/firebase-service-account.json
+
+# Runtime uploads (created on demand by the API)
+uploads/
+# Keys / tokens
+*.pem
+*.ppk
+*.tok
+scratch/
+.qa/

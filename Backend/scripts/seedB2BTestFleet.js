@@ -28,7 +28,15 @@ const Engineer = require('../models/Engineer');
 const Vendor = require('../models/Vendor');
 const { ensureVendorCompanyCode } = require('../utils/vendorCompanyCode');
 
-const PASSWORD = process.env.QA_FLEET_PASSWORD || 'QaTest!2026#WBI';
+const PASSWORD = process.env.QA_FLEET_PASSWORD;
+if (!PASSWORD) {
+  console.error('QA_FLEET_PASSWORD env var is required (no default password is baked in).');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production') {
+  console.error('Refusing to seed QA fleet accounts when NODE_ENV=production.');
+  process.exit(1);
+}
 const DOMAIN = 'qa.wbi.test';
 
 /** Indore. Small offsets so proximity ordering is meaningful, all within ~6 km. */

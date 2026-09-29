@@ -9,7 +9,12 @@ const normalizePhone10 = (phone) => {
   return digits.slice(-10);
 };
 
+/** Built-in QA phones are inactive in production unless ALLOW_BUILTIN_QA_OTP_IN_PROD=true is set explicitly. */
+const isBuiltinQaEnabled = () =>
+  process.env.NODE_ENV !== 'production' || process.env.ALLOW_BUILTIN_QA_OTP_IN_PROD === 'true';
+
 const isBuiltinQaPhone = (phone) => {
+  if (!isBuiltinQaEnabled()) return false;
   const n = normalizePhone10(phone);
   return n.length === 10 && BUILTIN_QA_OTP_PHONES.includes(n);
 };
@@ -24,10 +29,10 @@ const isBypassAllowedInEnv = () => {
 };
 
 const getBypassPhones = () => {
-  if (!isBypassAllowedInEnv()) return [...BUILTIN_QA_OTP_PHONES];
+  if (!isBypassAllowedInEnv()) return isBuiltinQaEnabled() ? [...BUILTIN_QA_OTP_PHONES] : [];
   const raw = process.env.OTP_BYPASS_PHONES || '';
   const fromEnv = raw.split(',').map(normalizePhone10).filter((p) => p.length === 10);
-  return [...new Set([...BUILTIN_QA_OTP_PHONES, ...fromEnv])];
+  return [...new Set([...(isBuiltinQaEnabled() ? BUILTIN_QA_OTP_PHONES : []), ...fromEnv])];
 };
 
 const isOtpBypassPhone = (phone) => {
@@ -38,7 +43,7 @@ const isOtpBypassPhone = (phone) => {
 };
 
 const getBypassOtp = () => {
-  if (isBypassAllowedInEnv() || BUILTIN_QA_OTP_PHONES.length) {
+  if (isBypassAllowedInEnv() || isBuiltinQaEnabled()) {
     return process.env.OTP_BYPASS_CODE || DEFAULT_BYPASS_OTP;
   }
   return null;

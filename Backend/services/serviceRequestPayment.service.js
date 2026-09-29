@@ -10,6 +10,8 @@ const { getEngineerPayoutPercent } = require('./opsJobPayout.service');
 
 const isPaymentBypassed = () => {
   if (process.env.SERVICE_REQUEST_SKIP_PAYMENT === 'true') return true;
+  // In production, missing gateway keys must not silently skip payment.
+  if (process.env.NODE_ENV === 'production') return false;
   if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) return true;
   return false;
 };

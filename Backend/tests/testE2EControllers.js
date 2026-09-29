@@ -30,7 +30,7 @@ async function runE2ETest() {
     console.log('🚀 Starting Full E2E Controller Test...');
     console.log('=======================================\n');
 
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/appzeto');
+    await mongoose.connect(require('./helpers/assertLocalDb')(process.env.MONGODB_URI));
     
     // Cleanup old test data
     await Worker.deleteMany({ name: /^E2E Worker/ });

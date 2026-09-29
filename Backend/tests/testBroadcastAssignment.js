@@ -42,7 +42,7 @@ async function runTest() {
   try {
     console.log('Connecting to MongoDB...');
     mongoose.set('strictPopulate', false);
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/appzeto');
+    await mongoose.connect(require('./helpers/assertLocalDb')(process.env.MONGODB_URI));
     console.log('Connected to DB');
 
     // 1. Clean up old test data if any

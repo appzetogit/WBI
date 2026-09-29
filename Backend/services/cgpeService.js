@@ -31,7 +31,13 @@ class CgpeService {
       }
     }
 
-    const isMock = process.env.USE_MOCK_KYC === 'true' || !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
+    const missingApiKey = !this.apiKey || this.apiKey === 'your_cgpe_api_key_here';
+    const isProduction = process.env.NODE_ENV === 'production';
+    // Never simulate KYC in production: a missing key must fail closed, not auto-verify.
+    if (isProduction && missingApiKey) {
+      throw new Error('KYC provider is not configured');
+    }
+    const isMock = !isProduction && (process.env.USE_MOCK_KYC === 'true' || missingApiKey);
     if (isMock) {
       return this.simulateSandboxResponse(endpoint, data);
     }
