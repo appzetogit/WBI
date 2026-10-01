@@ -50,6 +50,10 @@ const createOpsProjectFromOpportunity = async (opportunity, vendorId, amount = 0
       ...m,
       paymentPercent: Math.round((Number(m.paymentPercent) || 0) * scale)
     }));
+    // Rounding can land on 99% / 101%; the last paid milestone absorbs the difference.
+    const drift = 100 - milestones.reduce((s, m) => s + m.paymentPercent, 0);
+    const lastPaid = milestones.map((m) => m.paymentPercent > 0).lastIndexOf(true);
+    if (drift && lastPaid >= 0) milestones[lastPaid].paymentPercent += drift;
   }
 
   const clientName =

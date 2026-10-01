@@ -67,6 +67,13 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
     const red = (n) => Boolean(n > 0);
     return {
       'Dashboard': { path: `${b}/dashboard`, icon: LayoutDashboard },
+      // Customer project requests waiting for this vendor to accept / decline
+      'Requests': {
+        path: `${b}/requests?tab=user`,
+        icon: Inbox,
+        badge: counts.clientRequests,
+        badgeRed: red(counts.clientRequests)
+      },
       'Jobs': {
         path: `${b}/jobs`,
         icon: Briefcase,
@@ -130,9 +137,7 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
       },
       'Bookings': {
         path: `${b}/bookings?tab=user`,
-        icon: CalendarCheck,
-        badge: counts.clientRequests,
-        badgeRed: red(counts.clientRequests)
+        icon: CalendarCheck
       },
       'Payments': {
         path: `${b}/payments`,
@@ -161,7 +166,7 @@ const DynamicSidebar = ({ mobileOpen = false, onCloseMobile }) => {
   }, [basePath, counts, engCounts, globalCounts, jobCounts]);
 
   const sectionsToRender = useMemo(() => [
-    'Dashboard', 'Jobs', 'Engineers', 'Assignments', 'Services', 'Parts', 'Bookings',
+    'Dashboard', 'Requests', 'Jobs', 'Engineers', 'Assignments', 'Services', 'Parts', 'Bookings',
     'Payments', 'Settlements', 'Support', 'Analytics', 'Documents', 'Settings', 'Notifications'
   ], []);
 

@@ -670,6 +670,20 @@ async function approveServiceRequestMilestoneCustomer({ serviceRequestId, milest
     return { ok: false, status: 404, message: 'No vendor project linked to this request yet' };
   }
 
+  // The milestone id comes from the client — it must belong to this request's
+  // project and be waiting on the customer after QA, or escrow could be released
+  // for someone else's project / unchecked work.
+  const VendorOpsMilestone = require('../models/VendorOpsMilestone');
+  const milestone = await VendorOpsMilestone.findOne({ _id: milestoneId, projectId })
+    .select('qaStatus customerSignoff')
+    .lean();
+  if (!milestone) {
+    return { ok: false, status: 404, message: 'Milestone not found for this request' };
+  }
+  if (milestone.qaStatus !== 'passed' || milestone.customerSignoff !== 'pending') {
+    return { ok: false, status: 409, message: 'This milestone is not awaiting your approval' };
+  }
+
   return onMilestoneCustomerSignoff({ projectId, milestoneId, approved });
 }
 
@@ -690,6 +704,12 @@ async function autoFinalizeProjectEscrow(projectId) {
   }).lean();
 
   if (projectLedger && withPay.length) {
+    // Every field job is done, so unpaid checkpoints (e.g. "Assessment") are
+    // done too — left pending they keep the project and flow from ever closing.
+    await require('../models/VendorOpsMilestone').updateMany(
+      { projectId, status: { $ne: 'completed' }, paymentPercent: { $not: { $gt: 0 } } },
+      { $set: { status: 'completed', progress: 100 } }
+    );
     const { markMilestoneQaPassed } = require('./milestoneApproval.service');
     for (const m of withPay) {
       const doc = await require('../models/VendorOpsMilestone').findById(m._id);

@@ -25,6 +25,7 @@ const { onVendorAccepted, recordVendorReject } = require('../../services/project
 const { createOpsProjectFromOpportunity } = require('../../utils/createOpsProjectFromOpportunity');
 const { getIO } = require('../../sockets');
 const { openVendorOfferFilter, sendJobError } = require('../../services/jobScope.service');
+const { vendorOpportunityScope, withVendorStatus } = require('../../services/vendorOpportunityInbox.service');
 const { lifecycleOf } = require('../../services/jobLifecycle.service');
 const { LIFECYCLE: S } = require('../../services/jobStateMachine');
 
@@ -144,16 +145,12 @@ exports.getRequests = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Vendor not found' });
     }
 
-    const oppCategoryFilter = matchCodes.length ? { categoryCode: { $in: matchCodes } } : {};
+    const scope = vendorOpportunityScope(vid, matchCodes);
 
     // ── 1. Fetch User Requests ──
     let userRequests = [];
     if (source === 'all' || source === 'user') {
-      const oppFilter = {
-        type: 'client_request',
-        ...oppCategoryFilter,
-        $or: [{ eligibleVendors: vid }, { eligibleVendors: { $size: 0 } }, { 'clientInfo.targetVendorId': vid }]
-      };
+      const oppFilter = { type: 'client_request', ...scope };
 
       if (category) oppFilter.categoryCode = category;
       if (priority) oppFilter.priority = priority;
@@ -163,14 +160,12 @@ exports.getRequests = async (req, res) => {
         Booking.find(bookingScopeFor(vid)).sort({ createdAt: -1 }).lean().catch(() => []),
         ServiceRequest.find({ assignedVendorId: vid }).sort({ createdAt: -1 }).lean().catch(() => [])
       ]);
+      const oppRows = await withVendorStatus(opps, vid);
+      // A customer service request is listed through its opportunity once that is in the list.
+      const listedOppIds = new Set(opps.map((o) => String(o._id)));
 
       userRequests = [
-        ...opps.map((opp) => {
-          let derivedStatus = 'new';
-          if (opp.status === 'closed' || opp.assignment?.phase === 'awarded') derivedStatus = 'accepted';
-          else if (opp.status === 'rejected') derivedStatus = 'rejected';
-          else if (opp.assignment?.phase === 'awaiting_engineer') derivedStatus = 'assigned';
-
+        ...oppRows.map(({ opp, status: derivedStatus }) => {
           return {
             id: opp._id.toString(),
             requestId: opp.opportunityCode,
@@ -230,7 +225,7 @@ exports.getRequests = async (req, res) => {
             attachments: b.serviceImages || []
           };
         }),
-        ...serviceReqs.map((sr) => {
+        ...serviceReqs.filter((sr) => !listedOppIds.has(String(sr.opportunityId || ''))).map((sr) => {
           let derivedStatus = 'new';
           if (sr.status === 'Assigned') derivedStatus = 'assigned';
           else if (sr.status === 'In Progress') derivedStatus = 'in_progress';
@@ -270,8 +265,7 @@ exports.getRequests = async (req, res) => {
     if (source === 'all' || source === 'b2b') {
       const b2bOppFilter = {
         type: { $in: ['b2b_opportunity', 'bulk_requirement', 'bid_quote_request', 'direct_invitation'] },
-        ...oppCategoryFilter,
-        $or: [{ eligibleVendors: vid }, { eligibleVendors: { $size: 0 } }, { 'clientInfo.targetVendorId': vid }]
+        ...scope
       };
 
       if (category) b2bOppFilter.categoryCode = category;
@@ -290,13 +284,10 @@ exports.getRequests = async (req, res) => {
           .catch(() => [])
       ]);
 
-      b2bRequests = [
-        ...b2bOpps.map((opp) => {
-          let derivedStatus = 'new';
-          if (opp.status === 'closed' || opp.assignment?.phase === 'awarded') derivedStatus = 'accepted';
-          else if (opp.status === 'rejected') derivedStatus = 'rejected';
-          else if (opp.assignment?.phase === 'awaiting_engineer') derivedStatus = 'assigned';
+      const b2bOppRows = await withVendorStatus(b2bOpps, vid);
 
+      b2bRequests = [
+        ...b2bOppRows.map(({ opp, status: derivedStatus }) => {
           return {
             id: opp._id.toString(),
             requestId: opp.opportunityCode,
@@ -589,12 +580,20 @@ exports.acceptRequest = async (req, res) => {
       if (!(await vendorCanSeeOpportunity(opp.toObject(), vid))) {
         return res.status(403).json({ success: false, message: 'You do not have access to this request' });
       }
-      const claim = await onVendorAccepted(id, vid);
-      if (!claim.ok) {
-        return res.status(409).json({ success: false, message: claim.message || 'Opportunity is no longer available' });
-      }
 
-      const updatedOpp = claim.opportunity;
+      // This vendor already won it (e.g. an earlier accept failed after the
+      // claim): finish the hand-over instead of reporting a conflict.
+      const alreadyMine = (opp.assignment?.vendorQueue || []).some(
+        (q) => String(q.vendorId) === String(vid) && q.status === 'accepted'
+      );
+      let updatedOpp = opp;
+      if (!alreadyMine) {
+        const claim = await onVendorAccepted(id, vid);
+        if (!claim.ok) {
+          return res.status(409).json({ success: false, message: claim.message || 'Opportunity is no longer available' });
+        }
+        updatedOpp = claim.opportunity;
+      }
 
       // An opportunity that fronts a B2B job: the vendor takes the SAME job
       // (no separate ops-project copy of the job).
@@ -609,10 +608,24 @@ exports.acceptRequest = async (req, res) => {
         });
       }
 
-      const opsProject = await createOpsProjectFromOpportunity({
-        opportunity: updatedOpp,
-        vendorId: vid
-      });
+      let opsProject = await VendorOpsProject.findOne({ opportunityId: updatedOpp._id, vendorId: vid });
+      if (!opsProject) {
+        // A paid customer request is worth exactly what the customer put in escrow.
+        const sr = updatedOpp.assignment?.serviceRequestId
+          ? await ServiceRequest.findById(updatedOpp.assignment.serviceRequestId)
+              .select('payment.amount payment.status')
+              .lean()
+          : null;
+        const customerPaid = sr?.payment?.status === 'paid' ? Number(sr.payment.amount) || 0 : 0;
+
+        opsProject = await createOpsProjectFromOpportunity(updatedOpp, vid, customerPaid);
+        updatedOpp.awardedTo = {
+          vendorId: new mongoose.Types.ObjectId(vid),
+          projectId: opsProject._id,
+          awardedAt: null
+        };
+        await updatedOpp.save();
+      }
 
       return res.status(200).json({
         success: true,

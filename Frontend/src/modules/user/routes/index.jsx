@@ -80,6 +80,7 @@ const Rewards = lazyLoad(() => import('../pages/Rewards'));
 const Native = lazyLoad(() => import('../pages/Native'));
 const CategoryDetails = lazyLoad(() => import('../pages/CategoryDetails'));
 const DynamicServiceRequest = lazyLoad(() => import('../pages/DynamicServiceRequest'));
+const ServiceRequestTrack = lazyLoad(() => import('../pages/ServiceRequestTrack'));
 const Checkout = lazyLoad(() => import('../pages/Checkout'));
 const Calendar = lazyLoad(() => import('../pages/Calendar'));
 const Inbox = lazyLoad(() => import('../pages/Inbox'));
@@ -189,6 +190,7 @@ const UserRoutes = () => {
               <Route path="/checkout" element={<AnimatedPage><ProtectedRoute userType="user"><Checkout /></ProtectedRoute></AnimatedPage>} />
               <Route path="/categories/:slug" element={<AnimatedPage><ProtectedRoute userType="user"><CategoryDetails /></ProtectedRoute></AnimatedPage>} />
               <Route path="/service-request/:subCatCode" element={<AnimatedPage><ProtectedRoute userType="user"><DynamicServiceRequest /></ProtectedRoute></AnimatedPage>} />
+              <Route path="/service-request/track/:requestCode" element={<AnimatedPage><ProtectedRoute userType="user"><ServiceRequestTrack /></ProtectedRoute></AnimatedPage>} />
               <Route path="/workers/match" element={<AnimatedPage><ProtectedRoute userType="user"><WorkerSelection /></ProtectedRoute></AnimatedPage>} />
               <Route path="/native" element={<AnimatedPage><ProtectedRoute userType="user"><Native /></ProtectedRoute></AnimatedPage>} />
 

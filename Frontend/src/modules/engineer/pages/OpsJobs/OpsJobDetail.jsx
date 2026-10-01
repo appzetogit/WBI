@@ -210,8 +210,14 @@ const OpsJobDetail = () => {
       </div>
 
       {showConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-3">
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4"
+          onClick={() => !acting && setShowConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-md p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] space-y-3 max-h-[90dvh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="font-bold text-gray-900">Confirm before accepting</h3>
             <p className="text-sm text-gray-600">Project is awarded only after this checklist.</p>
             <label className="block text-xs font-semibold text-gray-600">
@@ -242,7 +248,7 @@ const OpsJobDetail = () => {
               </label>
             ))}
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setShowConfirm(false)} className="flex-1 py-2 border rounded-xl text-sm font-bold">
+              <button type="button" disabled={acting} onClick={() => setShowConfirm(false)} className="flex-1 py-2 border rounded-xl text-sm font-bold">
                 Cancel
               </button>
               <button

@@ -25,15 +25,44 @@ const parseBudgetNumber = (raw) => {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 };
 
+const BUDGET_FIELDS = ['budget', 'budgetRange', 'estimatedBudget'];
+
+/**
+ * The catalogue price (basePrice) is the floor. A budget the customer types can
+ * only raise the amount, and only when the form actually asks for one — otherwise
+ * any client could post `budget: 1` and book a ₹2,499 service for ₹1.
+ */
 const resolvePayableAmount = (schema, formData = {}) => {
-  const fromForm =
-    parseBudgetNumber(formData.budget) ||
-    parseBudgetNumber(formData.budgetRange) ||
-    parseBudgetNumber(formData.estimatedBudget);
-  if (fromForm) return fromForm;
   const base = Number(schema?.basePrice);
-  if (Number.isFinite(base) && base > 0) return Math.round(base);
-  return 0;
+  const basePrice = Number.isFinite(base) && base > 0 ? Math.round(base) : 0;
+  const formFields = new Set((schema?.fields || []).map((f) => f.fieldName));
+  const offered =
+    BUDGET_FIELDS.filter((key) => formFields.has(key))
+      .map((key) => parseBudgetNumber(formData[key]))
+      .find(Boolean) || 0;
+  return Math.max(basePrice, offered);
+};
+
+/** Settled payment states — nothing left for the customer to pay. */
+const isSettledPaymentStatus = (status) => ['paid', 'skipped', 'not_required'].includes(status);
+
+const knownOrderIds = (request) =>
+  [...new Set([...(request.payment?.razorpayOrderIds || []), request.payment?.razorpayOrderId].filter(Boolean))];
+
+/** Form schema used to build the marketplace payload; survives a schema being archived after payment. */
+const schemaForRequest = async (request) => {
+  const FormSchema = require('../models/FormSchema');
+  const schema = await FormSchema.findOne({ subCatCode: request.subCatCode }).lean();
+  return (
+    schema || {
+      categoryCode: request.categoryCode,
+      categoryName: request.categoryName,
+      subCatCode: request.subCatCode,
+      subCategoryName: request.subCategoryName,
+      basePrice: Number(request.payment?.amount) || 0,
+      fields: []
+    }
+  );
 };
 
 const buildMarketplacePayload = (request, schema, formData) => ({
@@ -77,12 +106,14 @@ const buildMarketplacePayload = (request, schema, formData) => ({
 });
 
 async function queueMarketplaceForServiceRequest(request, schema, formData) {
-  if (request.payment?.marketplaceQueued) return { alreadyQueued: true };
-  queueOpportunityFromEnquiry(buildMarketplacePayload(request, schema, formData));
-  await ServiceRequest.updateOne(
-    { _id: request._id },
+  // Atomic claim: the client verify call and the Razorpay webhook can arrive
+  // together, and only one of them may create the marketplace opportunity.
+  const claim = await ServiceRequest.updateOne(
+    { _id: request._id, 'payment.marketplaceQueued': { $ne: true } },
     { $set: { 'payment.marketplaceQueued': true } }
   );
+  if (!claim.modifiedCount) return { alreadyQueued: true };
+  queueOpportunityFromEnquiry(buildMarketplacePayload(request, schema, formData));
   if (global.io) {
     global.io.emit('new_enquiry', {
       type: 'ServiceRequest',
@@ -134,11 +165,118 @@ async function initializePaymentForNewRequest(request, schema, formData) {
   return { paymentRequired: true, amount, status: 'pending' };
 }
 
+/**
+ * Mark a captured Razorpay payment against the request (escrow held) and start
+ * vendor matching. Shared by the client verify call, the Razorpay webhook and
+ * reconciliation, and safe to run from all three at once: only the caller that
+ * flips the status to 'paid' does the follow-up work.
+ *
+ * @param {object} payment Razorpay payment entity (amount in paise)
+ */
+async function settleCapturedPayment(request, payment, { source = 'client' } = {}) {
+  if (!payment || payment.status !== 'captured') {
+    return {
+      ok: false,
+      status: 409,
+      processing: payment?.status === 'authorized',
+      message:
+        payment?.status === 'authorized'
+          ? 'Payment received — confirming with the bank'
+          : 'Payment has not been captured'
+    };
+  }
+  if (!knownOrderIds(request).includes(payment.order_id)) {
+    return { ok: false, status: 400, message: 'This payment does not belong to this request' };
+  }
+
+  const expectedPaise = Math.round((Number(request.payment?.amount) || 0) * 100);
+  if (String(payment.currency || 'INR') !== 'INR' || Number(payment.amount) < expectedPaise) {
+    console.error('[serviceRequestPayment] amount mismatch', {
+      requestCode: request.requestCode,
+      expectedPaise,
+      paidPaise: payment.amount,
+      paymentId: payment.id,
+      source
+    });
+    return { ok: false, status: 400, message: 'Paid amount does not match this request' };
+  }
+
+  const paid = await ServiceRequest.findOneAndUpdate(
+    { _id: request._id, 'payment.status': { $ne: 'paid' } },
+    {
+      $set: {
+        'payment.status': 'paid',
+        'payment.razorpayOrderId': payment.order_id,
+        'payment.razorpayPaymentId': payment.id,
+        'payment.paidAt': new Date(),
+        'payment.escrowStatus': 'held'
+      },
+      $addToSet: { 'payment.razorpayOrderIds': payment.order_id }
+    },
+    { new: true }
+  );
+  if (!paid) return { ok: true, alreadyPaid: true, message: 'Payment already recorded' };
+
+  const schema = await schemaForRequest(paid);
+  await queueMarketplaceForServiceRequest(paid, schema, paid.formData || {});
+
+  try {
+    const { dispatchUserServiceRequestPaid } = require('./marketplaceNotify.service');
+    await dispatchUserServiceRequestPaid({
+      request: paid.toObject(),
+      schema,
+      paymentMeta: { orderId: payment.order_id, paymentId: payment.id }
+    });
+  } catch (e) {
+    console.warn('[serviceRequestPayment] user notify failed', e.message);
+  }
+
+  try {
+    await Transaction.create({
+      userId: paid.userId || null,
+      type: 'payment',
+      amount: Number(paid.payment?.amount) || 0,
+      status: 'completed',
+      paymentMethod: 'razorpay',
+      description: `Service request ${paid.requestCode} — escrow held until completion`,
+      metadata: {
+        escrow: 'held',
+        requestCode: paid.requestCode,
+        subCatCode: paid.subCatCode,
+        categoryCode: paid.categoryCode,
+        razorpayPaymentId: payment.id,
+        razorpayOrderId: payment.order_id,
+        settledBy: source
+      }
+    });
+  } catch (txnErr) {
+    console.warn('[serviceRequestPayment] escrow audit txn failed:', txnErr.message);
+  }
+
+  return { ok: true, message: 'Payment verified. Vendors will be notified shortly.' };
+}
+
+/**
+ * Settle a request whose customer paid but whose verify call never reached us
+ * (tab closed, network drop). Looks for a captured payment on any of its orders.
+ */
+async function reconcileServiceRequestPayment(request) {
+  if (request.payment?.status === 'paid') return { ok: true, alreadyPaid: true };
+  if (isPaymentBypassed()) return { ok: false, notPaid: true };
+
+  for (const orderId of knownOrderIds(request)) {
+    const res = await razorpayService.getOrderPayments(orderId);
+    const captured = (res.payments || []).find((p) => p.status === 'captured');
+    if (captured) return settleCapturedPayment(request, captured, { source: 'reconcile' });
+  }
+  return { ok: false, notPaid: true };
+}
+
 async function createPaymentOrder(requestCode) {
   const request = await ServiceRequest.findOne({ requestCode });
   if (!request) return { ok: false, status: 404, message: 'Request not found' };
 
-  if (request.payment?.status === 'paid' || request.payment?.status === 'skipped' || request.payment?.status === 'not_required') {
+  if (isSettledPaymentStatus(request.payment?.status)) {
     return {
       ok: true,
       alreadyPaid: true,
@@ -156,9 +294,24 @@ async function createPaymentOrder(requestCode) {
     return { ok: false, status: 400, message: 'No payable amount on this request' };
   }
 
+  // Never charge twice: if an earlier attempt was paid, settle it instead.
+  const settled = await reconcileServiceRequestPayment(request);
+  if (settled.ok) {
+    return {
+      ok: true,
+      alreadyPaid: true,
+      paymentRequired: false,
+      data: { requestCode, amount }
+    };
+  }
+
   if (request.payment?.razorpayOrderId) {
     const existing = await razorpayService.getOrderDetails(request.payment.razorpayOrderId);
-    if (existing.success && existing.order?.status !== 'paid') {
+    if (
+      existing.success &&
+      existing.order?.status !== 'paid' &&
+      Number(existing.order?.amount) === Math.round(amount * 100)
+    ) {
       return {
         ok: true,
         data: {
@@ -184,8 +337,11 @@ async function createPaymentOrder(requestCode) {
   }
 
   await ServiceRequest.updateOne(
-    { _id: request._id },
-    { $set: { 'payment.razorpayOrderId': order.orderId, 'payment.status': 'pending' } }
+    { _id: request._id, 'payment.status': { $ne: 'paid' } },
+    {
+      $set: { 'payment.razorpayOrderId': order.orderId, 'payment.status': 'pending' },
+      $addToSet: { 'payment.razorpayOrderIds': order.orderId }
+    }
   );
 
   return {
@@ -200,39 +356,32 @@ async function createPaymentOrder(requestCode) {
   };
 }
 
-async function markPaidAndActivateMarketplace(request, schema, formData, paymentMeta) {
-  await ServiceRequest.updateOne(
-    { _id: request._id },
-    {
-      $set: {
-        'payment.status': 'paid',
-        'payment.razorpayOrderId': paymentMeta.orderId,
-        'payment.razorpayPaymentId': paymentMeta.paymentId,
-        'payment.paidAt': new Date(),
-        'payment.escrowStatus': 'held'
-      }
-    }
-  );
-  request.payment = {
-    ...request.payment,
-    status: 'paid',
-    escrowStatus: 'held',
-    marketplaceQueued: request.payment?.marketplaceQueued
-  };
-  await queueMarketplaceForServiceRequest(request, schema, formData);
-  try {
-    const { dispatchUserServiceRequestPaid } = require('./marketplaceNotify.service');
-    await dispatchUserServiceRequestPaid({
-      request: { ...request.toObject?.() || request, payment: { ...request.payment, status: 'paid', amount: request.payment?.amount } },
-      schema,
-      paymentMeta
-    });
-  } catch (e) {
-    console.warn('[serviceRequestPayment] user notify failed', e.message);
+/**
+ * An order belongs to the request when we stored it, or (orders created before
+ * order ids were tracked) when the notes we set at creation name this request.
+ */
+async function orderBelongsToRequest(request, orderId) {
+  if (!orderId) return false;
+  if (knownOrderIds(request).includes(orderId)) return true;
+  const res = await razorpayService.getOrderDetails(orderId);
+  const notes = res.success ? res.order?.notes || {} : {};
+  if (notes.type === 'service_request' && notes.requestCode === request.requestCode) {
+    await ServiceRequest.updateOne(
+      { _id: request._id },
+      { $addToSet: { 'payment.razorpayOrderIds': orderId } }
+    );
+    request.payment.razorpayOrderIds = [...(request.payment.razorpayOrderIds || []), orderId];
+    return true;
   }
+  return false;
 }
 
-async function verifyServiceRequestPayment(requestCode, { orderId, paymentId, signature }, formDataFallback = {}) {
+/**
+ * Client-side confirmation after Razorpay checkout. The signature alone only proves
+ * that *some* payment happened on our account, so the payment is also tied to this
+ * request's order and its captured amount is checked against what the request costs.
+ */
+async function verifyServiceRequestPayment(requestCode, { orderId, paymentId, signature }) {
   const request = await ServiceRequest.findOne({ requestCode });
   if (!request) return { ok: false, status: 404, message: 'Request not found' };
 
@@ -241,44 +390,69 @@ async function verifyServiceRequestPayment(requestCode, { orderId, paymentId, si
   }
 
   if (!razorpayService.verifyPayment(orderId, paymentId, signature)) {
-    await ServiceRequest.updateOne({ _id: request._id }, { $set: { 'payment.status': 'failed' } });
     return { ok: false, status: 400, message: 'Invalid payment signature' };
   }
 
-  const FormSchema = require('../models/FormSchema');
-  const schema = await FormSchema.findOne({ subCatCode: request.subCatCode, isActive: true });
-  if (!schema) {
-    return { ok: false, status: 500, message: 'Form schema missing for request' };
+  if (!(await orderBelongsToRequest(request, orderId))) {
+    return { ok: false, status: 400, message: 'This payment does not belong to this request' };
   }
 
-  const formData = { ...request.formData, ...formDataFallback };
+  const fetched = await razorpayService.getPaymentDetails(paymentId);
+  if (!fetched.success || !fetched.payment) {
+    return {
+      ok: false,
+      status: 502,
+      message: 'Could not confirm the payment with Razorpay. Please refresh in a moment.'
+    };
+  }
+  if (fetched.payment.order_id !== orderId) {
+    return { ok: false, status: 400, message: 'This payment does not belong to this request' };
+  }
 
-  await markPaidAndActivateMarketplace(request, schema, formData, {
-    orderId,
-    paymentId
+  const result = await settleCapturedPayment(request, fetched.payment, { source: 'client' });
+  // Authorised-but-not-captured settles via the payment.captured webhook / next reconcile.
+  if (result.processing) return { ok: true, processing: true, message: result.message };
+  return result;
+}
+
+/**
+ * Razorpay `payment.captured` webhook. Returns null when the payment is not for a
+ * service request, so the caller can try its other payment types.
+ */
+async function settleServiceRequestFromWebhook(payment) {
+  if (!payment?.order_id) return null;
+  const request = await ServiceRequest.findOne({
+    $or: [
+      { 'payment.razorpayOrderId': payment.order_id },
+      { 'payment.razorpayOrderIds': payment.order_id }
+    ]
   });
+  if (!request) return null;
+  return settleCapturedPayment(request, payment, { source: 'webhook' });
+}
 
-  try {
-    await Transaction.create({
-      userId: request.userId || null,
-      type: 'payment',
-      amount: Number(request.payment?.amount) || 0,
-      status: 'completed',
-      paymentMethod: 'razorpay',
-      description: `Service request ${request.requestCode} — escrow held until completion`,
-      metadata: {
-        escrow: 'held',
-        requestCode: request.requestCode,
-        subCatCode: request.subCatCode,
-        categoryCode: request.categoryCode,
-        razorpayPaymentId: paymentId
-      }
-    });
-  } catch (txnErr) {
-    console.warn('[serviceRequestPayment] escrow audit txn failed:', txnErr.message);
+/**
+ * Recovery: a request that is paid (or needs no payment) but never got a
+ * marketplace opportunity, e.g. the process died between payment and queueing.
+ */
+async function ensureMarketplaceForServiceRequest(request) {
+  const existing = await Opportunity.findOne({ 'assignment.serviceRequestId': request._id })
+    .select('_id')
+    .lean();
+  if (existing) {
+    await ServiceRequest.updateOne(
+      { _id: request._id, opportunityId: null },
+      { $set: { opportunityId: existing._id } }
+    );
+    return { linked: true, opportunityId: existing._id };
   }
-
-  return { ok: true, message: 'Payment verified. Vendors will be notified shortly.' };
+  const { createOpportunityFromEnquiry } = require('../utils/createOpportunityFromEnquiry');
+  const schema = await schemaForRequest(request);
+  await ServiceRequest.updateOne({ _id: request._id }, { $set: { 'payment.marketplaceQueued': true } });
+  const result = await createOpportunityFromEnquiry(
+    buildMarketplacePayload(request, schema, request.formData || {})
+  );
+  return { created: true, opportunityId: result?.opportunity?._id || null };
 }
 
 /**
@@ -407,36 +581,109 @@ async function releaseVendorEscrowIfProjectComplete(projectId) {
 }
 
 /**
+ * Milestone escrow for a project is fully paid out: close the customer's request
+ * and record the split, as the single-release path above does.
+ */
+async function markServiceRequestEscrowReleased(projectId) {
+  const project = await VendorOpsProject.findById(projectId).select('opportunityId').lean();
+  if (!project?.opportunityId) return { skipped: true };
+  const opportunity = await Opportunity.findById(project.opportunityId)
+    .select('assignment.serviceRequestId')
+    .lean();
+  const srId = opportunity?.assignment?.serviceRequestId;
+  if (!srId) return { skipped: true };
+
+  const releases = await Transaction.find({
+    type: 'earnings_credit',
+    'metadata.projectId': String(projectId),
+    'metadata.idempotencyKey': /^milestone_release:/
+  })
+    .select('amount metadata')
+    .lean();
+  const sum = (pick) => releases.reduce((s, t) => s + (Number(pick(t)) || 0), 0);
+
+  const res = await ServiceRequest.updateOne(
+    { _id: srId, 'payment.escrowStatus': 'held' },
+    {
+      $set: {
+        status: 'Completed',
+        'payment.escrowStatus': 'released',
+        'payment.vendorEscrowReleasedAt': new Date(),
+        'payment.settlement': {
+          customerPaid: sum((t) => t.metadata?.sliceGross),
+          engineerTotal: sum((t) => t.metadata?.engineerTotal),
+          platformFee: sum((t) => t.metadata?.platformFee),
+          gst: sum((t) => t.metadata?.gst),
+          vendorShare: sum((t) => t.amount),
+          settledAt: new Date()
+        }
+      }
+    }
+  );
+  return { ok: true, updated: res.modifiedCount > 0 };
+}
+
+/**
  * Refund customer escrow when marketplace assignment fails (no vendor / queue exhausted).
  */
 async function refundEscrowOnAssignmentFailure(serviceRequestId, { reason = 'assignment_failed', opportunityId = null } = {}) {
-  const sr = await ServiceRequest.findById(serviceRequestId);
-  if (!sr) return { skipped: true, reason: 'not_found' };
-  if (sr.payment?.escrowStatus !== 'held' || sr.payment?.status !== 'paid') {
+  // Claim the escrow first so two callers (queue worker + recovery sweep, or two
+  // servers on one DB) can never both send a refund.
+  const sr = await ServiceRequest.findOneAndUpdate(
+    { _id: serviceRequestId, 'payment.status': 'paid', 'payment.escrowStatus': 'held' },
+    { $set: { 'payment.escrowStatus': 'refunding' } },
+    { new: true }
+  );
+  if (!sr) {
+    // Nothing held (free / skipped payment) — still close the request so the
+    // customer does not see it "pending" forever.
+    await ServiceRequest.updateOne(
+      {
+        _id: serviceRequestId,
+        status: 'Pending',
+        'payment.escrowStatus': { $nin: ['held', 'refunding', 'released'] }
+      },
+      { $set: { status: 'Cancelled' } }
+    );
     return { skipped: true, reason: 'no_held_escrow' };
   }
 
   const amount = Number(sr.payment.amount) || 0;
   const paymentId = sr.payment.razorpayPaymentId;
+  let refundId = null;
 
   if (paymentId && !isPaymentBypassed()) {
-    const refundResult = await razorpayService.refundPayment(paymentId, amount > 0 ? amount : null, {
-      type: 'service_request_assignment_failed',
-      requestCode: sr.requestCode,
-      reason: String(reason).slice(0, 200),
-      opportunityId: opportunityId ? String(opportunityId) : ''
-    });
-    if (!refundResult.success) {
-      console.error('[serviceRequestPayment] Razorpay refund failed:', refundResult.error);
-      return { ok: false, error: refundResult.error || 'refund_failed' };
+    // Idempotent: a previous attempt may have refunded before we could record it.
+    const current = await razorpayService.getPaymentDetails(paymentId);
+    const alreadyRefundedPaise = Number(current.payment?.amount_refunded) || 0;
+    if (current.success && alreadyRefundedPaise >= Math.round(amount * 100)) {
+      console.warn('[serviceRequestPayment] refund already present on Razorpay', sr.requestCode);
+    } else {
+      const refundResult = await razorpayService.refundPayment(paymentId, amount > 0 ? amount : null, {
+        type: 'service_request_assignment_failed',
+        requestCode: sr.requestCode,
+        reason: String(reason).slice(0, 200),
+        opportunityId: opportunityId ? String(opportunityId) : ''
+      });
+      if (!refundResult.success) {
+        console.error('[serviceRequestPayment] Razorpay refund failed:', refundResult.error);
+        // Hand the escrow back so the recovery sweep retries the refund.
+        await ServiceRequest.updateOne(
+          { _id: sr._id, 'payment.escrowStatus': 'refunding' },
+          { $set: { 'payment.escrowStatus': 'held' } }
+        );
+        return { ok: false, error: refundResult.error || 'refund_failed' };
+      }
+      refundId = refundResult.refund?.id || null;
     }
   }
 
   await ServiceRequest.updateOne(
-    { _id: sr._id, 'payment.escrowStatus': 'held' },
+    { _id: sr._id, 'payment.escrowStatus': 'refunding' },
     {
       $set: {
         'payment.escrowStatus': 'refunded',
+        'payment.razorpayRefundId': refundId,
         status: 'Cancelled'
       }
     }
@@ -462,6 +709,10 @@ module.exports = {
   initializePaymentForNewRequest,
   createPaymentOrder,
   verifyServiceRequestPayment,
+  reconcileServiceRequestPayment,
+  settleServiceRequestFromWebhook,
+  ensureMarketplaceForServiceRequest,
   releaseVendorEscrowIfProjectComplete,
+  markServiceRequestEscrowReleased,
   refundEscrowOnAssignmentFailure
 };

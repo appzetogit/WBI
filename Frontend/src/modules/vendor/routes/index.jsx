@@ -290,6 +290,8 @@ const VendorRoutes = () => {
               <Route index element={<Navigate to="dashboard" replace />} />
               {/* 5 Core Pillars */}
               <Route path="dashboard" element={<AnimatedPage><DynamicDashboard /></AnimatedPage>} />
+              {/* Incoming user project requests (pre-accept); My Jobs only lists accepted work */}
+              <Route path="requests/*" element={<AnimatedPage><Requests /></AnimatedPage>} />
               <Route path="my-jobs/*" element={<AnimatedPage><MyJobs /></AnimatedPage>} />
               <Route path="jobs/*" element={<AnimatedPage><Jobs /></AnimatedPage>} />
               <Route path="engineers/roster/*" element={<AnimatedPage><Engineers /></AnimatedPage>} />
@@ -325,8 +327,7 @@ const VendorRoutes = () => {
               <Route path="profile/*" element={<AnimatedPage><Profile /></AnimatedPage>} />
 
               {/* Backward compatibility redirects */}
-              <Route path="requests/*" element={<Navigate to="../my-jobs" replace />} />
-              <Route path="business-intake/*" element={<Navigate to="../my-jobs" replace />} />
+              <Route path="business-intake/*" element={<Navigate to="../requests" replace />} />
               <Route path="clients/*" element={<Navigate to="../my-jobs" replace />} />
               <Route path="projects/*" element={<Navigate to="../my-jobs" replace />} />
               <Route path="workforce/*" element={<Navigate to="../engineers/roster" replace />} />

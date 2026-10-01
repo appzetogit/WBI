@@ -1,5 +1,4 @@
 const Opportunity = require('../../models/Opportunity');
-const ServiceRequest = require('../../models/ServiceRequest');
 const VendorOpsMilestone = require('../../models/VendorOpsMilestone');
 const EnterpriseProjectFlow = require('../../models/EnterpriseProjectFlow');
 const ProjectAssignmentConfig = require('../../models/ProjectAssignmentConfig');
@@ -9,12 +8,14 @@ const {
   freelancerAcceptProject,
   findMatchingFreelancers
 } = require('../../services/projectAssignmentEngine.service');
+const { requireOwnedServiceRequest } = require('../../services/serviceRequestAccess.service');
 
-/** GET /api/public/service-requests/:requestCode/assignment */
+/** GET /api/public/service-requests/:requestCode/assignment (owner only) */
 exports.getAssignmentByRequestCode = async (req, res) => {
   try {
-    const sr = await ServiceRequest.findOne({ requestCode: req.params.requestCode }).lean();
-    if (!sr) return res.status(404).json({ success: false, message: 'Request not found' });
+    const owned = await requireOwnedServiceRequest(req, res);
+    if (!owned) return;
+    const sr = owned.toObject();
 
     let opportunity = null;
     if (sr.opportunityId) {

@@ -1,15 +1,17 @@
 const mongoose = require('mongoose');
-const ServiceRequest = require('../../models/ServiceRequest');
 const { approveServiceRequestMilestoneCustomer } = require('../../services/enterpriseB2BOrchestrator.service');
+const { requireOwnedServiceRequest } = require('../../services/serviceRequestAccess.service');
 
 exports.approveMilestoneCustomer = async (req, res) => {
   try {
-    const { requestCode, milestoneId } = req.params;
+    const { milestoneId } = req.params;
     const { approved = true } = req.body || {};
 
-    const sr = await ServiceRequest.findOne({ requestCode }).select('_id').lean();
-    if (!sr) {
-      return res.status(404).json({ success: false, message: 'Service request not found' });
+    // Signing off releases escrow to the vendor — only the paying customer may do it.
+    const sr = await requireOwnedServiceRequest(req, res);
+    if (!sr) return;
+    if (!mongoose.Types.ObjectId.isValid(milestoneId)) {
+      return res.status(400).json({ success: false, message: 'Invalid milestone id' });
     }
 
     const result = await approveServiceRequestMilestoneCustomer({

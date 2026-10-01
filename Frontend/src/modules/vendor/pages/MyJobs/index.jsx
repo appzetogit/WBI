@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Briefcase,
   Search,
@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { fetchMyJobs } from '../../services/myJobsService';
 import { useVendorSocket } from '../../context/VendorSocketContext';
+import { useVendorCounts } from '../../context/VendorCountsContext';
+import useVendorBasePath from '../../hooks/useVendorBasePath';
 import JobDetailsModal from './components/JobDetailsModal';
 import AssignJobEngineerModal from './components/AssignJobEngineerModal';
 
@@ -65,6 +67,15 @@ const MyJobs = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSourceTab = searchParams.get('tab') || 'all'; // 'all' | 'user' | 'b2b'
   const activeStatus = searchParams.get('status') || 'all';
+  const { path } = useVendorBasePath();
+
+  // Offers waiting on this vendor live in Requests until accepted; point there from here.
+  const { businessIntake: { counts: intakeCounts } } = useVendorCounts();
+  const pendingUser = intakeCounts.clientRequests || 0;
+  const pendingB2B = Math.max(0, (intakeCounts.allOpportunities || 0) - pendingUser);
+  const pendingOffers =
+    activeSourceTab === 'user' ? pendingUser : activeSourceTab === 'b2b' ? pendingB2B : pendingUser + pendingB2B;
+  const pendingOffersTab = activeSourceTab === 'b2b' || (activeSourceTab === 'all' && !pendingUser) ? 'b2b' : 'user';
 
   const [jobs, setJobs] = useState([]);
   const [counts, setCounts] = useState({
@@ -239,6 +250,24 @@ const MyJobs = () => {
           );
         })}
       </div>
+
+      {pendingOffers > 0 && (
+        <Link
+          to={path(`requests?tab=${pendingOffersTab}&status=new`)}
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-cyan-200 bg-cyan-50 text-cyan-900 hover:bg-cyan-100 transition-colors"
+        >
+          <span className="flex items-center gap-2 text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0 text-cyan-700" />
+            <span>
+              <strong>{pendingOffers}</strong> new {pendingOffers === 1 ? 'request is' : 'requests are'} waiting for your
+              response. Accept in Requests to start work here.
+            </span>
+          </span>
+          <span className="flex items-center gap-1 text-xs font-bold whitespace-nowrap">
+            Review <ChevronRight className="w-4 h-4" />
+          </span>
+        </Link>
+      )}
 
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-center gap-3">

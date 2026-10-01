@@ -3,12 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { FiSearch, FiHeadphones, FiClock } from 'react-icons/fi';
 // toast removed
 import { motion } from 'framer-motion';
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIntersection } from 'react-use';
 import NotificationBell from '../../components/common/NotificationBell';
 import { bookingService } from '../../../../services/bookingService';
+import api from '../../../../services/api';
 import { useSocket } from '../../../../context/SocketContext';
 import BookingCard from './components/BookingCard';
+import ServiceRequestCard from './components/ServiceRequestCard';
+
+// Project (form-based) service requests, mapped onto the booking tabs
+const REQUEST_TAB_STATUSES = {
+  upcoming: ['Pending', 'Assigned', 'In Progress'],
+  completed: ['Completed'],
+  cancelled: ['Cancelled']
+};
 
 // Need Help Component
 const SupportCard = () => (
@@ -88,6 +97,18 @@ const MyBookings = () => {
     },
     staleTime: 1000 * 60 * 5, // 5 minutes cache
   });
+
+  const { data: serviceRequests = [] } = useQuery({
+    queryKey: ['myServiceRequests'],
+    queryFn: async () => {
+      const res = await api.get('/public/service-requests');
+      return res.data?.data || [];
+    },
+    staleTime: 1000 * 60,
+  });
+  const visibleRequests = filter === 'all'
+    ? serviceRequests
+    : serviceRequests.filter((r) => REQUEST_TAB_STATUSES[filter]?.includes(r.status));
 
   // Extract bookings from infinite query data structure
   const bookings = useMemo(() => {
@@ -182,6 +203,23 @@ const MyBookings = () => {
 
         {/* Bookings List Area */}
         <main className="px-4 pt-4 pb-2 w-full">
+          {visibleRequests.length > 0 && (
+            <section className="mb-5">
+              <h2 className="text-[13px] font-extrabold text-slate-500 uppercase tracking-wide mb-2.5">Project Requests</h2>
+              <div className="space-y-3.5">
+                {visibleRequests.map((request) => (
+                  <ServiceRequestCard
+                    key={request.requestCode}
+                    request={request}
+                    onClick={() => navigate(`/user/service-request/track/${request.requestCode}`)}
+                  />
+                ))}
+              </div>
+              {bookings.length > 0 && (
+                <h2 className="text-[13px] font-extrabold text-slate-500 uppercase tracking-wide mt-5">Service Bookings</h2>
+              )}
+            </section>
+          )}
           {queryStatus === 'pending' ? (
             // Skeleton Loader
             <div className="space-y-4">
@@ -207,6 +245,7 @@ const MyBookings = () => {
               Failed to load bookings. Please try again.
             </div>
           ) : bookings.length === 0 ? (
+            visibleRequests.length > 0 ? null : (
             // Empty State
             <motion.div
               initial={{ opacity: 0 }}
@@ -223,6 +262,7 @@ const MyBookings = () => {
                   : `You don't have any ${filter} bookings at the moment.`}
               </p>
             </motion.div>
+            )
           ) : (
             // Render Bookings
             <div className="space-y-3.5">

@@ -9,6 +9,7 @@ const ServiceRequest = require('../../models/ServiceRequest');
 const ServiceConfig = require('../../models/ServiceConfig');
 const mongoose = require('mongoose');
 const { expandCategoryMatchCodes } = require('../../utils/serviceCategoryAliases');
+const { vendorOpportunityScope, withVendorStatus } = require('../../services/vendorOpportunityInbox.service');
 const { onVendorAccepted, recordVendorReject } = require('../../services/projectAssignmentEngine.service');
 const { createOpsProjectFromOpportunity } = require('../../utils/createOpsProjectFromOpportunity');
 
@@ -1373,32 +1374,34 @@ const getCounts = async (req, res) => {
     const vendor = await Vendor.findById(vendorId).select('approvedServices').lean();
     const codes = getVendorCategoryCodes(vendor);
     const matchCodes = await expandCategoryMatchCodes(codes);
-    const oppScope = { eligibleVendors: vid, status: 'open' };
-    if (matchCodes.length) oppScope.categoryCode = { $in: matchCodes };
-    else oppScope.categoryCode = { $in: [] };
 
-    const [typeCounts, invitationCount, pendingProposals, acceptedWork, acceptedThisWeek, pendingQuotes] = await Promise.all([
-      Opportunity.aggregate([
-        { $match: oppScope },
-        { $group: { _id: '$type', count: { $sum: 1 } } }
-      ]),
-      Opportunity.countDocuments({ ...oppScope, type: 'direct_invitation' }),
+    // Badges count what this vendor can act on now — the same rule as the Requests list,
+    // so a declined, timed-out or already-taken opportunity no longer inflates them.
+    const openOpps = matchCodes.length
+      ? await Opportunity.find({ status: 'open', ...vendorOpportunityScope(vid, matchCodes) })
+          .select('type status assignment.phase assignment.vendorQueue assignment.b2bJobId bids.vendorId')
+          .lean()
+      : [];
+    const actionable = (await withVendorStatus(openOpps, vid))
+      .filter((row) => row.status === 'new')
+      .map((row) => row.opp);
+    const counts = actionable.reduce((acc, o) => ({ ...acc, [o.type]: (acc[o.type] || 0) + 1 }), {});
+    const invitationCount = counts.direct_invitation || 0;
+    const pendingQuotes = actionable.filter(
+      (o) => o.type === 'bid_quote_request' && !(o.bids || []).some((b) => String(b.vendorId) === String(vid))
+    ).length;
+
+    const [pendingProposals, acceptedWork, acceptedThisWeek] = await Promise.all([
       VendorProposal.countDocuments({ vendorId: vid, status: { $in: ['sent', 'viewed', 'negotiating'] } }),
       Opportunity.countDocuments({ status: 'awarded', 'awardedTo.vendorId': vid }),
       Opportunity.countDocuments({
         status: 'awarded',
         'awardedTo.vendorId': vid,
         'awardedTo.awardedAt': { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-      }),
-      Opportunity.countDocuments({
-        ...oppScope,
-        type: 'bid_quote_request',
-        bids: { $not: { $elemMatch: { vendorId: vid } } }
       })
     ]);
 
-    const counts = typeCounts.reduce((acc, c) => ({ ...acc, [c._id]: c.count }), {});
-    const totalOpen = Object.values(counts).reduce((s, v) => s + v, 0);
+    const totalOpen = actionable.length;
 
     res.status(200).json({
       success: true,

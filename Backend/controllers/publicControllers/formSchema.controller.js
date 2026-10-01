@@ -1,6 +1,13 @@
 const FormSchema = require('../../models/FormSchema');
 const ServiceRequest = require('../../models/ServiceRequest');
-const { initializePaymentForNewRequest } = require('../../services/serviceRequestPayment.service');
+const {
+  initializePaymentForNewRequest,
+  reconcileServiceRequestPayment
+} = require('../../services/serviceRequestPayment.service');
+const {
+  claimLegacyServiceRequests,
+  requireOwnedServiceRequest
+} = require('../../services/serviceRequestAccess.service');
 
 const normalizeOptions = (options = []) =>
   (options || []).map((opt) =>
@@ -215,7 +222,7 @@ exports.submitServiceRequest = async (req, res) => {
     }
 
     const request = new ServiceRequest({
-      userId: req.user?._id || req.user?.id || null,
+      userId: req.user._id,
       categoryCode: schema.categoryCode,
       categoryName: schema.categoryName,
       subCatCode: schema.subCatCode,
@@ -257,27 +264,58 @@ exports.submitServiceRequest = async (req, res) => {
   }
 };
 
-/** GET /api/public/service-requests/:requestCode — confirmation lookup */
+const toCustomerView = (doc) => ({
+  requestCode: doc.requestCode,
+  status: doc.status,
+  categoryCode: doc.categoryCode,
+  categoryName: doc.categoryName,
+  subCatCode: doc.subCatCode,
+  subCategoryName: doc.subCategoryName,
+  city: doc.contact?.city || '',
+  createdAt: doc.createdAt,
+  payment: doc.payment
+    ? {
+        amount: doc.payment.amount,
+        status: doc.payment.status,
+        escrowStatus: doc.payment.escrowStatus,
+        paidAt: doc.payment.paidAt
+      }
+    : null
+});
+
+/** GET /api/public/service-requests — the logged-in customer's project requests */
+exports.listMine = async (req, res) => {
+  try {
+    await claimLegacyServiceRequests(req.user);
+    const docs = await ServiceRequest.find({ userId: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    res.json({ success: true, data: docs.map(toCustomerView) });
+  } catch (error) {
+    console.error('listMine service requests error:', error);
+    res.status(500).json({ success: false, message: 'Failed to load your requests' });
+  }
+};
+
+/** GET /api/public/service-requests/:requestCode — owner-only status lookup */
 exports.getByCode = async (req, res) => {
   try {
-    const doc = await ServiceRequest.findOne({ requestCode: req.params.requestCode }).lean();
-    if (!doc) return res.status(404).json({ success: false, message: 'Request not found' });
-    res.json({
-      success: true,
-      data: {
-        requestCode: doc.requestCode,
-        status: doc.status,
-        subCatCode: doc.subCatCode,
-        subCategoryName: doc.subCategoryName,
-        payment: doc.payment
-          ? {
-              amount: doc.payment.amount,
-              status: doc.payment.status,
-              escrowStatus: doc.payment.escrowStatus
-            }
-          : null
+    let doc = await requireOwnedServiceRequest(req, res);
+    if (!doc) return;
+
+    // Customer paid but the verify call was lost — settle it now instead of
+    // asking them to pay again.
+    if (doc.payment?.status === 'pending' && doc.payment?.razorpayOrderId) {
+      try {
+        const settled = await reconcileServiceRequestPayment(doc);
+        if (settled.ok) doc = await ServiceRequest.findById(doc._id);
+      } catch (err) {
+        console.warn('getByCode reconcile failed:', err.message);
       }
-    });
+    }
+
+    res.json({ success: true, data: toCustomerView(doc) });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Failed to fetch request' });
   }

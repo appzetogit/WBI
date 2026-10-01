@@ -104,7 +104,7 @@ const BottomNav = memo(() => {
 
   return (
     <motion.nav
-      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/95 backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] z-50"
+      className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white/95 backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] z-40"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}

@@ -109,6 +109,21 @@ async function onPaymentCaptured(payment) {
       }
       return;
     }
+
+    // Project service request: the checkout page normally calls payment/verify,
+    // but if the tab closes after capture the request must still go to vendors.
+    const { settleServiceRequestFromWebhook } = require('../../services/serviceRequestPayment.service');
+    const settled = await settleServiceRequestFromWebhook(payment);
+    if (settled) {
+      if (!settled.ok) {
+        console.error('[payment.webhook] service request not settled', {
+          paymentId: payment.id,
+          orderId: payment.order_id,
+          message: settled.message
+        });
+      }
+      return;
+    }
   }
 
   if (notes.bookingId) {

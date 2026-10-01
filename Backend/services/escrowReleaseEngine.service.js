@@ -100,6 +100,18 @@ function computeSplit(gross, rules) {
 }
 
 /**
+ * The part of a contract-level `total` (platform fee, GST, engineer payout) that
+ * belongs to one escrow slice. Measured on cumulative releases, so the slices of
+ * a fully released project add up to `total` exactly instead of drifting by a
+ * rupee of rounding per milestone.
+ */
+function sliceShare(total, releasedBefore, slice, contractGross) {
+  if (!(contractGross > 0)) return 0;
+  const through = (released) => Math.round((total * released) / contractGross);
+  return through(releasedBefore + slice) - through(releasedBefore);
+}
+
+/**
  * B2B field job engineer payout from ServiceConfig paymentRules (replaces hardcoded platform %).
  */
 async function computeB2BEngineerPayout(job, configSnapshot = null) {
@@ -218,22 +230,37 @@ async function releaseMilestoneEscrow({
   const remaining = Math.max(0, Number(ledger.heldAmount) - Number(ledger.releasedAmount));
   const contractGross = Number(ledger.grossAmount) || Number(project.budget) || 0;
   let slice = Math.round((contractGross * pct) / 100);
+  // The last paid milestone takes whatever is still held, so per-slice rounding
+  // never strands a rupee in escrow.
+  const otherUnpaid = await VendorOpsMilestone.countDocuments({
+    projectId,
+    _id: { $ne: milestone._id },
+    paymentPercent: { $gt: 0 },
+    status: { $ne: 'completed' }
+  });
+  if (!otherUnpaid) slice = remaining;
   slice = Math.min(slice, remaining);
   if (slice <= 0) return { skipped: true, reason: 'nothing_to_release' };
 
   const rules = await resolvePaymentRules(categoryCode || project.serviceCategoryCode, configSnapshot);
-  const split = computeSplit(slice, rules);
+  const contract = computeSplit(contractGross, rules);
+  const releasedBefore = Number(ledger.releasedAmount) || 0;
+  const portion = (total) => sliceShare(total, releasedBefore, slice, contractGross);
 
   const vendorId = project.vendorId;
   const jobs = await VendorOpsJob.find({ projectId }).select('engineerPayout payoutStatus budget engineerId').lean();
-  let engineerTotal = split.engineerShare;
+  // Engineer pay is a contract-level amount; each slice carries only its pro-rata
+  // part. Deducting the whole payout from every slice zeroed the vendor's share.
+  let engineerContractTotal = contract.engineerShare;
   const credited = jobs.filter((j) => j.payoutStatus === 'credited' && j.engineerPayout > 0);
   if (credited.length) {
-    engineerTotal = credited.reduce((s, j) => s + Number(j.engineerPayout), 0);
+    engineerContractTotal = credited.reduce((s, j) => s + Number(j.engineerPayout), 0);
   } else if (jobs.length) {
     const pctEng = await getEngineerPayoutPercent();
-    engineerTotal = Math.round((split.net * pctEng) / 100);
+    engineerContractTotal = Math.round((contract.net * pctEng) / 100);
   }
+  const split = { platformFee: portion(contract.platformFee), gst: portion(contract.gst) };
+  const engineerTotal = portion(engineerContractTotal);
   const vendorShare = Math.max(0, slice - split.platformFee - split.gst - engineerTotal);
 
   const idemKey = `milestone_release:${milestoneId}`;
@@ -300,6 +327,15 @@ async function releaseMilestoneEscrow({
       { _id: projectId },
       { $set: { paymentStatus: 'paid', status: 'completed', progress: 100, currentStage: 'Closed' } }
     );
+  }
+
+  if (ledger.status === 'released') {
+    try {
+      const { markServiceRequestEscrowReleased } = require('./serviceRequestPayment.service');
+      await markServiceRequestEscrowReleased(projectId);
+    } catch (e) {
+      console.warn('[escrowReleaseEngine] service request close-out:', e.message);
+    }
   }
 
   return {

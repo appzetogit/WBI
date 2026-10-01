@@ -741,6 +741,10 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         const { startB2BTimeoutScheduler } = require('./services/b2bJobTimeouts.service');
         startB2BTimeoutScheduler().catch((err) => console.error('[Server] B2B timeout scheduler failed:', err.message));
 
+        // Project requests: recover vendor / freelancer-pool timeouts the queue missed
+        const { startAssignmentRecoveryScheduler } = require('./services/assignmentRecoverySweep.service');
+        startAssignmentRecoveryScheduler();
+
         // Initialize Daily B2B MIS Email Cron (fires at 11:59 PM IST)
         const { startMISCronScheduler } = require('./services/misCronScheduler');
         startMISCronScheduler();

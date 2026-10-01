@@ -8,7 +8,7 @@ const Counter = mongoose.models.Counter || mongoose.model('Counter', counterSche
 
 const serviceRequestSchema = new mongoose.Schema({
   requestCode: { type: String, unique: true, index: true },
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
   categoryCode: { type: String, required: true, uppercase: true, index: true },
   categoryName: { type: String, required: true },
   subCatCode: { type: String, required: true, uppercase: true, index: true },
@@ -36,12 +36,16 @@ const serviceRequestSchema = new mongoose.Schema({
       default: 'pending',
       index: true
     },
-    razorpayOrderId: { type: String, default: null },
+    razorpayOrderId: { type: String, default: null, index: true },
+    // Every order ever created for this request (a retry creates a new one), so a
+    // late payment / webhook against an older order can still be matched.
+    razorpayOrderIds: { type: [String], default: [], index: true },
     razorpayPaymentId: { type: String, default: null },
+    razorpayRefundId: { type: String, default: null },
     paidAt: { type: Date, default: null },
     escrowStatus: {
       type: String,
-      enum: ['none', 'held', 'released', 'refunded'],
+      enum: ['none', 'held', 'refunding', 'released', 'refunded'],
       default: 'none'
     },
     vendorEscrowReleasedAt: { type: Date, default: null },
@@ -50,6 +54,7 @@ const serviceRequestSchema = new mongoose.Schema({
       customerPaid: { type: Number, default: 0 },
       engineerTotal: { type: Number, default: 0 },
       platformFee: { type: Number, default: 0 },
+      gst: { type: Number, default: 0 },
       vendorShare: { type: Number, default: 0 },
       settledAt: { type: Date, default: null }
     }

@@ -221,7 +221,7 @@ const DynamicDashboard = () => {
             {refreshing ? 'Syncing...' : 'Sync Now'}
           </button>
           <Link
-            to={path('business-intake/all')}
+            to={path('requests')}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#0D8A72] hover:bg-[#0b735f] rounded-xl shadow-xs transition-all"
           >
             <span>Explore Opportunities</span>
@@ -262,7 +262,7 @@ const DynamicDashboard = () => {
         {/* 1. New User Requests */}
         <motion.div
           whileHover={{ y: -3 }}
-          onClick={() => navigate(path('my-jobs?tab=user&status=new'))}
+          onClick={() => navigate(path('requests?tab=user&status=new'))}
           className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs hover:border-cyan-400 transition-all cursor-pointer relative overflow-hidden group"
         >
           <div className="flex items-center justify-between mb-2">
@@ -290,7 +290,7 @@ const DynamicDashboard = () => {
         {/* 2. New B2B Jobs */}
         <motion.div
           whileHover={{ y: -3 }}
-          onClick={() => navigate(path('my-jobs?tab=b2b&status=new'))}
+          onClick={() => navigate(path('requests?tab=b2b'))}
           className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs hover:border-indigo-400 transition-all cursor-pointer relative overflow-hidden group"
         >
           <div className="flex items-center justify-between mb-2">
@@ -563,7 +563,7 @@ const DynamicDashboard = () => {
                   </p>
                   <div className="mt-5">
                     <Link
-                      to={path('business-intake/all')}
+                      to={path('requests')}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#0D8A72] hover:bg-[#0b735f]"
                     >
                       Browse Incoming Requests <ArrowRight className="h-4 w-4" />
@@ -680,7 +680,7 @@ const DynamicDashboard = () => {
                       <p className="text-xs text-gray-500">Service requests submitted directly by consumers requiring your immediate review or engineer assignment.</p>
                     </div>
                     <Link
-                      to={path('business-intake/client-requests')}
+                      to={path('requests?tab=user')}
                       className="text-xs font-semibold text-[#0D8A72] hover:underline inline-flex items-center gap-1"
                     >
                       View All User Requests <ChevronRight className="h-3.5 w-3.5" />
@@ -729,7 +729,7 @@ const DynamicDashboard = () => {
                               Est: ₹{Number(req.budget || 0).toLocaleString('en-IN')}
                             </span>
                             <Link
-                              to={req.actionUrl || path('business-intake/client-requests')}
+                              to={path('requests?tab=user&status=new')}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#0D8A72] hover:bg-[#0b735f]"
                             >
                               <span>Review & Accept</span>
@@ -749,7 +749,7 @@ const DynamicDashboard = () => {
                       <p className="text-xs text-gray-500">Corporate, AMC, and multi-site enterprise contracts requiring quotation, bidding, or engineer dispatch.</p>
                     </div>
                     <Link
-                      to={path('business-intake/b2b')}
+                      to={path('requests?tab=b2b')}
                       className="text-xs font-semibold text-[#0D8A72] hover:underline inline-flex items-center gap-1"
                     >
                       View All B2B Jobs <ChevronRight className="h-3.5 w-3.5" />
@@ -799,7 +799,7 @@ const DynamicDashboard = () => {
                               Budget: ₹{Number(job.budget || 0).toLocaleString('en-IN')}
                             </span>
                             <Link
-                              to={job.actionUrl || path('business-intake/b2b')}
+                              to={path('requests?tab=b2b')}
                               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-[#0D8A72] hover:bg-[#0b735f]"
                             >
                               <span>Submit Bid / Accept</span>

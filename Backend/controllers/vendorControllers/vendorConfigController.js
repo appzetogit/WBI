@@ -18,6 +18,7 @@ const VendorFinanceTransaction = require('../../models/VendorFinanceTransaction'
 const VendorFinanceReceivable = require('../../models/VendorFinanceReceivable');
 const { getCache, setCache, delCache, isRedisConnected } = require('../../services/redisService');
 const { expandCategoryMatchCodes } = require('../../utils/serviceCategoryAliases');
+const { vendorOpportunityScope, withVendorStatus } = require('../../services/vendorOpportunityInbox.service');
 const { buildServiceRoutes, getPrimaryServiceSlug } = require('../../utils/serviceSlug');
 
 const SIDEBAR_SECTIONS = [
@@ -456,18 +457,20 @@ exports.getOperationalSummary = async (req, res) => {
       .map((s) => s.categoryCode)
       .filter(Boolean);
     const legacyCats = Array.isArray(vendorDoc.categories) ? vendorDoc.categories : [];
-    const matchCodes = expandCategoryMatchCodes([...approvedCodes, ...legacyCats]);
+    const matchCodes = await expandCategoryMatchCodes([...approvedCodes, ...legacyCats]);
 
-    const oppCategoryFilter = matchCodes.length ? { categoryCode: { $in: matchCodes } } : {};
+    // Same rule as the Requests list: "new" = this vendor can accept it right now.
+    const scope = vendorOpportunityScope(vid, matchCodes);
+    const newForVendor = async (opps) =>
+      (await withVendorStatus(opps, vid)).filter((row) => row.status === 'new').map((row) => row.opp);
 
     // ── 1. NEW USER REQUESTS ──
     const [userOpps, pendingBookings, pendingServiceRequests] = await Promise.all([
-      Opportunity.find({
-        status: 'open',
-        type: 'client_request',
-        ...oppCategoryFilter,
-        $or: [{ eligibleVendors: vid }, { eligibleVendors: { $size: 0 } }, { 'clientInfo.targetVendorId': vid }]
-      }).sort({ createdAt: -1 }).limit(10).lean().catch(() => []),
+      Opportunity.find({ status: 'open', type: 'client_request', ...scope })
+        .sort({ createdAt: -1 })
+        .lean()
+        .then(newForVendor)
+        .catch(() => []),
       Booking.find({
         $or: [
           { vendorId: vid, status: 'requested' },
@@ -496,8 +499,7 @@ exports.getOperationalSummary = async (req, res) => {
         priority: opp.priority || 'normal',
         createdAt: opp.createdAt,
         status: 'Action Required',
-        type: 'opportunity',
-        actionUrl: `/vendor/${(opp.categoryCode || 'general').toLowerCase()}/business-intake/client-requests`
+        type: 'opportunity'
       })),
       ...pendingBookings.map((b) => ({
         id: b._id,
@@ -514,8 +516,7 @@ exports.getOperationalSummary = async (req, res) => {
         priority: 'high',
         createdAt: b.createdAt,
         status: b.status || 'Requested',
-        type: 'booking',
-        actionUrl: `/vendor/${(b.categoryCode || 'general').toLowerCase()}/digital-solution/booking-alerts`
+        type: 'booking'
       })),
       ...pendingServiceRequests.map((sr) => ({
         id: sr._id,
@@ -532,8 +533,7 @@ exports.getOperationalSummary = async (req, res) => {
         priority: 'normal',
         createdAt: sr.createdAt,
         status: 'Pending',
-        type: 'service_request',
-        actionUrl: `/vendor/${(sr.categoryCode || 'general').toLowerCase()}/business-intake/client-requests`
+        type: 'service_request'
       }))
     ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
@@ -544,9 +544,12 @@ exports.getOperationalSummary = async (req, res) => {
       Opportunity.find({
         status: 'open',
         type: { $in: ['b2b_opportunity', 'bulk_requirement', 'bid_quote_request', 'direct_invitation'] },
-        ...oppCategoryFilter,
-        $or: [{ eligibleVendors: vid }, { eligibleVendors: { $size: 0 } }, { 'clientInfo.targetVendorId': vid }]
-      }).sort({ createdAt: -1 }).limit(10).lean().catch(() => []),
+        ...scope
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+        .then(newForVendor)
+        .catch(() => []),
       B2BJob.find({
         assignedVendorId: vid,
         status: { $in: ['pending', 'searching_engineer', 'assigned'] }
@@ -568,8 +571,7 @@ exports.getOperationalSummary = async (req, res) => {
         priority: opp.priority || 'high',
         createdAt: opp.createdAt,
         status: 'Action Required',
-        type: 'opportunity',
-        actionUrl: `/vendor/${(opp.categoryCode || 'general').toLowerCase()}/business-intake/b2b`
+        type: 'opportunity'
       })),
       ...directB2BJobs.map((job) => ({
         id: job._id,
@@ -585,8 +587,7 @@ exports.getOperationalSummary = async (req, res) => {
         priority: job.priority || 'Medium',
         createdAt: job.createdAt,
         status: job.status,
-        type: 'b2b_job',
-        actionUrl: `/vendor/${(approvedCodes[0] || 'general').toLowerCase()}/projects`
+        type: 'b2b_job'
       }))
     ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
