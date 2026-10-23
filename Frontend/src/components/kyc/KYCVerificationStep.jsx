@@ -66,7 +66,7 @@ const KYCVerificationStep = forwardRef(({
 }, ref) => {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [verifications, setVerifications] = useState({});
+  const [verifications, setVerifications] = useState(() => sanitizeVerificationMap(initialVerifications) || {});
   const [editingDocs, setEditingDocs] = useState({}); // documentType -> force re-entry
   const [activeUploads, setActiveUploads] = useState({});
   const [uploadProgress, setUploadProgress] = useState({}); // { [documentType]: 0-100 }
@@ -78,6 +78,15 @@ const KYCVerificationStep = forwardRef(({
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const hydratedRef = useRef(false);
+
+  // Stable callback ref and duplicate-notification guard to prevent re-render loops
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  const lastNotifiedRef = useRef('');
+  const prevInitRef = useRef(JSON.stringify(initialVerifications || {}));
 
   // Discrete action loading states — never corrupt document status with temporary in-flight actions
   const [digiLockerLoading, setDigiLockerLoading] = useState(false);
@@ -232,9 +241,15 @@ const KYCVerificationStep = forwardRef(({
 
   useEffect(() => {
     if (!initialVerifications || typeof initialVerifications !== 'object') return;
+    const serialized = JSON.stringify(initialVerifications);
+    if (prevInitRef.current === serialized) return;
+    prevInitRef.current = serialized;
+
+    const cleanInit = sanitizeVerificationMap(initialVerifications);
     setVerifications((prev) => {
-      const cleanInit = sanitizeVerificationMap(initialVerifications);
-      return { ...prev, ...cleanInit };
+      const next = { ...cleanInit, ...prev };
+      if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+      return next;
     });
   }, [initialVerifications]);
 
@@ -247,18 +262,20 @@ const KYCVerificationStep = forwardRef(({
         const res = await kycService.getStatus(role, entityId);
         if (!res.success || cancelled) return;
         const map = res.data || {};
+        if (Object.keys(map).length === 0) return;
         setVerifications((prev) => {
+          let hasDiff = false;
           const next = { ...prev };
           Object.entries(map).forEach(([docType, rec]) => {
             if (!rec) return;
             const existing = next[docType] || {};
             // Prefer already-verified local if newer interaction; else server
             if (existing.status === 'verified' && !rec.expired) {
-              next[docType] = { ...rec, ...existing, status: 'verified', skipReverify: true };
+              // keep local verified state
             } else {
               const safeStatus = rec.status === 'generating_otp' ? 'pending' : (rec.status || existing.status || 'pending');
               const hasFile = Boolean(rec.fileUrl || existing.fileUrl);
-              next[docType] = {
+              const merged = {
                 ...existing,
                 status: safeStatus,
                 fileUrl: rec.fileUrl || existing.fileUrl,
@@ -273,8 +290,13 @@ const KYCVerificationStep = forwardRef(({
                 expired: !!rec.expired,
                 failureReason: rec.failureReason
               };
+              if (JSON.stringify(existing) !== JSON.stringify(merged)) {
+                next[docType] = merged;
+                hasDiff = true;
+              }
             }
           });
+          if (!hasDiff) return prev;
           return next;
         });
         hydratedRef.current = true;
@@ -288,10 +310,12 @@ const KYCVerificationStep = forwardRef(({
   }, [entityId, role]);
 
   useEffect(() => {
-    if (typeof onComplete === 'function') {
-      onComplete(verifications);
-    }
-  }, [verifications, onComplete]);
+    if (typeof onCompleteRef.current !== 'function') return;
+    const serialized = JSON.stringify(verifications);
+    if (lastNotifiedRef.current === serialized) return;
+    lastNotifiedRef.current = serialized;
+    onCompleteRef.current(verifications);
+  }, [verifications]);
 
   const loadRules = async () => {
     try {
