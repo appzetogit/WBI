@@ -105,64 +105,48 @@ async function deliverPush(job) {
 }
 
 async function deliverEmail(job) {
-  const { recipientRole, recipientId, title, message, emailTemplate, data, actionUrl } = job;
-  const emailService = require('../emailService');
+  const { recipientRole, recipientId, recipientEmail, title, message, actionUrl, email } = job;
+  const { sendTemplatedNotification } = require('../emailService');
 
-  let to = data?.email || null;
+  // The address comes from the recipient, never from event data: data.email
+  // is usually the subject of the event (e.g. the vendor who registered).
+  let to = recipientEmail || null;
   if (!to && recipientId) {
     to = await resolveEmail(recipientRole, recipientId);
   }
-  if (!to) return { ok: false, error: 'no_email', skipped: true };
+  if (!to || (Array.isArray(to) && !to.length)) return { ok: false, error: 'no_email', skipped: true };
 
-  if (emailTemplate && typeof emailService.sendTemplatedNotification === 'function') {
-    await emailService.sendTemplatedNotification({
-      to,
-      template: emailTemplate,
-      title,
-      message,
-      data: { ...data, actionUrl }
-    });
-    return { ok: true };
-  }
-
-  if (typeof emailService.sendMailSafe === 'function') {
-    await emailService.sendMailSafe({
-      to,
-      subject: title,
-      html: `<p>${message}</p>${actionUrl ? `<p><a href="${actionUrl}">Open</a></p>` : ''}`
-    });
-    return { ok: true };
-  }
-
-  return { ok: false, error: 'email_unavailable', skipped: true };
+  const res = await sendTemplatedNotification({
+    to,
+    title,
+    message,
+    actionUrl,
+    role: recipientRole,
+    email: email || {}
+  });
+  if (res?.skipped) return { ok: false, skipped: true, error: res.reason || 'email_skipped' };
+  return { ok: true, provider: res?.messageId || null };
 }
 
+const EMAIL_MODELS = {
+  vendor: '../../models/Vendor',
+  user: '../../models/User',
+  admin: '../../models/Admin',
+  engineer: '../../models/Engineer',
+  worker: '../../models/Worker',
+  b2b: '../../models/B2BUser'
+};
+
 async function resolveEmail(role, id) {
+  const modelPath = EMAIL_MODELS[role];
+  if (!modelPath) return null;
   try {
-    if (role === 'vendor') {
-      const v = await require('../../models/Vendor').findById(id).select('email').lean();
-      return v?.email || null;
-    }
-    if (role === 'user') {
-      const u = await require('../../models/User').findById(id).select('email').lean();
-      return u?.email || null;
-    }
-    if (role === 'admin') {
-      const a = await require('../../models/Admin').findById(id).select('email').lean();
-      return a?.email || null;
-    }
-    if (role === 'engineer') {
-      const e = await require('../../models/Engineer').findById(id).select('email').lean();
-      return e?.email || null;
-    }
-    if (role === 'b2b') {
-      const b = await require('../../models/B2BUser').findById(id).select('email').lean();
-      return b?.email || null;
-    }
+    const doc = await require(modelPath).findById(id).select('email').lean();
+    const email = doc?.email ? String(doc.email).trim() : '';
+    return email || null;
   } catch {
     return null;
   }
-  return null;
 }
 
 async function deliverSms(job) {
@@ -233,10 +217,11 @@ async function maybeFallback(job, pushResult) {
   const { emit } = require('./notificationOrchestrator.service');
   // Enqueue email/sms as separate channel jobs via direct deliver to avoid recursion storms
   const base = { ...job, fallbackOnPushFail: false };
-  if (!job._didEmailFallback) {
+  // Events that already send email get it on their own channel job.
+  if (!job._didEmailFallback && !(job.channels || []).includes('email')) {
     await deliverChannel({ ...base, channel: 'email', type: 'deliver_channel', _didEmailFallback: true });
   }
-  if (!job._didSmsFallback) {
+  if (!job._didSmsFallback && !(job.channels || []).includes('sms')) {
     await deliverChannel({ ...base, channel: 'sms', type: 'deliver_channel', _didSmsFallback: true });
   }
 }

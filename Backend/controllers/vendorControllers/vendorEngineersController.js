@@ -836,6 +836,26 @@ exports.createEngineer = async (req, res) => {
       changes: { name, phone, skills }
     });
 
+    if (engineer.email) {
+      try {
+        const Vendor = require('../../models/Vendor');
+        const vendor = await Vendor.findById(vid).select('businessName name').lean();
+        const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+        emitAsync('engineer_added_by_vendor', {
+          targets: { engineerId: engineer._id },
+          data: {
+            name: engineer.name,
+            phone: engineer.phone,
+            vendorName: vendor ? (vendor.businessName || vendor.name) : undefined,
+            skills,
+            city
+          }
+        });
+      } catch (notifyErr) {
+        console.warn('createEngineer welcome email failed:', notifyErr.message);
+      }
+    }
+
     return res.status(201).json({
       success: true,
       message: 'Engineer added. They can start receiving jobs once WBI verifies their documents.',

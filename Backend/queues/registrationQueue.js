@@ -52,13 +52,6 @@ const registrationWorker = new Worker(
           console.log(`[WORKER] Penny Drop Success.`);
           break;
 
-        case 'WELCOME_NOTIFICATION':
-          // Simulate sending SMS/Email
-          console.log(`[WORKER] Sending Welcome SMS/Email to:`, data.phone || data.email);
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          console.log(`[WORKER] Welcome SMS Sent.`);
-          break;
-
         default:
           console.warn(`[WORKER] Unknown job type: ${name}`);
       }

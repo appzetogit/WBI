@@ -7,6 +7,25 @@ const { createNotification } = require('../notificationControllers/notificationC
 /**
  * Get all workers with filters and pagination
  */
+/** Notify a service partner about an admin decision (email + in-app). Never throws. */
+const notifyWorker = (eventKey, worker, extra = {}, { emailOnly = false } = {}) => {
+  try {
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    const data = {
+      name: worker.name,
+      accountLabel: 'Service partner account',
+      changedBy: 'WBI admin team',
+      ...extra,
+      reason: extra.reason ? String(extra.reason).trim() : undefined
+    };
+    emitAsync(eventKey, emailOnly
+      ? { targets: { emails: worker.email ? [{ role: 'worker', email: worker.email }] : [] }, data }
+      : { targets: { workerId: worker._id }, data });
+  } catch (err) {
+    console.warn(`${eventKey} notify failed:`, err.message);
+  }
+};
+
 const getAllWorkers = async (req, res) => {
   try {
     const {
@@ -151,6 +170,7 @@ const approveWorker = async (req, res) => {
     worker.approvalStatus = 'approved';
     worker.isActive = true;
     await worker.save();
+    notifyWorker('worker_approval_updated', worker, { approved: true });
 
     // Send notification to worker
     /*
@@ -200,6 +220,7 @@ const rejectWorker = async (req, res) => {
     worker.isActive = false;
     // worker.rejectedReason = reason; // If we want to store reason
     await worker.save();
+    notifyWorker('worker_approval_updated', worker, { approved: false, reason });
 
     res.status(200).json({
       success: true,
@@ -234,6 +255,7 @@ const suspendWorker = async (req, res) => {
     worker.approvalStatus = 'suspended';
     worker.isActive = false;
     await worker.save();
+    notifyWorker('account_status_changed', worker, { status: 'suspended', reason: req.body?.reason });
 
     res.status(200).json({
       success: true,
@@ -525,8 +547,12 @@ const toggleWorkerStatus = async (req, res) => {
       });
     }
 
+    const wasActive = worker.isActive;
     worker.isActive = isActive;
     await worker.save();
+    if (wasActive !== worker.isActive) {
+      notifyWorker('account_status_changed', worker, { status: worker.isActive ? 'reactivated' : 'deactivated', reason: req.body?.reason });
+    }
 
     res.status(200).json({
       success: true,
@@ -557,6 +583,7 @@ const deleteWorker = async (req, res) => {
         message: 'Worker not found'
       });
     }
+    notifyWorker('account_status_changed', worker, { status: 'deleted', reason: req.body?.reason }, { emailOnly: true });
 
     res.status(200).json({
       success: true,

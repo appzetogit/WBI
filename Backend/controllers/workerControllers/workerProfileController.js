@@ -193,7 +193,16 @@ const updateProfile = async (req, res) => {
       };
     }
 
+    const profileChangeList = require('../../services/notification/profileChangeNotice').profileChanges(worker);
     await worker.save();
+    {
+      const notice = require('../../services/notification/profileChangeNotice');
+      if (profileChangeList.includes('Bank details')) {
+        const b = worker.bankDetails || {};
+        notice.notifyBankChange({ role: 'worker', id: worker._id, name: worker.name, holderName: b.accountHolder || b.accountHolderName || b.holderName, bankName: b.bankName, account: b.accountNumber, ifsc: b.ifscCode || b.ifsc });
+      }
+      notice.notifyProfileChange({ role: 'worker', id: worker._id, name: worker.name, changes: profileChangeList.filter((c) => c !== 'Bank details') });
+    }
 
     res.status(200).json({
       success: true,
@@ -358,6 +367,10 @@ const updateBankDetails = async (req, res) => {
   try {
     const workerId = req.user.id;
     const worker = await Worker.findByIdAndUpdate(workerId, { bankDetails: req.body }, { new: true });
+    if (worker) {
+      const b = req.body || {};
+      require('../../services/notification/profileChangeNotice').notifyBankChange({ role: 'worker', id: worker._id, name: worker.name, holderName: b.accountHolder || b.accountHolderName || b.holderName, bankName: b.bankName, account: b.accountNumber, ifsc: b.ifscCode || b.ifsc });
+    }
     res.status(200).json({ success: true, message: 'Bank details updated', worker });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -387,6 +400,7 @@ const updateDocuments = async (req, res) => {
     
     worker.documents = { ...worker.documents, ...req.body, status: 'Pending' };
     await worker.save();
+    require('../../services/notification/profileChangeNotice').notifyProfileChange({ role: 'worker', id: worker._id, name: worker.name, changes: ['Documents (sent for re-verification)'] });
     
     res.status(200).json({ success: true, message: 'Documents updated', worker });
   } catch (error) {

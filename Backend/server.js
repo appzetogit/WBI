@@ -8,6 +8,9 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const morgan = require('morgan');
+// Must run before any model is compiled (emails every enquiry form).
+require('./services/notification/enquiryMail').register();
+require('./services/notification/bookingMail').register();
 let compressionPkg;
 try {
   compressionPkg = require('compression');
@@ -782,6 +785,7 @@ if (process.env.VERCEL !== '1' && !process.env.VERCEL_ENV) {
         } catch (notifErr) {
           console.warn('[Server] Notification worker init skipped:', notifErr.message);
         }
+        require('./services/mail/mailer').verifyMailer().catch(() => {});
         console.log('[Server] BullMQ Workers initialized');
 
         // Initialize BullMQ Workers for B2B Bulk Uploads

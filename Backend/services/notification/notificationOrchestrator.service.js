@@ -30,7 +30,7 @@ function hasSpecificRecipientTargets(targets = {}) {
   const keys = [
     'vendorId', 'vendorIds', 'engineerId', 'engineerIds', 'userId', 'userIds',
     'workerId', 'workerIds', 'b2bId', 'b2bIds', 'b2bUserId', 'b2bUserIds',
-    'b2bCompanyId', 'adminId', 'adminIds'
+    'b2bCompanyId', 'adminId', 'adminIds', 'emails'
   ];
   return keys.some((k) => {
     const v = targets[k];
@@ -89,12 +89,70 @@ function resolveTargets(eventDef, targets = {}) {
     });
   }
 
+  // Email-only recipients: people without an account row (yet), or whose
+  // account was just removed. { role, email }
+  if (Array.isArray(targets.emails)) {
+    targets.emails.forEach((t) => {
+      const email = String(t?.email || '').trim().toLowerCase();
+      if (t?.role && EMAIL_RX.test(email)) out.push({ role: t.role, id: null, email, emailOnly: true });
+    });
+  }
+
   return out;
+}
+
+const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const adminOpsEmails = () =>
+  String(process.env.ADMIN_NOTIFICATION_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => EMAIL_RX.test(e) && !/@example\.com$/.test(e));
+
+async function companyContactEmail(companyId) {
+  if (!companyId) return null;
+  try {
+    const B2BCompany = require('../../models/B2BCompany');
+    const c = await B2BCompany.findById(companyId).select('email').lean();
+    return c?.email || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who receives the email channel. Admin mail goes to ADMIN_NOTIFICATION_EMAILS
+ * as one message when it is set; events marked emailScope 'company' send one
+ * message to the B2B company's contact address instead of every team member.
+ */
+async function emailRecipientsFor(eventDef, recipients, opts) {
+  const roles = eventDef.emailRoles || null;
+  let list = recipients.filter((r) => !r.broadcast && (!roles || roles.includes(r.role)));
+
+  const ops = adminOpsEmails();
+  if (ops.length && list.some((r) => r.role === 'admin' && !r.emailOnly)) {
+    list = list.filter((r) => r.role !== 'admin' || r.emailOnly);
+    list.push({ role: 'admin', id: null, email: ops, key: 'ops' });
+  }
+
+  if (eventDef.emailScope === 'company' && list.some((r) => r.role === 'b2b' && !r.emailOnly)) {
+    const companyId = opts.targets?.b2bCompanyId || opts.data?.b2bCompanyId || opts.data?.companyId;
+    const contact = await companyContactEmail(companyId);
+    if (contact) {
+      list = list.filter((r) => r.role !== 'b2b' || r.emailOnly);
+      list.push({ role: 'b2b', id: null, email: contact, key: `company:${companyId}` });
+    }
+  }
+  return list;
 }
 
 async function expandRecipients(resolved) {
   const expanded = [];
   for (const t of resolved) {
+    if (t.emailOnly) {
+      expanded.push(t);
+      continue;
+    }
     if (t.role === 'admin' && (t.allAdmins || !t.id)) {
       try {
         const Admin = require('../../models/Admin');
@@ -133,7 +191,12 @@ const toQueueJobId = (value) =>
 
 async function enqueueOrInline(jobName, data, opts = {}) {
   try {
-    const { notificationQueue } = require('../../jobs/queueSetup');
+    const { notificationQueue, redisConnection } = require('../../jobs/queueSetup');
+    // With Redis down, queue.add() waits for a reconnect instead of failing,
+    // which would silently stall every notification. Deliver directly instead.
+    if (redisConnection && redisConnection.status !== 'ready') {
+      throw new Error(`queue Redis is ${redisConnection.status}`);
+    }
     const job = await notificationQueue.add(jobName, data, {
       attempts: opts.attempts || 5,
       backoff: { type: 'exponential', delay: opts.delay || 2000 },
@@ -146,9 +209,16 @@ async function enqueueOrInline(jobName, data, opts = {}) {
   } catch (err) {
     console.warn('[orchestrator] queue unavailable:', err.message);
     if (!INLINE_FALLBACK) throw err;
-    const { deliverChannel } = require('./channelAdapters');
-    await deliverChannel(data);
-    return { queued: false, inline: true };
+    const { deliverChannel, processBroadcastChunk } = require('./channelAdapters');
+    // One failed channel must not stop the others; its log row records the failure.
+    try {
+      if (jobName === 'broadcast_chunk') await processBroadcastChunk(data);
+      else await deliverChannel(data);
+      return { queued: false, inline: true };
+    } catch (deliveryErr) {
+      console.warn(`[orchestrator] inline ${data.channel || jobName} delivery failed:`, deliveryErr.message);
+      return { queued: false, inline: true, failed: true };
+    }
   }
 }
 
@@ -215,13 +285,24 @@ async function emit(eventKey, opts = {}) {
         jobId: `bcast:${eventKey}:${recipient.role}:${crypto.randomBytes(4).toString('hex')}`
       });
       jobs.push(enq);
-      continue;
     }
+  }
 
-    for (const channel of channels) {
-      const dedupeKey =
-        opts.dedupeKey ||
-        eventDef.dedupe(data, recipient.role, recipient.id) + `:${channel}`;
+  const accountRecipients = recipients.filter((r) => !r.broadcast && !r.emailOnly && r.id);
+  const deliveries = [];
+  for (const channel of channels) {
+    const list = channel === 'email'
+      ? await emailRecipientsFor(eventDef, recipients, opts)
+      : accountRecipients;
+    list.forEach((recipient) => deliveries.push({ channel, recipient }));
+  }
+
+  for (const { channel, recipient } of deliveries) {
+    {
+      const recipientKey = recipient.id || recipient.key || recipient.email;
+      const dedupeKey = opts.dedupeKey
+        ? `${opts.dedupeKey}:${recipient.role}:${recipientKey}:${channel}`
+        : eventDef.dedupe(data, recipient.role, recipientKey) + `:${channel}`;
 
       if (await shortDedupe(dedupeKey)) {
         logMetric('skipped', { eventKey, channel, reason: 'redis_dedupe', dedupeKey });
@@ -239,6 +320,19 @@ async function emit(eventKey, opts = {}) {
         typeof eventDef.actionUrl === 'function'
           ? eventDef.actionUrl(data, recipient.role)
           : eventDef.actionUrl;
+
+      // Rich email body from the catalog; an admin text override replaces it.
+      let email = null;
+      if (channel === 'email') {
+        try {
+          email = typeof eventDef.email === 'function' ? eventDef.email(data, recipient.role) || {} : {};
+        } catch (err) {
+          console.warn(`[orchestrator] email template ${eventKey} failed:`, err.message);
+          email = {};
+        }
+        if (override?.message) delete email.paragraphs;
+        if (override?.title) { delete email.subject; delete email.heading; }
+      }
 
       let logDoc;
       try {
@@ -271,12 +365,15 @@ async function emit(eventKey, opts = {}) {
         channel,
         recipientRole: recipient.role,
         recipientId: recipient.id,
+        recipientEmail: recipient.email || null,
         title,
         message,
         actionUrl,
         priority: eventDef.priority,
         category: eventDef.category,
         data,
+        email,
+        channels,
         emailTemplate: eventDef.emailTemplate || null,
         smsTemplate: eventDef.smsTemplate || null,
         fallbackOnPushFail: !!eventDef.fallbackOnPushFail

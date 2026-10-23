@@ -98,6 +98,18 @@ const uploadDocumentMeta = async (req, res) => {
 const submit = async (req, res) => {
   try {
     const onboarding = await submitOnboarding(req.companyId, req.user?.id);
+    try {
+      const B2BCompany = require('../../models/B2BCompany');
+      const company = await B2BCompany.findById(req.companyId).select('companyName').lean();
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      const submittedAt = new Date().toISOString();
+      emitAsync('b2b_onboarding_submitted', {
+        targets: { b2bCompanyId: req.companyId, notifyAllAdmins: true },
+        data: { companyId: String(req.companyId), companyName: company?.companyName, submittedAt }
+      });
+    } catch (notifyErr) {
+      console.warn('b2b_onboarding_submitted notify failed:', notifyErr.message);
+    }
     res.json({ success: true, data: onboarding });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
@@ -191,7 +203,7 @@ const sendContactOtp = async (req, res) => {
     const companyId = req.companyId;
     if (channel === 'email') {
       const { otp } = await createOTPToken({ email, type: 'b2b_onboarding_email' });
-      await sendOtpEmail(email, otp, 'b2b');
+      await sendOtpEmail(email, otp, 'b2b', 'verification', 10);
       return res.json({ success: true, message: 'OTP sent to email' });
     }
     if (channel === 'mobile') {

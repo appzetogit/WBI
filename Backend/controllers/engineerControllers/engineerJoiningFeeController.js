@@ -64,6 +64,28 @@ const markDraftAndPaymentPaid = async ({
     await redeemCouponOnPaid(draft, { orderId, paymentId, req });
   }
 
+  // Receipt on the first transition to paid (verify and webhook both land here)
+  if (wasUnpaid && draft.email) {
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('joining_fee_paid', {
+        targets: { emails: [{ role: 'engineer', email: draft.email }] },
+        data: {
+          name: draft.fullName,
+          amount: payment.finalAmount ?? draft.joiningFeeFinalAmount,
+          baseAmount: payment.baseAmount ?? draft.joiningFeeAmount,
+          discount: payment.discount ?? draft.joiningFeeDiscount,
+          couponCode: draft.couponCode || undefined,
+          paymentId,
+          orderId,
+          paidAt: payment.paidAt || new Date()
+        }
+      });
+    } catch (notifyErr) {
+      console.warn('joining_fee_paid notify failed:', notifyErr.message);
+    }
+  }
+
   return payment;
 };
 

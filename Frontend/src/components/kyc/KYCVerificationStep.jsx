@@ -37,6 +37,22 @@ const compressImage = (file, { maxWidth = 1200, maxHeight = 1200, quality = 0.8 
   });
 };
 
+const sanitizeVerificationMap = (map) => {
+  if (!map || typeof map !== 'object') return {};
+  const cleaned = {};
+  Object.entries(map).forEach(([key, val]) => {
+    if (val && typeof val === 'object') {
+      cleaned[key] = {
+        ...val,
+        status: val.status === 'generating_otp' ? 'pending' : val.status
+      };
+    } else {
+      cleaned[key] = val;
+    }
+  });
+  return cleaned;
+};
+
 const KYCVerificationStep = forwardRef(({
   role,
   mobileNumber,
@@ -62,6 +78,23 @@ const KYCVerificationStep = forwardRef(({
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const hydratedRef = useRef(false);
+
+  // Discrete action loading states — never corrupt document status with temporary in-flight actions
+  const [digiLockerLoading, setDigiLockerLoading] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [panVerifying, setPanVerifying] = useState(false);
+  const [bankVerifying, setBankVerifying] = useState(false);
+  const [licenseVerifying, setLicenseVerifying] = useState(false);
+
+  // Controlled inputs for inline API verification cards
+  const [panInput, setPanInput] = useState('');
+  const [panName, setPanName] = useState('');
+  const [bankAcc, setBankAcc] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [dlNumber, setDlNumber] = useState('');
+  const [dlDob, setDlDob] = useState('');
 
   const stopCamera = useCallback(() => {
     if (videoStream) {
@@ -104,7 +137,7 @@ const KYCVerificationStep = forwardRef(({
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
     
-    setVerifications(p => ({ ...p, [rule.documentType]: { status: 'verifying' } }));
+    setVerifications(p => ({ ...p, [rule.documentType]: { ...p[rule.documentType], status: 'verifying' } }));
     stopCamera();
 
     canvas.toBlob(async (blob) => {
@@ -126,7 +159,9 @@ const KYCVerificationStep = forwardRef(({
           const matchRes = await kycService.verifySelfieMatch({ role, entityId });
           if (matchRes.success) {
              toast.success('Selfie verified successfully against ID document!');
-             setVerifications(p => ({ ...p, [rule.documentType]: { status: 'verified', fileUrl } }));
+             setVerifications(p => ({ ...p, [rule.documentType]: { status: 'verified', fileUrl, physicalUploaded: true } }));
+          } else {
+             setVerifications(p => ({ ...p, [rule.documentType]: { status: 'uploaded', fileUrl, physicalUploaded: true } }));
           }
         }
       } catch (err) {
@@ -174,15 +209,21 @@ const KYCVerificationStep = forwardRef(({
       const saved = JSON.parse(raw);
       if (saved.aadhaarNumber) setAadhaarNumber(String(saved.aadhaarNumber));
       if (saved.clientId) {
-        setVerifications((p) => ({
-          ...p,
-          aadhaar: {
-            ...p.aadhaar,
-            otpSent: true,
-            clientId: saved.clientId,
-            status: p.aadhaar?.status === 'verified' ? 'verified' : 'pending'
-          }
-        }));
+        setVerifications((p) => {
+          const currentAadhaar = p.aadhaar || {};
+          const safeStatus = currentAadhaar.status === 'verified'
+            ? 'verified'
+            : (currentAadhaar.status === 'generating_otp' ? 'pending' : (currentAadhaar.status || 'pending'));
+          return {
+            ...p,
+            aadhaar: {
+              ...currentAadhaar,
+              otpSent: true,
+              clientId: saved.clientId,
+              status: safeStatus
+            }
+          };
+        });
       }
     } catch {
       /* ignore */
@@ -191,7 +232,10 @@ const KYCVerificationStep = forwardRef(({
 
   useEffect(() => {
     if (!initialVerifications || typeof initialVerifications !== 'object') return;
-    setVerifications((prev) => ({ ...initialVerifications, ...prev }));
+    setVerifications((prev) => {
+      const cleanInit = sanitizeVerificationMap(initialVerifications);
+      return { ...prev, ...cleanInit };
+    });
   }, [initialVerifications]);
 
   // Hydrate from server KYC records — never wipe verified state on remount
@@ -212,16 +256,19 @@ const KYCVerificationStep = forwardRef(({
             if (existing.status === 'verified' && !rec.expired) {
               next[docType] = { ...rec, ...existing, status: 'verified', skipReverify: true };
             } else {
+              const safeStatus = rec.status === 'generating_otp' ? 'pending' : (rec.status || existing.status || 'pending');
+              const hasFile = Boolean(rec.fileUrl || existing.fileUrl);
               next[docType] = {
                 ...existing,
-                status: rec.status,
+                status: safeStatus,
                 fileUrl: rec.fileUrl || existing.fileUrl,
                 backFileUrl: rec.backFileUrl || existing.backFileUrl,
+                frontUrl: rec.fileUrl || existing.frontUrl || existing.fileUrl,
                 masked: rec.masked,
                 verifiedAt: rec.verifiedAt,
                 provider: rec.provider,
                 physicalUploaded:
-                  rec.physicalUploadStatus === 'uploaded' || existing.physicalUploaded,
+                  rec.physicalUploadStatus === 'uploaded' || hasFile || existing.physicalUploaded,
                 skipReverify: !!rec.skipReverify && !rec.expired,
                 expired: !!rec.expired,
                 failureReason: rec.failureReason
@@ -266,7 +313,7 @@ const KYCVerificationStep = forwardRef(({
       if (res.success) {
         toast.success('DigiLocker verification complete!');
         sessionStorage.removeItem('digilockerRecordId');
-        setVerifications(p => ({ ...p, aadhaar: { status: 'verified', data: res.data } }));
+        setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verified', data: res.data } }));
       }
     } catch (err) {
       toast.error(err.message || 'DigiLocker verification failed');
@@ -275,12 +322,12 @@ const KYCVerificationStep = forwardRef(({
   };
 
   const handleDigiLockerInitiate = async () => {
+    if (!mobileNumber) {
+      toast.error('Mobile number is required for DigiLocker');
+      return;
+    }
+    setDigiLockerLoading(true);
     try {
-      if (!mobileNumber) {
-        toast.error('Mobile number is required for DigiLocker');
-        return;
-      }
-      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'generating_otp' } }));
       if (onBeforeDigiLockerInitiate) {
         await onBeforeDigiLockerInitiate();
       }
@@ -299,21 +346,29 @@ const KYCVerificationStep = forwardRef(({
         window.location.href = authUrl;
       } else {
         toast.error('Failed to start DigiLocker — no auth URL');
-        setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed' } }));
       }
     } catch (err) {
       toast.error(err.message || 'Failed to initiate DigiLocker');
-      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message } }));
+      setVerifications(p => ({
+        ...p,
+        aadhaar: {
+          ...p.aadhaar,
+          status: p.aadhaar?.status === 'verified' ? 'verified' : 'pending',
+          error: err.message
+        }
+      }));
+    } finally {
+      setDigiLockerLoading(false);
     }
   };
 
-  const handleGenerateAadhaarOtp = async (aadhaarNumber) => {
-    const cleaned = String(aadhaarNumber || '').replace(/\D/g, '');
+  const handleGenerateAadhaarOtp = async (aadhaarNum) => {
+    const cleaned = String(aadhaarNum || aadhaarNumber || '').replace(/\D/g, '');
     if (cleaned.length !== 12) {
       return toast.error('Valid 12-digit Aadhaar required');
     }
+    setOtpSending(true);
     try {
-      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'generating_otp' } }));
       const res = await kycService.generateAadhaarOtp({ role, entityId, aadhaarNumber: cleaned });
       if (res.success) {
         toast.success(res.data?.message || 'OTP sent to Aadhaar linked mobile number');
@@ -330,7 +385,17 @@ const KYCVerificationStep = forwardRef(({
       }
     } catch (err) {
       toast.error(err.message || 'Failed to generate Aadhaar OTP');
-      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: err.message, otpSent: false } }));
+      setVerifications(p => ({
+        ...p,
+        aadhaar: {
+          ...p.aadhaar,
+          status: p.aadhaar?.status === 'verified' ? 'verified' : 'pending',
+          error: err.message,
+          otpSent: false
+        }
+      }));
+    } finally {
+      setOtpSending(false);
     }
   };
 
@@ -343,12 +408,13 @@ const KYCVerificationStep = forwardRef(({
       } catch (_) { /* ignore */ }
     }
     if (!resolvedClientId) return toast.error('Session expired. Please tap Get OTP again.');
-    const otpClean = String(otp || '').replace(/\D/g, '').trim();
-    const aadhaarClean = String(aadhaarNum || '').replace(/\D/g, '');
+    const otpClean = String(otp || aadhaarOtp || '').replace(/\D/g, '').trim();
+    const aadhaarClean = String(aadhaarNum || aadhaarNumber || '').replace(/\D/g, '');
     if (otpClean.length < 4) return toast.error('Valid OTP is required');
     if (aadhaarClean.length !== 12) return toast.error('Valid 12-digit Aadhaar is required');
+
+    setOtpVerifying(true);
     try {
-      setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verifying' } }));
       const res = await kycService.verifyAadhaar({
         role,
         entityId,
@@ -360,57 +426,75 @@ const KYCVerificationStep = forwardRef(({
         toast.success('Aadhaar verified successfully');
         sessionStorage.removeItem(aadhaarSessionKey);
         setAadhaarOtp('');
-        setVerifications(p => ({ ...p, aadhaar: { status: 'verified', data: res.data } }));
+        setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'verified', data: res.data } }));
       }
     } catch (err) {
       const msg = err?.message || 'Aadhaar verification failed';
       toast.error(msg);
       setVerifications(p => ({ ...p, aadhaar: { ...p.aadhaar, status: 'failed', error: msg } }));
+    } finally {
+      setOtpVerifying(false);
     }
   };
 
-  const handleVerifyPan = async (panNumber, name) => {
-    if (!panNumber || !name) return toast.error('PAN and Name are required');
+  const handleVerifyPan = async (panNum, name) => {
+    const panClean = String(panNum || panInput || '').trim().toUpperCase();
+    const nameClean = String(name || panName || '').trim();
+    if (!panClean || !nameClean) return toast.error('PAN and Name are required');
+
+    setPanVerifying(true);
     try {
-      setVerifications(p => ({ ...p, pan: { status: 'verifying' } }));
-      const res = await kycService.verifyPan({ role, entityId, panNumber, name });
+      const res = await kycService.verifyPan({ role, entityId, panNumber: panClean, name: nameClean });
       if (res.success) {
         toast.success('PAN verified successfully');
-        setVerifications(p => ({ ...p, pan: { status: 'verified', data: res.data } }));
+        setVerifications(p => ({ ...p, pan: { ...p.pan, status: 'verified', data: res.data } }));
       }
     } catch (err) {
       toast.error(err.message || 'PAN verification failed');
-      setVerifications(p => ({ ...p, pan: { status: 'failed', error: err.message } }));
+      setVerifications(p => ({ ...p, pan: { ...p.pan, status: 'failed', error: err.message } }));
+    } finally {
+      setPanVerifying(false);
     }
   };
 
   const handleVerifyBank = async (accountNumber, ifsc, name) => {
-    if (!accountNumber || !ifsc) return toast.error('Account and IFSC are required');
+    const accClean = String(accountNumber || bankAcc || '').trim();
+    const ifscClean = String(ifsc || bankIfsc || '').trim().toUpperCase();
+    const nameClean = String(name || bankName || '').trim();
+    if (!accClean || !ifscClean) return toast.error('Account and IFSC are required');
+
+    setBankVerifying(true);
     try {
-      setVerifications(p => ({ ...p, bank: { status: 'verifying' } }));
-      const res = await kycService.verifyBank({ role, entityId, accountNumber, ifsc, name });
+      const res = await kycService.verifyBank({ role, entityId, accountNumber: accClean, ifsc: ifscClean, name: nameClean });
       if (res.success) {
         toast.success('Bank verified successfully');
-        setVerifications(p => ({ ...p, bank: { status: 'verified', data: res.data } }));
+        setVerifications(p => ({ ...p, bank: { ...p.bank, status: 'verified', data: res.data } }));
       }
     } catch (err) {
       toast.error(err.message || 'Bank verification failed');
-      setVerifications(p => ({ ...p, bank: { status: 'failed', error: err.message } }));
+      setVerifications(p => ({ ...p, bank: { ...p.bank, status: 'failed', error: err.message } }));
+    } finally {
+      setBankVerifying(false);
     }
   };
 
-  const handleVerifyLicense = async (dlNumber, dob) => {
-    if (!dlNumber || !dob) return toast.error('License Number and DOB are required');
+  const handleVerifyLicense = async (dlNum, dob) => {
+    const dlClean = String(dlNum || dlNumber || '').trim().toUpperCase();
+    const dobClean = String(dob || dlDob || '').trim();
+    if (!dlClean || !dobClean) return toast.error('License Number and DOB are required');
+
+    setLicenseVerifying(true);
     try {
-      setVerifications(p => ({ ...p, license: { status: 'verifying' } }));
-      const res = await kycService.verifyLicense({ role, entityId, dlNumber, dob });
+      const res = await kycService.verifyLicense({ role, entityId, dlNumber: dlClean, dob: dobClean });
       if (res.success) {
         toast.success('License verified successfully');
-        setVerifications(p => ({ ...p, license: { status: 'verified', data: res.data } }));
+        setVerifications(p => ({ ...p, license: { ...p.license, status: 'verified', data: res.data } }));
       }
     } catch (err) {
       toast.error(err.message || 'License verification failed');
-      setVerifications(p => ({ ...p, license: { status: 'failed', error: err.message } }));
+      setVerifications(p => ({ ...p, license: { ...p.license, status: 'failed', error: err.message } }));
+    } finally {
+      setLicenseVerifying(false);
     }
   };
 
@@ -420,14 +504,27 @@ const KYCVerificationStep = forwardRef(({
   const isCgpeComplete = (rule, vState = {}) => {
     if (vState.skipReverify && vState.status === 'verified' && !vState.expired) return true;
     const status = vState.status;
-    if (rule.verificationMode === 'upload_only' || rule.verificationMode === 'ocr' || rule.verificationMode === 'manual') {
-      return status === 'uploaded' || status === 'verified';
+    if (
+      rule.verificationMode === 'upload_only' ||
+      rule.verificationMode === 'ocr' ||
+      rule.verificationMode === 'manual'
+    ) {
+      return (
+        status === 'uploaded' ||
+        status === 'verified' ||
+        Boolean(vState.fileUrl || vState.frontUrl || vState.physicalUploaded)
+      );
     }
     return status === 'verified';
   };
 
   const isPhysicalComplete = (rule, vState = {}) => {
-    if (!rule.requirePhysicalUpload && rule.verificationMode !== 'upload_only' && rule.verificationMode !== 'ocr' && rule.verificationMode !== 'manual') {
+    if (
+      !rule.requirePhysicalUpload &&
+      rule.verificationMode !== 'upload_only' &&
+      rule.verificationMode !== 'ocr' &&
+      rule.verificationMode !== 'manual'
+    ) {
       return true;
     }
     // Server-verified + skip: physical already accepted (file may be on record)
@@ -435,12 +532,35 @@ const KYCVerificationStep = forwardRef(({
       return true;
     }
     if (rule.requiresFrontAndBack) {
-      return Boolean(vState.frontUrl && vState.backUrl);
+      return Boolean((vState.frontUrl || vState.fileUrl) && vState.backUrl);
     }
-    return Boolean(vState.fileUrl || vState.frontUrl);
+    return Boolean(vState.fileUrl || vState.frontUrl || vState.physicalUploaded);
   };
 
-  const isRuleComplete = (rule, vState = {}) => isCgpeComplete(rule, vState) && isPhysicalComplete(rule, vState);
+  const isRuleComplete = (rule, vState = {}) => {
+    if (vState.skipReverify && vState.status === 'verified' && !vState.expired) return true;
+    if (vState.status === 'verified') return true;
+
+    const physicalDone = isPhysicalComplete(rule, vState);
+    const cgpeDone = isCgpeComplete(rule, vState);
+
+    // upload_only / manual / ocr completes when physical file is uploaded
+    if (
+      rule.verificationMode === 'upload_only' ||
+      rule.verificationMode === 'ocr' ||
+      rule.verificationMode === 'manual'
+    ) {
+      return physicalDone;
+    }
+
+    // For digilocker / api verification:
+    // If online verified (and physical if required is also done) -> complete!
+    if (cgpeDone && (!rule.requirePhysicalUpload || physicalDone)) return true;
+    // Or if physical document (e.g. front and back) is uploaded for admin review -> complete!
+    if (physicalDone) return true;
+
+    return false;
+  };
 
   const handlePhysicalUpload = async (file, rule, side = 'single') => {
     if (!file) return;
@@ -492,9 +612,12 @@ const KYCVerificationStep = forwardRef(({
           const next = { ...prev };
           if (side === 'front') next.frontUrl = fileUrl;
           else if (side === 'back') next.backUrl = fileUrl;
-          else next.fileUrl = fileUrl;
+          else {
+            next.fileUrl = fileUrl;
+            next.frontUrl = next.frontUrl || fileUrl;
+          }
 
-          // upload_only rules: mark uploaded; CGPE rules keep verified status
+          // upload_only rules: mark uploaded; CGPE rules keep verified status if already verified
           if (
             rule.verificationMode === 'upload_only' ||
             rule.verificationMode === 'ocr' ||
@@ -527,16 +650,14 @@ const KYCVerificationStep = forwardRef(({
       for (const rule of rules) {
         if (!rule.required) continue;
         const vState = verifications[rule.documentType] || {};
-        if (!isCgpeComplete(rule, vState)) {
-          toast.error(`Please complete verification for ${rule.label}`);
-          return false;
-        }
-        if (!isPhysicalComplete(rule, vState)) {
-          toast.error(
-            rule.requiresFrontAndBack
-              ? `Please upload front and back images for ${rule.label}`
-              : `Please upload the document file for ${rule.label}`
-          );
+        if (!isRuleComplete(rule, vState)) {
+          if (rule.requiresFrontAndBack && !(vState.frontUrl && vState.backUrl)) {
+            toast.error(`Please upload front and back images for ${rule.label}`);
+          } else if (rule.requirePhysicalUpload || rule.verificationMode === 'upload_only') {
+            toast.error(`Please upload document or complete verification for ${rule.label}`);
+          } else {
+            toast.error(`Please complete verification for ${rule.label}`);
+          }
           return false;
         }
       }
@@ -573,43 +694,48 @@ const KYCVerificationStep = forwardRef(({
             rule.verificationMode === 'upload_only' ||
             rule.verificationMode === 'ocr' ||
             rule.verificationMode === 'manual';
-          const showPhysicalUploader =
-            !lockedVerified &&
-            needsPhysical &&
-            (rule.verificationMode === 'upload_only' ||
-              rule.verificationMode === 'ocr' ||
-              rule.verificationMode === 'manual' ||
-              cgpeDone);
+          
+          // Physical uploader is available for any document that needs physical upload
+          const showPhysicalUploader = !lockedVerified && needsPhysical;
 
           return (
             <div key={rule.documentType} className={`p-4 border rounded-xl transition-all ${isComplete || lockedVerified ? 'border-green-200 bg-green-50/30' : isFailed ? 'border-red-200 bg-red-50/30' : 'border-gray-200 bg-white'}`}>
               <div className="flex justify-between items-center mb-3">
                 <h4 className="font-semibold text-gray-800 text-sm">{rule.label} {rule.required && <span className="text-red-500">*</span>}</h4>
                 <div className="flex flex-wrap items-center gap-1.5 justify-end">
-                  {lockedVerified || (cgpeDone && rule.verificationMode !== 'upload_only') ? (
-                    <span className="flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> Verified</span>
+                  {lockedVerified || (vState.status === 'verified') ? (
+                    <span className="flex items-center text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-1 rounded-md">
+                      <FiCheckCircle className="mr-1" /> Verified
+                    </span>
                   ) : null}
+                  {needsPhysical && physicalDone && (
+                    <span className="flex items-center text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-md">
+                      <FiCheckCircle className="mr-1" /> File Uploaded
+                    </span>
+                  )}
                   {vState.status === 'rejected' ? (
-                    <span className="flex items-center text-[10px] font-bold text-red-700 bg-red-100 px-2 py-1 rounded-md">Rejected</span>
-                  ) : null}
-                  {vState.status === 'pending' || vState.status === 'verifying' || vState.status === 'manual_review' ? (
-                    !lockedVerified ? (
-                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md capitalize">{vState.status || 'Pending'}</span>
-                    ) : null
-                  ) : null}
-                  {needsPhysical ? (
-                    physicalDone ? (
-                      <span className="flex items-center text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> File Uploaded</span>
-                    ) : !lockedVerified ? (
-                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md">Upload pending</span>
-                    ) : null
-                  ) : null}
-                  {isComplete || lockedVerified ? (
-                    <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-md"><FiCheckCircle className="mr-1" /> Complete</span>
+                    <span className="flex items-center text-[10px] font-bold text-red-700 bg-red-100 px-2 py-1 rounded-md">
+                      Rejected
+                    </span>
                   ) : isFailed ? (
-                    <span className="flex items-center text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-md"><FiAlertCircle className="mr-1" /> Failed</span>
+                    <span className="flex items-center text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded-md">
+                      <FiAlertCircle className="mr-1" /> Failed
+                    </span>
+                  ) : isComplete || lockedVerified ? (
+                    <span className="flex items-center text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded-md">
+                      <FiCheckCircle className="mr-1" /> Complete
+                    </span>
                   ) : (
-                    <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">Pending</span>
+                    <>
+                      {needsPhysical && !physicalDone && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-md">
+                          Upload pending
+                        </span>
+                      )}
+                      <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">
+                        Pending
+                      </span>
+                    </>
                   )}
                 </div>
               </div>
@@ -637,12 +763,16 @@ const KYCVerificationStep = forwardRef(({
                       <button
                         type="button"
                         onClick={handleDigiLockerInitiate}
-                        disabled={vState.status === 'generating_otp' || vState.status === 'verifying'}
-                        className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+                        disabled={digiLockerLoading || otpSending || otpVerifying}
+                        className="w-full bg-[#185598] hover:bg-[#124275] text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
                       >
-                        {vState.status === 'generating_otp' || vState.status === 'verifying'
-                          ? 'Opening DigiLocker...'
-                          : 'Verify Aadhaar via DigiLocker'}
+                        {digiLockerLoading ? (
+                          <>
+                            <FiLoader className="w-4 h-4 animate-spin" /> Opening DigiLocker...
+                          </>
+                        ) : (
+                          'Verify Aadhaar via DigiLocker'
+                        )}
                       </button>
                       <p className="text-[11px] text-gray-500 text-center">
                         Secure UIDAI DigiLocker consent — recommended
@@ -664,10 +794,16 @@ const KYCVerificationStep = forwardRef(({
                         <button
                           type="button"
                           onClick={() => handleGenerateAadhaarOtp(aadhaarNumber)}
-                          disabled={vState.status === 'generating_otp'}
-                          className="w-full bg-gray-900 hover:bg-black text-white text-sm font-semibold py-2.5 rounded-lg transition-colors"
+                          disabled={otpSending || digiLockerLoading || !aadhaarNumber || aadhaarNumber.length !== 12}
+                          className="w-full bg-gray-900 hover:bg-black text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
                         >
-                          {vState.status === 'generating_otp' ? 'Sending OTP...' : 'Get OTP'}
+                          {otpSending ? (
+                            <>
+                              <FiLoader className="w-4 h-4 animate-spin" /> Sending OTP...
+                            </>
+                          ) : (
+                            'Get OTP'
+                          )}
                         </button>
                       ) : (
                         <>
@@ -683,10 +819,16 @@ const KYCVerificationStep = forwardRef(({
                           <button
                             type="button"
                             onClick={() => handleVerifyAadhaar(vState.clientId, aadhaarOtp, aadhaarNumber)}
-                            disabled={vState.status === 'verifying'}
-                            className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                            disabled={otpVerifying || !aadhaarOtp || aadhaarOtp.length < 4}
+                            className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2 disabled:opacity-60"
                           >
-                            {vState.status === 'verifying' ? 'Verifying...' : 'Verify OTP & Aadhaar'}
+                            {otpVerifying ? (
+                              <>
+                                <FiLoader className="w-4 h-4 animate-spin" /> Verifying...
+                              </>
+                            ) : (
+                              'Verify OTP & Aadhaar'
+                            )}
                           </button>
                         </>
                       )}
@@ -695,43 +837,108 @@ const KYCVerificationStep = forwardRef(({
 
                   {rule.verificationMode === 'api' && rule.documentType === 'pan' && (
                     <div className="space-y-3">
-                      <input type="text" id="panInput" placeholder="Enter PAN Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
-                      <input type="text" id="panName" placeholder="Name as per PAN" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
+                      <input
+                        type="text"
+                        placeholder="Enter PAN Number"
+                        maxLength="10"
+                        value={panInput}
+                        onChange={(e) => setPanInput(e.target.value.toUpperCase().slice(0, 10))}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border uppercase"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Name as per PAN"
+                        value={panName}
+                        onChange={(e) => setPanName(e.target.value)}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border"
+                      />
                       <button
-                        onClick={() => handleVerifyPan(document.getElementById('panInput').value, document.getElementById('panName').value)}
-                        disabled={vState.status === 'verifying'}
-                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                        type="button"
+                        onClick={() => handleVerifyPan(panInput, panName)}
+                        disabled={panVerifying || !panInput || !panName}
+                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2 disabled:opacity-60"
                       >
-                        {vState.status === 'verifying' ? 'Verifying...' : 'Verify PAN'}
+                        {panVerifying ? (
+                          <>
+                            <FiLoader className="w-4 h-4 animate-spin" /> Verifying...
+                          </>
+                        ) : (
+                          'Verify PAN'
+                        )}
                       </button>
                     </div>
                   )}
 
                   {rule.verificationMode === 'api' && rule.documentType === 'bank' && (
                     <div className="space-y-3">
-                      <input type="text" id="bankAcc" placeholder="Account Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
-                      <input type="text" id="bankIfsc" placeholder="IFSC Code" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
-                      <input type="text" id="bankName" placeholder="Account Holder Name" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
+                      <input
+                        type="text"
+                        placeholder="Account Number"
+                        value={bankAcc}
+                        onChange={(e) => setBankAcc(e.target.value.replace(/\D/g, ''))}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border"
+                      />
+                      <input
+                        type="text"
+                        placeholder="IFSC Code"
+                        maxLength="11"
+                        value={bankIfsc}
+                        onChange={(e) => setBankIfsc(e.target.value.toUpperCase().slice(0, 11))}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border uppercase"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Account Holder Name"
+                        value={bankName}
+                        onChange={(e) => setBankName(e.target.value)}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border"
+                      />
                       <button
-                        onClick={() => handleVerifyBank(document.getElementById('bankAcc').value, document.getElementById('bankIfsc').value, document.getElementById('bankName').value)}
-                        disabled={vState.status === 'verifying'}
-                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                        type="button"
+                        onClick={() => handleVerifyBank(bankAcc, bankIfsc, bankName)}
+                        disabled={bankVerifying || !bankAcc || !bankIfsc}
+                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2 disabled:opacity-60"
                       >
-                        {vState.status === 'verifying' ? 'Verifying...' : 'Verify Bank Account'}
+                        {bankVerifying ? (
+                          <>
+                            <FiLoader className="w-4 h-4 animate-spin" /> Verifying...
+                          </>
+                        ) : (
+                          'Verify Bank Account'
+                        )}
                       </button>
                     </div>
                   )}
 
                   {rule.verificationMode === 'api' && rule.documentType === 'license' && (
                     <div className="space-y-3">
-                      <input type="text" id="dlNumber" placeholder="Driving License Number" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black uppercase" />
-                      <input type="date" id="dlDob" placeholder="Date of Birth" className="w-full text-sm border-gray-200 rounded-lg focus:ring-black" />
+                      <input
+                        type="text"
+                        placeholder="Driving License Number"
+                        value={dlNumber}
+                        onChange={(e) => setDlNumber(e.target.value.toUpperCase())}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border uppercase"
+                      />
+                      <input
+                        type="date"
+                        placeholder="Date of Birth"
+                        value={dlDob}
+                        onChange={(e) => setDlDob(e.target.value)}
+                        className="w-full text-sm border-gray-200 rounded-lg focus:ring-black px-3 py-2 border"
+                      />
                       <button
-                        onClick={() => handleVerifyLicense(document.getElementById('dlNumber').value, document.getElementById('dlDob').value)}
-                        disabled={vState.status === 'verifying'}
-                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800"
+                        type="button"
+                        onClick={() => handleVerifyLicense(dlNumber, dlDob)}
+                        disabled={licenseVerifying || !dlNumber || !dlDob}
+                        className="w-full bg-black text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2 disabled:opacity-60"
                       >
-                        {vState.status === 'verifying' ? 'Verifying...' : 'Verify License'}
+                        {licenseVerifying ? (
+                          <>
+                            <FiLoader className="w-4 h-4 animate-spin" /> Verifying...
+                          </>
+                        ) : (
+                          'Verify License'
+                        )}
                       </button>
                     </div>
                   )}
@@ -739,10 +946,14 @@ const KYCVerificationStep = forwardRef(({
               )}
 
               {showPhysicalUploader && (
-                <div className={`mt-3 space-y-2 ${cgpeDone && needsPhysical ? 'border-t border-gray-100 pt-3' : ''}`}>
+                <div className={`mt-3 space-y-2 ${cgpeDone || rule.verificationMode === 'digilocker' || rule.verificationMode === 'api' ? 'border-t border-gray-100 pt-3' : ''}`}>
                   {cgpeDone && rule.requirePhysicalUpload && rule.verificationMode !== 'upload_only' ? (
+                    <p className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded-lg">
+                      ✓ Online verification completed. You can also upload a clear photo/scan of the physical document for admin records.
+                    </p>
+                  ) : !cgpeDone && (rule.verificationMode === 'digilocker' || rule.verificationMode === 'api') ? (
                     <p className="text-[11px] text-gray-500">
-                      CGPE verification is complete. Upload clear scans of the physical document for admin review.
+                      Upload clear photo/scan of document (front & back) or complete online verification above.
                     </p>
                   ) : null}
                   {rule.requiresFrontAndBack ? (

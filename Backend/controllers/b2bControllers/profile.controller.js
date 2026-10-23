@@ -133,7 +133,15 @@ exports.updateProfile = async (req, res) => {
     if (companyEmail) company.companyEmail = companyEmail;
     if (companyPhone) company.companyPhone = companyPhone;
 
+    const profileChangeList = require('../../services/notification/profileChangeNotice').profileChanges(company);
     await company.save();
+    require('../../services/notification/profileChangeNotice').notifyProfileChange({
+      role: 'b2b',
+      name: company.authorizedPerson?.name,
+      changes: profileChangeList,
+      changedBy: req.user?.fullName || req.user?.email || 'A company administrator',
+      email: company.email
+    });
 
     await logAction(req, 'B2B_PROFILE_UPDATE', company._id, 'B2BCompany', {
       old: previousData,
@@ -173,7 +181,15 @@ exports.updateContactPerson = async (req, res) => {
       altPhone: altPhone !== undefined ? altPhone : company.authorizedPerson.altPhone
     };
 
+    const profileChangeList = require('../../services/notification/profileChangeNotice').profileChanges(company);
     await company.save();
+    require('../../services/notification/profileChangeNotice').notifyProfileChange({
+      role: 'b2b',
+      name: company.authorizedPerson?.name,
+      changes: profileChangeList,
+      changedBy: req.user?.fullName || req.user?.email || 'A company administrator',
+      email: company.email
+    });
 
     await logAction(req, 'B2B_CONTACT_UPDATE', company._id, 'B2BCompany', {
       old: oldContact,
@@ -215,7 +231,15 @@ exports.updateAddress = async (req, res) => {
       company.billingAddress = billingAddress;
     }
 
+    const profileChangeList = require('../../services/notification/profileChangeNotice').profileChanges(company);
     await company.save();
+    require('../../services/notification/profileChangeNotice').notifyProfileChange({
+      role: 'b2b',
+      name: company.authorizedPerson?.name,
+      changes: profileChangeList,
+      changedBy: req.user?.fullName || req.user?.email || 'A company administrator',
+      email: company.email
+    });
 
     await logAction(req, 'B2B_ADDRESS_UPDATE', company._id, 'B2BCompany', {
       old: oldAddresses,
@@ -703,6 +727,21 @@ exports.updateBankDetails = async (req, res) => {
       maskedNumber
     });
 
+    {
+      const company = await B2BCompany.findById(req.companyId).select('email authorizedPerson').lean();
+      if (company?.email) {
+        require('../../services/notification/profileChangeNotice').notifyBankChange({
+          role: 'b2b',
+          name: company.authorizedPerson?.name,
+          holderName: accountHolderName,
+          bankName,
+          account: maskedNumber,
+          ifsc: ifscCode,
+          email: company.email
+        });
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Bank details saved successfully',
@@ -792,6 +831,22 @@ exports.changePassword = async (req, res) => {
     await company.save();
 
     await logAction(req, 'B2B_PASSWORD_CHANGE', company._id, 'B2BCompany');
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('password_changed', {
+        targets: { emails: [{ role: 'b2b', email: company.email }] },
+        data: {
+          method: 'change',
+          at: new Date().toISOString(),
+          name: company.authorizedPerson?.name,
+          ip: req.ip,
+          device: String(req.headers['user-agent'] || '').slice(0, 120) || undefined
+        }
+      });
+    } catch (notifyErr) {
+      console.warn('password_changed notify failed:', notifyErr.message);
+    }
 
     return res.status(200).json({ success: true, message: 'Password changed successfully' });
   } catch (error) {

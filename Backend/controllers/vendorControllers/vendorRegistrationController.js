@@ -691,6 +691,24 @@ const submitApplication = async (req, res) => {
     
     // Scoped token so the vendor can complete KYC / bank / induction before
     // approval, without any endpoint having to trust a body-supplied vendorId.
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('vendor_application_submitted', {
+        targets: { vendorId: vendor._id, notifyAllAdmins: true },
+        data: {
+          vendorId: String(vendor._id),
+          name: vendor.name,
+          businessName: vendor.businessName || vendor.name,
+          phone: vendor.phone,
+          email: vendor.email,
+          services: (vendor.approvedServices || []).map((x) => x.categoryName).filter(Boolean),
+          submittedAt: new Date().toISOString()
+        }
+      });
+    } catch (notifyErr) {
+      console.warn('vendor_application_submitted notify failed:', notifyErr.message);
+    }
+
     const { generateOnboardingToken } = require('../../utils/tokenService');
     res.status(200).json({
       success: true,

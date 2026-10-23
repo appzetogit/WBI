@@ -69,6 +69,35 @@ const registerCompany = async (req, res) => {
       status: 'pending' // Requires WBI Admin approval
     });
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('b2b_registered', {
+        targets: { notifyAllAdmins: true },
+        data: {
+          companyId: newCompany._id,
+          companyName: newCompany.companyName,
+          gstNumber: newCompany.gstNumber || undefined,
+          contactName: primaryContact?.name,
+          email: primaryContact?.email,
+          phone: primaryContact?.phone
+        }
+      });
+      const welcomeTo = [...new Set([primaryContact?.email, admin?.email].filter(Boolean).map((e) => String(e).trim().toLowerCase()))];
+      emitAsync('account_welcome', {
+        targets: { emails: welcomeTo.map((email) => ({ role: 'b2b', email })) },
+        data: {
+          variant: 'b2b',
+          accountLabel: 'Business company',
+          name: admin?.fullName || primaryContact?.name,
+          companyName: newCompany.companyName,
+          email: primaryContact?.email,
+          phone: primaryContact?.phone
+        }
+      });
+    } catch (notifyErr) {
+      console.warn('Company registration email skipped:', notifyErr.message);
+    }
+
     // Generate token for auto-login
     const tokens = generateTokenPair({
       userId: newCompany._id,

@@ -40,6 +40,65 @@ const isLastActiveAdmin = async (companyId, userId) => {
   return false;
 };
 
+const inviteUrl = (token) => {
+  const { panelUrl } = require('../../services/mail/mailer');
+  return panelUrl('b2b', `/b2b/accept-invite?token=${token}`);
+};
+
+/**
+ * Email the invitation link. Resolves true when the mail server accepted the
+ * message; a failure is logged and reported to the caller, never thrown.
+ */
+const emailInvite = async (req, user, token, { resend = false } = {}) => {
+  try {
+    const { sendB2BInviteEmail } = require('../../services/emailService');
+    const [company, inviter] = await Promise.all([
+      B2BCompany.findById(user.companyId).select('companyName').lean(),
+      B2BUser.findById(req.user?.id).select('fullName').lean()
+    ]);
+    const res = await sendB2BInviteEmail({
+      to: user.email,
+      name: user.fullName,
+      companyName: company?.companyName,
+      role: user.role,
+      inviteLink: inviteUrl(token),
+      invitedBy: inviter?.fullName,
+      expiresHours: 24,
+      resend
+    });
+    return Boolean(res?.success);
+  } catch (err) {
+    console.error(`[B2B invite] email to ${user.email} failed:`, err.message);
+    return false;
+  }
+};
+
+/** Tell a member their workspace access changed (in-app + email). Never throws. */
+const notifyMember = async (req, user, change, { title, message, status, emailOnly = false } = {}) => {
+  try {
+    const [company, actor] = await Promise.all([
+      B2BCompany.findById(user.companyId).select('companyName').lean(),
+      B2BUser.findById(req.user?.id).select('fullName').lean()
+    ]);
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    const data = {
+      change,
+      name: user.fullName,
+      companyName: company?.companyName,
+      role: user.role,
+      status: status || user.status,
+      changedBy: actor?.fullName || 'Your company admin',
+      title,
+      message
+    };
+    emitAsync('b2b_member_updated', emailOnly
+      ? { targets: { emails: [{ role: 'b2b', email: user.email }] }, data }
+      : { targets: { b2bUserId: user._id }, data });
+  } catch (err) {
+    console.warn('[B2B users] member notify failed:', err.message);
+  }
+};
+
 /**
  * GET /api/b2b/users/summary
  */
@@ -191,14 +250,16 @@ exports.inviteUser = async (req, res) => {
     // Log activity
     await logActivity(req, req.user.id, `Invited user ${fullName} (${email}) as ${role}`, 'Users');
 
-    // In a real application, we would email/SMS the link.
-    // For local evaluation, we print it to console and return the token URL in response.
-    const inviteLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/b2b/accept-invite?token=${token}`;
-    console.log(`[B2B INVITE LINK]: ${inviteLink}`);
+    const inviteLink = inviteUrl(token);
+    if (process.env.NODE_ENV !== 'production') console.log(`[B2B INVITE LINK]: ${inviteLink}`);
+    const emailSent = await emailInvite(req, newUser, token);
 
     return res.status(201).json({
       success: true,
-      message: 'Invitation sent successfully.',
+      message: emailSent
+        ? `Invitation emailed to ${newUser.email}.`
+        : 'User invited, but the invitation email could not be sent. Share the invite link manually or resend the invitation.',
+      emailSent,
       inviteLink,
       token,
       data: newUser
@@ -307,6 +368,8 @@ exports.updateUser = async (req, res) => {
       });
     }
 
+    const previous = { role: user.role, email: user.email, permissions: (user.permissions || []).join(',') };
+
     // Update fields
     if (fullName) user.fullName = fullName;
     if (email) user.email = email.toLowerCase().trim();
@@ -318,6 +381,25 @@ exports.updateUser = async (req, res) => {
     await user.save();
 
     await logActivity(req, req.user.id, `Updated user ${user.fullName} (${user.email}) details`, 'Users');
+
+    if (user.status !== 'invited') {
+      if (previous.role !== user.role || previous.permissions !== (user.permissions || []).join(',')) {
+        notifyMember(req, user, 'role', {
+          title: 'Your role or permissions changed',
+          message: previous.role !== user.role
+            ? `Your role was changed from ${previous.role} to ${user.role}.`
+            : 'Your permissions in the company workspace were updated.'
+        });
+      }
+      if (previous.email !== user.email) {
+        // The old address is told too, so an unwanted change is noticed.
+        notifyMember(req, { ...user.toObject(), email: previous.email }, 'email', {
+          title: 'Your login email was changed',
+          message: `The login email for your workspace account was changed to ${user.email}.`,
+          emailOnly: true
+        });
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -379,6 +461,12 @@ exports.updateUserStatus = async (req, res) => {
     await user.save();
 
     await logActivity(req, req.user.id, `Changed user ${user.fullName} status to ${status}`, 'Users');
+    notifyMember(req, user, `status:${status}`, {
+      title: status === 'active' ? 'Your workspace access was restored' : 'Your workspace access was deactivated',
+      message: status === 'active'
+        ? 'Your account in the company workspace is active again.'
+        : 'Your account in the company workspace was deactivated. You can no longer sign in.'
+    });
 
     return res.status(200).json({
       success: true,
@@ -424,12 +512,16 @@ exports.resendInvitation = async (req, res) => {
 
     await logActivity(req, req.user.id, `Resent invitation to ${user.fullName} (${user.email})`, 'Users');
 
-    const inviteLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/b2b/accept-invite?token=${token}`;
-    console.log(`[B2B RESEND INVITE LINK]: ${inviteLink}`);
+    const inviteLink = inviteUrl(token);
+    if (process.env.NODE_ENV !== 'production') console.log(`[B2B RESEND INVITE LINK]: ${inviteLink}`);
+    const emailSent = await emailInvite(req, user, token, { resend: true });
 
     return res.status(200).json({
       success: true,
-      message: 'Invitation resent successfully.',
+      message: emailSent
+        ? `Invitation re-sent to ${user.email}.`
+        : 'A new invite link was created, but the email could not be sent. Share the link manually.',
+      emailSent,
       inviteLink,
       token
     });
@@ -476,6 +568,14 @@ exports.deleteUser = async (req, res) => {
     }
 
     await B2BUser.deleteOne({ _id: userId });
+    if (user.status !== 'invited') {
+      notifyMember(req, user, 'removed', {
+        title: 'You were removed from the workspace',
+        message: 'Your account was removed from the company workspace. You can no longer sign in.',
+        status: 'removed',
+        emailOnly: true
+      });
+    }
 
     await logActivity(req, req.user.id, `Deleted user ${user.fullName} (${user.email})`, 'Users');
 
@@ -628,6 +728,24 @@ exports.acceptInviteSetPassword = async (req, res) => {
       headers: req.headers,
       connection: req.connection
     }, user._id, `Activated user account and configured password`, 'Auth');
+
+    try {
+      const admins = await B2BUser.find({
+        companyId: user.companyId,
+        role: 'Company Admin',
+        status: 'active',
+        _id: { $ne: user._id }
+      }).select('_id').lean();
+      if (admins.length) {
+        const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+        emitAsync('b2b_member_joined', {
+          targets: { b2bUserIds: admins.map((a) => a._id) },
+          data: { memberId: String(user._id), memberName: user.fullName, memberEmail: user.email, role: user.role }
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('[B2B users] join notify failed:', notifyErr.message);
+    }
 
     return res.status(200).json({
       success: true,

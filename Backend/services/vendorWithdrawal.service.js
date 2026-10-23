@@ -25,6 +25,36 @@ function emitFinance(vendorId, event, payload = {}) {
   }
 }
 
+const WITHDRAWAL_STATUS_LABEL = {
+  requested: 'requested',
+  paid: 'completed',
+  rejected: 'rejected',
+  failed: 'failed'
+};
+
+/** Payout email to the account holder. Never throws. */
+function mailWithdrawal(withdrawal, status, reason) {
+  try {
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('withdrawal_status_updated', {
+      targets: { vendorId: withdrawal.vendorId },
+      data: {
+        withdrawalId: String(withdrawal._id),
+        status,
+        statusLabel: WITHDRAWAL_STATUS_LABEL[status] || status,
+        amount: withdrawal.amount,
+        fee: withdrawal.feeAmount || withdrawal.platformFeeAmount || undefined,
+        netAmount: withdrawal.netAmount || undefined,
+        accountMasked: withdrawal.bankDetails?.accountNumberMasked || undefined,
+        utr: status === 'paid' ? withdrawal.transactionReference || undefined : undefined,
+        reason
+      }
+    });
+  } catch (err) {
+    console.warn('[withdraw] email notify failed:', err.message);
+  }
+}
+
 async function getEscrowHeldFromServiceRequests(vendorId) {
   const rows = await ServiceRequest.aggregate([
     {
@@ -171,7 +201,7 @@ async function addOrUpdateBank(vendorId, payload) {
   }
 
   // Sync legacy Vendor.bankDetails for fallbacks
-  await Vendor.findByIdAndUpdate(vendorId, {
+  const vendorDoc = await Vendor.findByIdAndUpdate(vendorId, {
     bankDetails: {
       accountName: bank.accountHolderName,
       accountNumber: accountNumber || '',
@@ -179,6 +209,16 @@ async function addOrUpdateBank(vendorId, payload) {
       bankName: bank.bankName,
       upiId: bank.upiId || ''
     }
+  }).select('name').lean();
+
+  require('./notification/profileChangeNotice').notifyBankChange({
+    role: 'vendor',
+    id: vendorId,
+    name: vendorDoc?.name,
+    holderName: bank.accountHolderName,
+    bankName: bank.method === 'upi' ? `UPI (${bank.upiId})` : bank.bankName,
+    account: bank.accountNumberMasked,
+    ifsc: bank.method === 'upi' ? undefined : bank.ifsc
   });
 
   return bank;
@@ -483,6 +523,7 @@ async function createWithdrawalRequest(vendorId, {
       amount: amt,
       status: withdrawal.status
     });
+    mailWithdrawal(withdrawal, 'requested');
 
     // Auto-approve small amounts
     if (approvalMode === 'auto') {
@@ -665,6 +706,7 @@ async function processApprovedWithdrawal(withdrawalId, { adminId = null, actorTy
     withdrawal.pushEvent('failed', error.message, { actorType: 'gateway' });
     await withdrawal.save();
     await refundFinanceHold(withdrawal, error.message);
+    mailWithdrawal(withdrawal, 'failed', "The bank transfer could not be completed. The amount has been returned to your wallet; please check your bank details or try again.");
     emitFinance(withdrawal.vendorId, 'finance:withdrawalFailed', {
       withdrawalId: withdrawal._id,
       reason: error.message
@@ -710,6 +752,7 @@ async function markWithdrawalPaid(withdrawalId, { utr, adminId = null, notes = '
     /* ignore */
   }
 
+  mailWithdrawal(withdrawal, 'paid');
   emitFinance(withdrawal.vendorId, 'finance:withdrawalPaid', {
     withdrawalId: withdrawal._id,
     utr: withdrawal.transactionReference
@@ -730,6 +773,7 @@ async function rejectWithdrawal(withdrawalId, { adminId, reason }) {
   withdrawal.processedDate = new Date();
   withdrawal.pushEvent('rejected', reason || 'Rejected by admin', { actorType: 'admin', actorId: adminId });
   await withdrawal.save();
+  mailWithdrawal(withdrawal, 'rejected', withdrawal.rejectionReason);
   emitFinance(withdrawal.vendorId, 'finance:withdrawalRejected', { withdrawalId });
   return withdrawal;
 }

@@ -20,6 +20,26 @@ const { createNotification } = require('../notificationControllers/notificationC
 /**
  * Get all engineers with filters and pagination
  */
+/** Notify an engineer about an admin decision (email + in-app). Never throws. */
+const notifyEngineer = (eventKey, engineer, extra = {}, { emailOnly = false } = {}) => {
+  try {
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    const data = {
+      engineerId: engineer._id,
+      name: engineer.name,
+      accountLabel: 'Engineer account',
+      changedBy: 'WBI admin team',
+      ...extra,
+      reason: extra.reason ? String(extra.reason).trim() : undefined
+    };
+    emitAsync(eventKey, emailOnly
+      ? { targets: { emails: engineer.email ? [{ role: 'engineer', email: engineer.email }] : [] }, data }
+      : { targets: { engineerId: engineer._id }, data });
+  } catch (err) {
+    console.warn(`${eventKey} notify failed:`, err.message);
+  }
+};
+
 const getAllEngineers = async (req, res) => {
   try {
     const {
@@ -454,6 +474,7 @@ const rejectEngineer = async (req, res) => {
     engineer.isActive = false;
     engineer.rejectionReason = reason || '';
     await engineer.save();
+    notifyEngineer('engineer_rejected', engineer, { reason: reason || undefined });
 
     res.status(200).json({
       success: true,
@@ -488,6 +509,7 @@ const suspendEngineer = async (req, res) => {
     engineer.approvalStatus = 'suspended';
     engineer.isActive = false;
     await engineer.save();
+    notifyEngineer('account_status_changed', engineer, { status: 'suspended', reason: req.body?.reason });
 
     res.status(200).json({
       success: true,
@@ -856,8 +878,12 @@ const toggleEngineerStatus = async (req, res) => {
       });
     }
 
+    const wasActive = engineer.isActive;
     engineer.isActive = isActive;
     await engineer.save();
+    if (wasActive !== engineer.isActive) {
+      notifyEngineer('account_status_changed', engineer, { status: engineer.isActive ? 'reactivated' : 'deactivated', reason: req.body?.reason });
+    }
 
     res.status(200).json({
       success: true,
@@ -888,6 +914,7 @@ const deleteEngineer = async (req, res) => {
         message: 'Engineer not found'
       });
     }
+    notifyEngineer('account_status_changed', engineer, { status: 'deleted', reason: req.body?.reason }, { emailOnly: true });
 
     res.status(200).json({
       success: true,

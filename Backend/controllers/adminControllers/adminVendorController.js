@@ -24,6 +24,35 @@ const auditVendor = (req, actionType, vendor, oldValue, newValue, reason = '') =
 /**
  * Get all vendors with filters and pagination
  */
+/** Email + in-app notice to the vendor about an admin status change. Never throws. */
+const notifyVendorStatus = (vendor, status, reason, { emailOnly = false } = {}) => {
+  try {
+    const data = {
+      status,
+      reason: reason ? String(reason).trim() : undefined,
+      name: vendor.name,
+      accountLabel: vendor.businessName || vendor.name,
+      changedBy: 'WBI admin team'
+    };
+    require('../../services/notification/notificationOrchestrator.service').emitAsync('account_status_changed', emailOnly
+      ? { targets: { emails: vendor.email ? [{ role: 'vendor', email: vendor.email }] : [] }, data }
+      : { targets: { vendorId: vendor._id }, data });
+  } catch (err) {
+    console.warn('vendor status notify failed:', err.message);
+  }
+};
+
+const notifyVendorVerification = (vendor, subject, status, reason) => {
+  try {
+    require('../../services/notification/notificationOrchestrator.service').emitAsync('verification_status_updated', {
+      targets: { vendorId: vendor._id },
+      data: { subject, status, reason: reason ? String(reason).trim() : undefined, name: vendor.name }
+    });
+  } catch (err) {
+    console.warn('vendor verification notify failed:', err.message);
+  }
+};
+
 const getAllVendors = async (req, res) => {
   try {
     const {
@@ -281,7 +310,9 @@ const approveVendor = async (req, res) => {
         targets: { vendorId: vendor._id },
         data: {
           vendorId: vendor._id,
+          name: vendor.name,
           businessName: vendor.businessName || vendor.name,
+          companyCode: vendor.uniqueCompanyCode || undefined,
           email: vendor.email,
           phone: vendor.phone
         },
@@ -353,6 +384,7 @@ const rejectVendor = async (req, res) => {
         targets: { vendorId: vendor._id },
         data: {
           vendorId: vendor._id,
+          name: vendor.name,
           reason: vendor.rejectedReason,
           email: vendor.email,
           phone: vendor.phone
@@ -411,6 +443,7 @@ const suspendVendor = async (req, res) => {
     vendor.rejectedReason = reason;
     await vendor.save();
     await auditVendor(req, 'ADMIN_SUSPENDED_VENDOR', vendor, suspendBefore, { approvalStatus: vendor.approvalStatus, isActive: false }, reason);
+    notifyVendorStatus(vendor, 'suspended', reason);
 
     // Jobs the vendor still holds need an operator's attention.
     const B2BJob = require('../../models/B2BJob');
@@ -752,6 +785,7 @@ const toggleVendorStatus = async (req, res) => {
     vendor.isActive = isActive;
     await vendor.save();
     await auditVendor(req, isActive ? 'ADMIN_ACTIVATED_VENDOR' : 'ADMIN_DEACTIVATED_VENDOR', vendor, toggleBefore, { isActive }, req.body?.reason);
+    if (toggleBefore.isActive !== isActive) notifyVendorStatus(vendor, isActive ? 'reactivated' : 'deactivated', req.body?.reason);
 
     res.status(200).json({
       success: true,
@@ -807,6 +841,7 @@ const deleteVendor = async (req, res) => {
       { businessName: vendor.businessName, name: vendor.name, phone: vendor.phone, email: vendor.email, approvalStatus: vendor.approvalStatus },
       null, req.body?.reason);
     await Vendor.deleteOne({ _id: vendor._id });
+    notifyVendorStatus(vendor, 'deleted', req.body?.reason, { emailOnly: true });
 
     res.status(200).json({
       success: true,
@@ -843,6 +878,7 @@ const updateVendorKycStatus = async (req, res) => {
     await vendor.save();
     // The reason is kept on the audit trail for this vendor.
     await auditVendor(req, 'ADMIN_VENDOR_KYC_STATUS', vendor, kycBefore, { kycStatus: status }, reason);
+    if (kycBefore.kycStatus !== status) notifyVendorVerification(vendor, 'KYC documents', status, reason);
 
     try {
       const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');
@@ -879,6 +915,7 @@ const updateVendorBankStatus = async (req, res) => {
     vendor.bankStatus = status;
     await vendor.save();
     await auditVendor(req, 'ADMIN_VENDOR_BANK_STATUS', vendor, bankBefore, { bankStatus: status }, reason);
+    if (bankBefore.bankStatus !== status) notifyVendorVerification(vendor, 'Bank account', status, reason);
 
     try {
       const { buildOnboardingStatus, emitOnboardingStatus } = require('../../services/vendorOnboarding.service');

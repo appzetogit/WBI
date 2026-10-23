@@ -358,7 +358,20 @@ const register = async (req, res) => {
     const { enqueueRegistrationTask } = require('../../queues/registrationQueue');
     await enqueueRegistrationTask('KYC_VERIFICATION', { vendorId: vendor._id });
     await enqueueRegistrationTask('BANK_PENNY_DROP', { vendorId: vendor._id, bankDetails: 'placeholder' });
-    await enqueueRegistrationTask('WELCOME_NOTIFICATION', { phone: vendor.phone, email: vendor.email });
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('account_welcome', {
+        targets: { vendorId: vendor._id },
+        data: {
+          variant: 'vendor',
+          name: vendor.name,
+          companyName: vendor.businessName !== vendor.name ? vendor.businessName : undefined,
+          email: vendor.email,
+          phone: vendor.phone
+        }
+      });
+    } catch (e) { console.error('Vendor welcome email error:', e.message); }
 
     res.status(201).json({
       success: true,

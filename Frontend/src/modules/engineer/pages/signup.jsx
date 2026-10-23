@@ -374,7 +374,21 @@ export default function EngineerSignup() {
       } else {
         url = await uploadToCloudinary(file, 'engineer_media', undefined, { skipCompression: true });
       }
-      setFormData(p => ({ ...p, [fieldName]: url }));
+      setFormData(p => ({
+        ...p,
+        [fieldName]: url,
+        ...(fieldName === 'selfieUrl' ? {
+          verifications: {
+            ...p.verifications,
+            selfie: {
+              ...p.verifications?.selfie,
+              fileUrl: url,
+              status: 'uploaded',
+              physicalUploaded: true
+            }
+          }
+        } : {})
+      }));
       toast.success(isVideo ? 'Video uploaded!' : 'Photo uploaded!', { id: toastId });
     } catch (err) {
       console.error('[MediaUpload]', err);
@@ -680,7 +694,8 @@ export default function EngineerSignup() {
       }
 
       // 3. Validate Identity
-      if (config?.engineerConfig?.selfieRequired && !formData.selfieUrl) {
+      const hasSelfie = Boolean(formData.selfieUrl || formData.verifications?.selfie?.fileUrl || formData.verifications?.selfie?.frontUrl);
+      if (config?.engineerConfig?.selfieRequired && !hasSelfie) {
         toast.error('Please upload a selfie for identity verification');
         return false;
       }
@@ -1211,7 +1226,16 @@ export default function EngineerSignup() {
                       otpSent
                     }));
                   }}
-                  onComplete={(verifications) => setFormData(prev => ({ ...prev, verifications }))}
+                  onComplete={(verifications) => {
+                    setFormData(prev => {
+                      const selfieKyc = verifications?.selfie?.fileUrl || verifications?.selfie?.frontUrl;
+                      return {
+                        ...prev,
+                        verifications,
+                        selfieUrl: prev.selfieUrl || selfieKyc || prev.selfieUrl
+                      };
+                    });
+                  }}
                 />
 
                 <div className="border-t border-gray-200"></div>

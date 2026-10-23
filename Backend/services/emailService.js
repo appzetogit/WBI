@@ -1,4 +1,12 @@
-const nodemailer = require('nodemailer');
+const {
+  sendMail,
+  getTransporter,
+  isConfigured,
+  mailFrom,
+  brandName,
+  appBaseUrl,
+  panelUrl
+} = require('./mail/mailer');
 
 const COLORS = {
   primary: '#00a6a6',
@@ -18,7 +26,7 @@ const emailWrapper = (content, title, preheader = '') => `
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>${escapeHtml(title)}</title>
   <!--[if mso]>
   <style type="text/css">
     body, table, td, a { font-family: Arial, Helvetica, sans-serif !important; }
@@ -71,23 +79,24 @@ const emailWrapper = (content, title, preheader = '') => `
   </style>
 </head>
 <body>
-  <div class="preheader">${preheader}</div>
+  <div class="preheader">${escapeHtml(preheader)}</div>
   <div class="wrapper">
     <div class="main">
       <div class="header">
-        <div class="logo-circle">H</div>
-        <h1>WBI</h1>
+        <div class="logo-circle">${escapeHtml(brandName().charAt(0).toUpperCase())}</div>
+        <h1>${escapeHtml(brandName())}</h1>
       </div>
       <div class="content">
         ${content}
       </div>
       <div class="footer">
-        <p>Premium Home Services â€¢ Delivered with Care</p>
-        <p>&copy; ${new Date().getFullYear()} WBI India. All rights reserved.</p>
+        <p>This is an automated message from ${escapeHtml(brandName())}. Please do not reply to this email.</p>
+        ${process.env.SUPPORT_EMAIL ? `<p>Need help? Write to <a href="mailto:${escapeHtml(process.env.SUPPORT_EMAIL)}" style="color:${COLORS.primary};">${escapeHtml(process.env.SUPPORT_EMAIL)}</a></p>` : ''}
+        <p>&copy; ${new Date().getFullYear()} ${escapeHtml(brandName())}. All rights reserved.</p>
         <div class="social-links">
-          <a href="#">Help Center</a>
-          <a href="#">Privacy Policy</a>
-          <a href="#">Terms of Service</a>
+          <a href="${appBaseUrl()}/user/help-support">Help Center</a>
+          <a href="${appBaseUrl()}/user/privacy-policy">Privacy Policy</a>
+          <a href="${appBaseUrl()}/user/terms-services">Terms of Service</a>
         </div>
       </div>
     </div>
@@ -96,23 +105,11 @@ const emailWrapper = (content, title, preheader = '') => `
 </html>
 `;
 
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST,
-    port: parseInt(process.env.EMAIL_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    },
-    tls: {
-      rejectUnauthorized: false // Fix ERR_SSL_TLSV1_ALERT_INTERNAL_ERROR on AWS
-    }
-  });
-};
+/** Shared pooled transport (kept as a function for the existing callers). */
+const createTransporter = () => getTransporter();
 
 const getAppUrl = (path = '') => {
-  const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+  const base = appBaseUrl();
   if (!path) return base;
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 };
@@ -122,109 +119,170 @@ const escapeHtml = (str) =>
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
-async function sendMailSafe({ to, subject, html, preheader, title }) {
+/** Send an HTML body inside the branded layout. Throws on delivery failure. */
+async function sendMailSafe({ to, subject, html, preheader, title, replyTo, attachments }) {
   if (!to) return { success: false, skipped: true };
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.log(`[EMAIL] (no SMTP) To: ${to} | ${subject}`);
-    return { success: true, logged: true };
-  }
-  const transporter = createTransporter();
-  await transporter.sendMail({
-    from: process.env.EMAIL_FROM || 'WBI <noreply@wbi.com>',
+  return sendMail({
     to,
     subject,
+    replyTo,
+    attachments,
     html: emailWrapper(html, title || subject, preheader || subject)
   });
-  return { success: true };
 }
 
+const TONES = {
+  info: { bg: '#e0f2fe', fg: '#0369a1' },
+  success: { bg: '#dcfce7', fg: '#15803d' },
+  warning: { bg: '#fef3c7', fg: '#b45309' },
+  danger: { bg: '#fee2e2', fg: '#b91c1c' },
+  neutral: { bg: '#f1f5f9', fg: '#475569' }
+};
+
 /**
- * Send OTP Email - Professional Style
+ * Body of a transactional email built from plain data. Every value is
+ * escaped, and the markup is table based with inline styles so it renders
+ * the same in Gmail, Outlook and mobile clients.
+ *
+ * @param {object} o
+ * @param {string} [o.badge]    short label above the heading
+ * @param {string} [o.tone]     info | success | warning | danger | neutral
+ * @param {string} o.heading
+ * @param {string} [o.greeting] e.g. "Hi Asha,"
+ * @param {string|string[]} [o.paragraphs]
+ * @param {Array<[string, any]>} [o.rows]  label/value pairs shown in a card
+ * @param {string} [o.rowsTitle]
+ * @param {string} [o.ctaUrl]
+ * @param {string} [o.ctaLabel]
+ * @param {string} [o.note]     small print under the button
+ * @param {string} [o.highlight] large monospace value (codes)
+ */
+function renderBlocks(o = {}) {
+  const tone = TONES[o.tone] || TONES.info;
+  const paras = (Array.isArray(o.paragraphs) ? o.paragraphs : [o.paragraphs]).filter(Boolean);
+  const rows = (o.rows || []).filter((r) => r && r[1] !== undefined && r[1] !== null && String(r[1]).trim() !== '');
+
+  const badge = o.badge
+    ? `<span style="display:inline-block;padding:6px 12px;border-radius:999px;background:${tone.bg};color:${tone.fg};font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">${escapeHtml(o.badge)}</span>`
+    : '';
+
+  const rowsHtml = rows.length
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;background:#f8fafc;border:1px solid ${COLORS.border};border-radius:12px;">
+        ${o.rowsTitle ? `<tr><td colspan="2" style="padding:14px 18px 6px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${COLORS.lightText};">${escapeHtml(o.rowsTitle)}</td></tr>` : ''}
+        ${rows.map(([label, value]) => `
+        <tr>
+          <td style="padding:10px 18px;font-size:14px;color:${COLORS.lightText};vertical-align:top;width:42%;">${escapeHtml(label)}</td>
+          <td style="padding:10px 18px;font-size:14px;color:${COLORS.text};font-weight:600;text-align:right;word-break:break-word;">${escapeHtml(value)}</td>
+        </tr>`).join('')}
+      </table>`
+    : '';
+
+  const highlight = o.highlight
+    ? `<div style="margin:28px 0;padding:24px;border:2px dashed ${COLORS.primary};border-radius:14px;text-align:center;font-family:'Courier New',monospace;font-size:34px;font-weight:800;letter-spacing:10px;color:${COLORS.primary};">${escapeHtml(o.highlight)}</div>`
+    : '';
+
+  const cta = o.ctaUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 8px;"><tr><td style="border-radius:10px;background:${COLORS.primary};">
+        <a href="${escapeHtml(o.ctaUrl)}" target="_blank" rel="noopener" style="display:inline-block;padding:14px 26px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">${escapeHtml(o.ctaLabel || 'Open dashboard')}</a>
+      </td></tr></table>
+      <p style="font-size:12px;line-height:1.5;color:${COLORS.lightText};margin:8px 0 0;">If the button does not work, copy this link into your browser:<br><span style="word-break:break-all;color:${COLORS.secondary};">${escapeHtml(o.ctaUrl)}</span></p>`
+    : '';
+
+  return `
+    ${badge ? `<div style="margin-bottom:18px;">${badge}</div>` : ''}
+    <h2 style="font-size:24px;line-height:1.3;margin:0 0 16px;color:${COLORS.text};">${escapeHtml(o.heading || '')}</h2>
+    ${o.greeting ? `<p style="font-size:15px;line-height:1.6;color:${COLORS.text};margin:0 0 12px;">${escapeHtml(o.greeting)}</p>` : ''}
+    ${paras.map((p) => `<p style="font-size:15px;line-height:1.6;color:#334155;margin:0 0 14px;">${escapeHtml(p)}</p>`).join('')}
+    ${highlight}
+    ${rowsHtml}
+    ${cta}
+    ${o.note ? `<p style="font-size:13px;line-height:1.5;color:${COLORS.lightText};margin:22px 0 0;">${escapeHtml(o.note)}</p>` : ''}
+  `;
+}
+
+/** Render blocks into the layout and send. Throws on delivery failure. */
+async function sendBlocksEmail({ to, subject, preheader, replyTo, ...blocks }) {
+  return sendMailSafe({
+    to,
+    subject,
+    title: blocks.heading || subject,
+    preheader: preheader || (Array.isArray(blocks.paragraphs) ? blocks.paragraphs[0] : blocks.paragraphs) || subject,
+    replyTo,
+    html: renderBlocks(blocks)
+  });
+}
+
+const OTP_PURPOSE_LABEL = {
+  verification: 'verify your email',
+  password_reset: 'reset your password',
+  login: 'sign in'
+};
+
+/**
+ * OTP email. Returns `{ success }` (never throws) for the existing callers;
+ * use `deliverOtpEmail` where a failure must stop the request.
  */
 const sendOTPEmail = async (email, otp, purpose = 'verification') => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.log(`[EMAIL SERVICE] OTP for ${email}: ${otp}`);
-      return { success: true };
-    }
-
-    const transporter = createTransporter();
-    const subjectPrefix = purpose === 'password_reset' ? 'Reset Password' : 'Verify Email';
-
-    const content = `
-      <div style="text-align: center;">
-        <div class="badge badge-primary">Security</div>
-        <h2>Verify your identity</h2>
-        <p>Your one-time password (OTP) for WBI is ready. Use this code to complete your ${purpose.replace('_', ' ')}.</p>
-        
-        <div style="background: ${COLORS.bg}; border-radius: 20px; padding: 40px; margin: 40px 0; border: 2px dashed ${COLORS.primary};">
-          <div style="font-size: 48px; font-weight: 900; letter-spacing: 12px; color: ${COLORS.primary}; margin-bottom: 8px;">${otp}</div>
-          <div style="font-size: 13px; color: ${COLORS.lightText}; font-weight: 600; text-transform: uppercase;">Valid for 10 minutes only</div>
-        </div>
-        
-        <p style="font-size: 14px;">If you didn't request this code, you can safely ignore this email. Someone else might have typed your email address by mistake.</p>
-      </div>
-    `;
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
-      to: email,
-      subject: `${subjectPrefix} - WBI`,
-      html: emailWrapper(content, subjectPrefix, `Your verification code is ${otp}`)
-    });
-    return { success: true };
+    const res = await deliverOtpEmail(email, otp, { purpose });
+    return { success: Boolean(res.success), ...res };
   } catch (error) {
-    console.error('OTP email error:', error);
+    console.error('[mail] OTP email error:', error.message);
     return { success: false, error: error.message };
   }
 };
 
-/**
- * Send Welcome Email - Professional App Style
- */
+const ROLE_LABEL = {
+  user: 'customer',
+  vendor: 'vendor',
+  engineer: 'engineer',
+  worker: 'service partner',
+  admin: 'admin',
+  b2b: 'business'
+};
+
+/** OTP email that throws when it could not be sent. */
+async function deliverOtpEmail(email, otp, { purpose = 'verification', role, validMinutes = 10 } = {}) {
+  const action = OTP_PURPOSE_LABEL[purpose] || 'continue';
+  const res = await sendBlocksEmail({
+    to: email,
+    subject: `${otp} is your ${brandName()} ${purpose === 'password_reset' ? 'password reset' : 'verification'} code`,
+    preheader: `Use ${otp} to ${action}. It expires in ${validMinutes} minutes.`,
+    badge: 'Security',
+    tone: 'info',
+    heading: purpose === 'password_reset' ? 'Reset your password' : 'Your verification code',
+    paragraphs: [
+      `Use this one-time code to ${action}${role && ROLE_LABEL[role] ? ` on your ${ROLE_LABEL[role]} account` : ''}.`
+    ],
+    highlight: otp,
+    note: `The code expires in ${validMinutes} minutes. ${brandName()} will never ask you for this code. If you did not request it, you can ignore this email — your account is safe.`
+  });
+  if (res.skipped && res.reason === 'smtp_not_configured') {
+    throw new Error('Email delivery is not configured');
+  }
+  return res;
+}
+
+/** Customer welcome email (kept for existing callers). */
 const sendWelcomeEmail = async (email, name) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) return { success: true };
-    const transporter = createTransporter();
-
-    const content = `
-      <div style="text-align: center;">
-        <div class="badge badge-success">Welcome</div>
-        <h2>Hello ${name}! ðŸ‘‹</h2>
-        <p>Welcome to the WBI family. We're excited to help you take care of your home with our premium services.</p>
-        
-        <div style="display: flex; justify-content: space-around; margin: 40px 0; flex-wrap: wrap;">
-          <div style="width: 140px; margin: 10px;">
-             <div style="font-size: 32px; margin-bottom: 10px;">ðŸ›¡ï¸</div>
-             <div style="font-size: 14px; font-weight: 700;">Verified Pros</div>
-          </div>
-          <div style="width: 140px; margin: 10px;">
-             <div style="font-size: 32px; margin-bottom: 10px;">âš¡</div>
-             <div style="font-size: 14px; font-weight: 700;">Fast Booking</div>
-          </div>
-          <div style="width: 140px; margin: 10px;">
-             <div style="font-size: 32px; margin-bottom: 10px;">ðŸ’Ž</div>
-             <div style="font-size: 14px; font-weight: 700;">Secure Pay</div>
-          </div>
-        </div>
-
-        <div class="btn-container">
-          <a href="#" class="btn">Book Your First Service</a>
-        </div>
-      </div>
-    `;
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
+    return await sendBlocksEmail({
       to: email,
-      subject: 'Welcome to WBI!',
-      html: emailWrapper(content, 'Welcome', 'Welcome to the future of home services')
+      subject: `Welcome to ${brandName()}`,
+      badge: 'Welcome',
+      tone: 'success',
+      heading: `Welcome to ${brandName()}${name ? `, ${name}` : ''}!`,
+      paragraphs: [
+        'Your account is ready. Book verified professionals, track every job live and pay securely — all in one place.'
+      ],
+      ctaUrl: panelUrl('user', '/home'),
+      ctaLabel: 'Book a service'
     });
-    return { success: true };
   } catch (error) {
-    console.error('Welcome email error:', error);
+    console.error('[mail] Welcome email error:', error.message);
     return { success: false, error: error.message };
   }
 };
@@ -234,7 +292,7 @@ const sendWelcomeEmail = async (email, name) => {
  */
 const sendBookingEmails = async (booking, user, vendor, service) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) return;
+    if (!isConfigured()) return;
     const transporter = createTransporter();
     const bookingId = booking.bookingNumber || booking._id;
 
@@ -263,7 +321,7 @@ const sendBookingEmails = async (booking, user, vendor, service) => {
       `;
 
       await transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
+        from: mailFrom(),
         to: user.email,
         subject: `Booking Confirmed #${bookingId} - WBI`,
         html: emailWrapper(content, 'Confirmed', 'Your booking is scheduled successfully')
@@ -291,7 +349,7 @@ const sendBookingEmails = async (booking, user, vendor, service) => {
       `;
 
       await transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
+        from: mailFrom(),
         to: vendor.email,
         subject: `New Job Assigned #${bookingId} - WBI`,
         html: emailWrapper(vContent, 'New Job', 'Action Required: New job assigned')
@@ -305,7 +363,7 @@ const sendBookingEmails = async (booking, user, vendor, service) => {
  */
 const sendBookingCompletionEmails = async (booking) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) return;
+    if (!isConfigured()) return;
     const transporter = createTransporter();
     const user = booking.userId;
     const bookingId = booking.bookingNumber || booking._id;
@@ -342,7 +400,7 @@ const sendBookingCompletionEmails = async (booking) => {
       `;
 
       await transporter.sendMail({
-        from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
+        from: mailFrom(),
         to: user.email,
         subject: `Service Invoice #${bookingId} - WBI`,
         html: emailWrapper(content, 'Invoice', 'Your service is complete. Here is the receipt.')
@@ -356,7 +414,7 @@ const sendBookingCompletionEmails = async (booking) => {
  */
 const sendWithdrawalApprovedEmail = async (vendor, amount, transactionId) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !vendor.email) return;
+    if (!isConfigured() || !vendor.email) return;
     const transporter = createTransporter();
 
     const content = `
@@ -377,7 +435,7 @@ const sendWithdrawalApprovedEmail = async (vendor, amount, transactionId) => {
     `;
 
     await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
+      from: mailFrom(),
       to: vendor.email,
       subject: 'Withdrawal Success - WBI',
       html: emailWrapper(content, 'Withdrawal', 'Your funds are on the way')
@@ -390,7 +448,7 @@ const sendWithdrawalApprovedEmail = async (vendor, amount, transactionId) => {
  */
 const sendDuesPaymentApprovedEmail = async (vendor, amount, balanceAfter) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !vendor.email) return;
+    if (!isConfigured() || !vendor.email) return;
     const transporter = createTransporter();
 
     const content = `
@@ -410,7 +468,7 @@ const sendDuesPaymentApprovedEmail = async (vendor, amount, balanceAfter) => {
     `;
 
     await transporter.sendMail({
-      from: process.env.EMAIL_FROM || 'WBI <noreply@WBI.com>',
+      from: mailFrom(),
       to: vendor.email,
       subject: 'Dues Payment Verified - WBI',
       html: emailWrapper(content, 'Verified', 'We have received your payment')
@@ -570,31 +628,65 @@ module.exports = {
   sendServiceRequestPaymentEmail,
   sendMailSafe,
   sendTemplatedNotification,
+  sendBlocksEmail,
+  renderBlocks,
+  deliverOtpEmail,
+  sendB2BInviteEmail,
+  escapeHtml,
   getAppUrl
 };
 
 /**
- * Generic transactional email used by the notification orchestrator.
+ * Email for a catalogued notification event (called by the orchestrator's
+ * email channel). `email` carries the presentation the catalog computed:
+ * { badge, tone, greeting, paragraphs, rows, rowsTitle, ctaLabel, note }.
  */
-async function sendTemplatedNotification({ to, template, title, message, data = {} }) {
-  const appUrl = typeof getAppUrl === 'function' ? getAppUrl() : (process.env.FRONTEND_URL || 'https://app.wbinfs.com');
-  const action = data.actionUrl
-    ? (String(data.actionUrl).startsWith('http') ? data.actionUrl : `${appUrl}/${String(data.actionUrl).replace(/^\//, '')}`)
-    : null;
-  const html = `
-    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0f172a">
-      <p style="font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.06em">${template || 'WBI Notice'}</p>
-      <h2 style="margin:8px 0 12px;font-size:20px">${title || 'Notification'}</h2>
-      <p style="line-height:1.5;color:#334155">${message || ''}</p>
-      ${action ? `<p style="margin-top:24px"><a href="${action}" style="background:#0f766e;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Open in WBI</a></p>` : ''}
-    </div>
-  `;
-  return sendMailSafe({
+async function sendTemplatedNotification({ to, title, message, actionUrl, role, email = {} }) {
+  const ctaUrl = actionUrl ? panelUrl(role, actionUrl) : null;
+  const paragraphs = email.paragraphs?.length ? email.paragraphs : [message].filter(Boolean);
+  return sendBlocksEmail({
     to,
-    subject: title || 'WBI Notification',
-    html,
-    title: title || 'WBI Notification',
-    preheader: message || ''
+    subject: email.subject || title || `${brandName()} notification`,
+    preheader: email.preheader || message || title,
+    badge: email.badge,
+    tone: email.tone,
+    heading: email.heading || title,
+    greeting: email.greeting,
+    paragraphs,
+    rows: email.rows,
+    rowsTitle: email.rowsTitle,
+    ctaUrl: email.noCta ? null : ctaUrl,
+    ctaLabel: email.ctaLabel,
+    note: email.note
+  });
+}
+
+/**
+ * Invitation to join a company's B2B workspace. Sent directly (not through
+ * the delivery log) because the link carries a one-time token. Throws on
+ * failure so the caller can report it.
+ */
+async function sendB2BInviteEmail({ to, name, companyName, role, inviteLink, invitedBy, expiresHours = 24, resend = false }) {
+  return sendBlocksEmail({
+    to,
+    subject: `${resend ? 'Reminder: ' : ''}You're invited to join ${companyName || 'your company'} on ${brandName()}`,
+    preheader: `${invitedBy || 'Your company admin'} invited you as ${role || 'a team member'}. The link expires in ${expiresHours} hours.`,
+    badge: 'Team invitation',
+    tone: 'info',
+    heading: `Join ${companyName || 'your company'} on ${brandName()}`,
+    greeting: name ? `Hi ${name},` : undefined,
+    paragraphs: [
+      `${invitedBy || 'Your company admin'} has invited you to the ${companyName || 'company'} business workspace on ${brandName()}.`,
+      'Accept the invitation and set your password to get started.'
+    ],
+    rows: [
+      ['Company', companyName],
+      ['Role', role],
+      ['Login email', to]
+    ],
+    ctaUrl: inviteLink,
+    ctaLabel: 'Accept invitation',
+    note: `This link expires in ${expiresHours} hours and can be used once. If you were not expecting this invitation, you can ignore this email.`
   });
 }
 
@@ -603,7 +695,7 @@ async function sendTemplatedNotification({ to, template, title, message, data = 
  */
 async function sendB2BJobCompletionEmail(companyEmail, companyName, job, engineerName) {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    if (!isConfigured()) {
       console.log(`[EMAIL] B2B job completion email skipped (no email config) for ${companyEmail}`);
       return;
     }
@@ -650,7 +742,7 @@ async function sendB2BJobCompletionEmail(companyEmail, companyName, job, enginee
 
     const transporter = createTransporter();
     await transporter.sendMail({
-      from: `"TazkY Operations" <${process.env.EMAIL_USER}>`,
+      from: mailFrom(),
       to: companyEmail,
       subject: `✅ Job Completed — ${job.jobId} | TazkY B2B Platform`,
       html: emailWrapper(content, 'Job Completed', `Your service request ${job.jobId} has been completed.`)

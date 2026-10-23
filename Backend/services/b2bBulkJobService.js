@@ -611,6 +611,32 @@ const geocodeRow = async (row) => {
   return coords || null;
 };
 
+/** Email the company about a finished/failed upload. Never throws. */
+const mailBatchOutcome = (batch, outcome, extra = {}) => {
+  try {
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    const eventKey = outcome === 'completed' ? 'B2B_UPLOAD_COMPLETED' : 'B2B_VALIDATION_FAILED';
+    emitAsync(eventKey, {
+      targets: { b2bCompanyId: batch.companyId },
+      data: {
+        b2bCompanyId: String(batch.companyId),
+        entityId: `${batch._id}:${outcome}`,
+        batchCode: batch.batchId,
+        fileName: batch.fileName,
+        totalRows: batch.totalRows,
+        validRows: batch.validRows,
+        invalidRows: batch.invalidRows,
+        createdJobs: batch.createdJobsCount,
+        failedJobs: batch.failedJobs,
+        reason: batch.failureReason || undefined,
+        ...extra
+      }
+    });
+  } catch (err) {
+    console.warn('[Bulk] outcome email skipped:', err.message);
+  }
+};
+
 /**
  * Validate B2B Batch (BullMQ Task)
  */
@@ -1015,6 +1041,7 @@ const processValidation = async (batchId, app) => {
     }
 
     console.log(`[Validation] Completed Batch: ${batchId}. Valid: ${validRows}, Invalid: ${invalidRows}`);
+    if (invalidRows > 0 || duplicates > 0) mailBatchOutcome(batch, 'validated');
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:validationCompleted', {
       batchId,
       total: totalRows,
@@ -1041,6 +1068,7 @@ const processValidation = async (batchId, app) => {
     batch.failedAt = new Date();
     batch.failureReason = safeMessage;
     await batch.save();
+    mailBatchOutcome(batch, 'failed');
 
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:validationFailed', {
       batchId,
@@ -1281,6 +1309,7 @@ const processJobCreation = async (batchId, app) => {
       batch.failureReason = 'No valid jobs found in this batch to create. Download the error report for details.';
       await batch.save();
       terminatedCleanly = true;
+      mailBatchOutcome(batch, 'failed');
 
       emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:uploadFailed', {
         batchId,
@@ -1428,6 +1457,7 @@ const processJobCreation = async (batchId, app) => {
       : null;
     await batch.save();
     terminatedCleanly = true;
+    mailBatchOutcome(batch, 'completed');
 
     if (newTxn) {
       // The reservation row is returned as a plain object by the ledger.
@@ -1540,6 +1570,7 @@ const processJobCreation = async (batchId, app) => {
     batch.failureReason = safeMessage;
     await batch.save();
     terminatedCleanly = true;
+    mailBatchOutcome(batch, 'failed');
 
     emitSocket(app, `b2b:${batch.companyId.toString()}`, 'b2b:uploadFailed', {
       batchId,

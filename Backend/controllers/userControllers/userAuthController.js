@@ -261,11 +261,6 @@ const register = async (req, res) => {
       isEmailVerified: email ? false : true
     });
 
-    // Send Welcome Email via Queue (Scaling)
-    if (email) {
-      const { enqueueRegistrationTask } = require('../../queues/registrationQueue');
-      await enqueueRegistrationTask('WELCOME_NOTIFICATION', { email: email, name: name, type: 'user' });
-    }
 
     // Generate JWT tokens with session
     const loginSessionId = Date.now().toString();
@@ -293,6 +288,12 @@ const register = async (req, res) => {
           email: user.email
         }
       });
+      if (user.email) {
+        emitAsync('account_welcome', {
+          targets: { userId: user._id },
+          data: { variant: 'user', name: user.name, email: user.email, phone: user.phone, statusLabel: 'Active' }
+        });
+      }
     } catch (_) { /* non-blocking */ }
 
     res.status(201).json({

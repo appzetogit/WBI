@@ -127,11 +127,31 @@ const updateProfile = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Current password is required to set new password' });
     }
 
+    const previousEmail = admin.email;
+
     // Update fields
     if (email) admin.email = email;
     if (newPassword) admin.password = newPassword;
 
     await admin.save();
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      if (newPassword) {
+        emitAsync('password_changed', {
+          targets: { emails: [{ role: 'admin', email: admin.email }] },
+          data: { method: 'change', at: new Date().toISOString(), name: admin.name, ip: req.ip, device: String(req.headers['user-agent'] || '').slice(0, 120) || undefined }
+        });
+      }
+      if (email && previousEmail && email.toLowerCase() !== String(previousEmail).toLowerCase()) {
+        emitAsync('profile_updated', {
+          targets: { emails: [{ role: 'admin', email: previousEmail }] },
+          data: { name: admin.name, changes: [`Login email changed to ${email}`], changedBy: 'You' }
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('admin security notify failed:', notifyErr.message);
+    }
 
     res.status(200).json({
       success: true,

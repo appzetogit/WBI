@@ -454,6 +454,34 @@ exports.getMemberProfile = async (req, res) => {
   }
 };
 
+/** Email a roster member (they have no WBI login). Never throws. */
+const mailMember = async (vendorId, member, change, { title, message, tone, rows, leaveId } = {}) => {
+  const email = String(member?.email || '').trim().toLowerCase();
+  if (!email) return;
+  try {
+    const Vendor = require('../../models/Vendor');
+    const vendor = await Vendor.findById(vendorId).select('businessName name').lean();
+    const vendorName = vendor ? (vendor.businessName || vendor.name) : undefined;
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    emitAsync('team_member_update', {
+      targets: { emails: [{ role: 'vendor', email }] },
+      data: {
+        change,
+        memberId: String(member._id),
+        leaveId: leaveId ? String(leaveId) : undefined,
+        name: member.name,
+        vendorName,
+        title,
+        message,
+        tone,
+        rows: rows || [['Company', vendorName]]
+      }
+    });
+  } catch (err) {
+    console.warn('[team] member email skipped:', err.message);
+  }
+};
+
 exports.addMember = async (req, res) => {
   try {
     const vendorId = req.user.id;
@@ -480,6 +508,12 @@ exports.addMember = async (req, res) => {
     });
 
     await logActivity(vendorId, member._id, 'Member Added', `Added new team member: ${name}`);
+    mailMember(vendorId, member, 'added', {
+      title: 'You were added to a team',
+      message: 'You have been added as a team member. Your company will share any further details with you directly.',
+      tone: 'success',
+      rows: [['Employee ID', member.employeeId], ['Designation', member.designation], ['Joining date', member.joiningDate ? new Date(member.joiningDate).toLocaleDateString('en-IN') : undefined]]
+    });
     res.status(201).json({ success: true, data: member });
   } catch (error) {
     console.error('[addMember Error]', error);
@@ -511,6 +545,11 @@ exports.deleteMember = async (req, res) => {
     // Soft delete
     await VendorTeamMember.findByIdAndUpdate(req.params.id, { isActive: false });
     await logActivity(vendorId, req.params.id, 'Member Deactivated', `Deactivated: ${member.name}`);
+    mailMember(vendorId, member, 'deactivated', {
+      title: 'Your team membership was deactivated',
+      message: 'Your company has deactivated your team membership.',
+      tone: 'warning'
+    });
     res.json({ success: true, message: 'Member deactivated successfully' });
   } catch (error) {
     console.error('[deleteMember Error]', error);
@@ -788,6 +827,13 @@ exports.applyLeave = async (req, res) => {
   }
 };
 
+const leaveRows = (leave) => [
+  ['Leave type', leave.leaveType],
+  ['From', leave.startDate ? new Date(leave.startDate).toLocaleDateString('en-IN') : undefined],
+  ['To', leave.endDate ? new Date(leave.endDate).toLocaleDateString('en-IN') : undefined],
+  ['Days', leave.days]
+];
+
 exports.approveLeave = async (req, res) => {
   try {
     const vendorId = req.user.id;
@@ -798,7 +844,14 @@ exports.approveLeave = async (req, res) => {
       { new: true }
     );
     if (!leave) return res.status(404).json({ success: false, message: 'Leave request not found' });
-    await VendorTeamMember.findByIdAndUpdate(leave.memberId, { availabilityStatus: 'On Leave' });
+    const leaveMember = await VendorTeamMember.findByIdAndUpdate(leave.memberId, { availabilityStatus: 'On Leave' }).select('name email').lean();
+    mailMember(vendorId, leaveMember && { ...leaveMember }, 'leave_approved', {
+      leaveId: leave._id,
+      title: 'Your leave was approved',
+      message: 'Your leave request has been approved.',
+      tone: 'success',
+      rows: leaveRows(leave)
+    });
     res.json({ success: true, data: leave });
   } catch (error) {
     console.error('[approveLeave Error]', error);
@@ -816,6 +869,14 @@ exports.rejectLeave = async (req, res) => {
       { new: true }
     );
     if (!leave) return res.status(404).json({ success: false, message: 'Leave request not found' });
+    const leaveMember = await VendorTeamMember.findById(leave.memberId).select('name email').lean();
+    mailMember(vendorId, leaveMember, 'leave_rejected', {
+      leaveId: leave._id,
+      title: 'Your leave request was declined',
+      message: 'Your leave request could not be approved.',
+      tone: 'danger',
+      rows: [...leaveRows(leave), ['Reason', leave.rejectionReason]]
+    });
     res.json({ success: true, data: leave });
   } catch (error) {
     console.error('[rejectLeave Error]', error);

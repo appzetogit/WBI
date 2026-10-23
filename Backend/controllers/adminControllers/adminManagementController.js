@@ -4,6 +4,23 @@ const { validationResult } = require('express-validator');
 /**
  * Get all admins (Super Admin only)
  */
+const roleLabel = (key) => String(key || 'admin').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+/** Email an admin about their own account. Never throws. */
+const mailAdmin = (eventKey, admin, extra = {}, { emailOnly = false } = {}) => {
+  if (!admin?.email) return;
+  try {
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    const data = { adminId: String(admin._id), name: admin.name, email: admin.email, ...extra };
+    emitAsync(eventKey, {
+      targets: { emails: [{ role: 'admin', email: admin.email }] },
+      data
+    });
+  } catch (err) {
+    console.warn(`${eventKey} email skipped:`, err.message);
+  }
+};
+
 const getAllAdmins = async (req, res) => {
   try {
     const admins = await Admin.find()
@@ -54,6 +71,12 @@ const createAdmin = async (req, res) => {
       role: role || 'admin',
       cityId: cityId || null,
       cityName: cityName || ''
+    });
+
+    mailAdmin('admin_account_created', admin, {
+      roleLabel: roleLabel(admin.role),
+      cityName: admin.cityName || undefined,
+      createdBy: req.user?.name || 'A super admin'
     });
 
     res.status(201).json({
@@ -107,6 +130,11 @@ const deleteAdmin = async (req, res) => {
     }
 
     await Admin.findByIdAndDelete(id);
+    mailAdmin('admin_account_changed', admin, {
+      change: 'removed',
+      previousRoleLabel: roleLabel(admin.role),
+      changedBy: req.user?.name || 'A super admin'
+    });
 
     res.status(200).json({
       success: true,
@@ -142,6 +170,7 @@ const updateAdminRole = async (req, res) => {
       });
     }
 
+    const previous = await Admin.findById(id).select('role').lean();
     const admin = await Admin.findByIdAndUpdate(
       id,
       { role },
@@ -152,6 +181,15 @@ const updateAdminRole = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: 'Admin not found'
+      });
+    }
+
+    if (previous && previous.role !== admin.role) {
+      mailAdmin('admin_account_changed', admin, {
+        change: 'role',
+        previousRoleLabel: roleLabel(previous.role),
+        roleLabel: roleLabel(admin.role),
+        changedBy: req.user?.name || 'A super admin'
       });
     }
 

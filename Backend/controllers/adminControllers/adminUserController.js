@@ -5,6 +5,26 @@ const { validationResult } = require('express-validator');
 /**
  * Get all users with filters and pagination
  */
+/** Email the customer about an admin status change. Never throws. */
+const notifyUserStatus = (user, status, reason) => {
+  if (!user.email) return;
+  try {
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    emitAsync('account_status_changed', {
+      targets: { userId: user._id },
+      data: {
+        status,
+        reason: reason ? String(reason).trim() : undefined,
+        name: user.name,
+        accountLabel: 'Customer account',
+        changedBy: 'WBI support team'
+      }
+    });
+  } catch (err) {
+    console.warn('user status notify failed:', err.message);
+  }
+};
+
 const getAllUsers = async (req, res) => {
   try {
     const {
@@ -150,8 +170,10 @@ const toggleUserStatus = async (req, res) => {
       });
     }
 
+    const wasActive = user.isActive;
     user.isActive = isActive !== undefined ? isActive : !user.isActive;
     await user.save();
+    if (wasActive !== user.isActive) notifyUserStatus(user, user.isActive ? 'reactivated' : 'blocked', req.body?.reason);
 
     res.status(200).json({
       success: true,
@@ -186,6 +208,7 @@ const deleteUser = async (req, res) => {
     // Soft delete
     user.isActive = false;
     await user.save();
+    notifyUserStatus(user, 'deleted', req.body?.reason);
 
     res.status(200).json({
       success: true,

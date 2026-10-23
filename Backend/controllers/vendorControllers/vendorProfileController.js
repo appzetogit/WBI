@@ -212,7 +212,9 @@ const updateProfile = async (req, res) => {
       }
     }
 
+    const profileChangeList = require('../../services/notification/profileChangeNotice').profileChanges(vendor);
     await vendor.save();
+    require('../../services/notification/profileChangeNotice').notifyProfileChange({ role: 'vendor', id: vendor._id, name: vendor.name, changes: profileChangeList });
 
     res.status(200).json({
       success: true,
@@ -344,11 +346,19 @@ const deleteAccount = async (req, res) => {
     const vendorId = req.user.id;
     
     // Instead of hard delete, we mark as inactive or deleted
-    await Vendor.findByIdAndUpdate(vendorId, {
+    const deleted = await Vendor.findByIdAndUpdate(vendorId, {
       status: 'inactive',
       approvalStatus: 'suspended',
       isDeleted: true
-    });
+    }).select('name businessName email').lean();
+
+    if (deleted?.email) {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('account_status_changed', {
+        targets: { emails: [{ role: 'vendor', email: deleted.email }] },
+        data: { status: 'deleted', name: deleted.name, accountLabel: deleted.businessName || deleted.name, changedBy: 'You' }
+      });
+    }
 
     res.status(200).json({ success: true, message: 'Account deleted successfully' });
   } catch (error) {

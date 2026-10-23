@@ -21,6 +21,9 @@ const PRIORITY = { HIGH: 'high', MEDIUM: 'medium', LOW: 'low' };
  * @property {(data: object) => string} message
  * @property {(data: object, role: string) => string|null} actionUrl
  * @property {(data: object, role: string, id: string) => string} dedupe
+ * @property {(data: object, role: string) => object} [email] - email presentation (badge, tone, rows, ctaLabel, ...)
+ * @property {RecipientRole[]} [emailRoles] - only these recipients get the email channel
+ * @property {'company'} [emailScope] - B2B: one email to the company contact instead of every member
  */
 
 /** @type {Record<string, EventDef>} */
@@ -45,7 +48,13 @@ const EVENT_CATALOG = {
     title: (d) => 'New vendor registration',
     message: (d) => `${d.businessName || d.name || 'Vendor'} submitted onboarding for review.`,
     actionUrl: () => '/admin/vendors/all',
-    dedupe: (d, role, id) => `vendor_registered:${d.vendorId || d.entityId}:${id}`
+    dedupe: (d, role, id) => `vendor_registered:${d.vendorId || d.entityId}:${id}`,
+    email: (d) => ({
+      badge: 'New registration',
+      tone: 'info',
+      rows: [['Business', d.businessName], ['Contact', d.name], ['Mobile', d.phone], ['Email', d.email]],
+      ctaLabel: 'Review vendor'
+    })
   },
   b2b_registered: {
     recipients: ['admin'],
@@ -56,8 +65,14 @@ const EVENT_CATALOG = {
     fallbackOnPushFail: true,
     title: (d) => 'New B2B company registration',
     message: (d) => `${d.companyName || 'A company'} registered for enterprise onboarding.`,
-    actionUrl: () => '/admin/b2b',
-    dedupe: (d, role, id) => `b2b_registered:${d.companyId || d.entityId}:${id}`
+    actionUrl: () => '/admin/b2b-companies',
+    dedupe: (d, role, id) => `b2b_registered:${d.companyId || d.entityId}:${id}`,
+    email: (d) => ({
+      badge: 'New registration',
+      tone: 'info',
+      rows: [['Company', d.companyName], ['GSTIN', d.gstNumber], ['Contact', d.contactName], ['Mobile', d.phone], ['Email', d.email]],
+      ctaLabel: 'Review company'
+    })
   },
   vendor_approved: {
     recipients: ['vendor'],
@@ -70,7 +85,17 @@ const EVENT_CATALOG = {
     title: () => 'Vendor registration approved',
     message: () => 'Your vendor registration has been approved. You can now start accepting bookings.',
     actionUrl: () => 'dashboard',
-    dedupe: (d, role, id) => `vendor_approved:${id}`
+    dedupe: (d, role, id) => `vendor_approved:${id}`,
+    email: (d) => ({
+      subject: 'Your vendor account is approved',
+      badge: 'Approved',
+      tone: 'success',
+      greeting: d.name ? `Hi ${d.name},` : undefined,
+      paragraphs: ['Congratulations — your vendor registration has been approved. You can now sign in, set up your services and team, and start receiving jobs.'],
+      rows: [['Business', d.businessName], ['Company code', d.companyCode]],
+      note: d.companyCode ? 'Share your company code with your engineers so they can join your team.' : undefined,
+      ctaLabel: 'Go to dashboard'
+    })
   },
   vendor_rejected: {
     recipients: ['vendor'],
@@ -83,7 +108,17 @@ const EVENT_CATALOG = {
     title: () => 'Vendor registration rejected',
     message: (d) => d.reason || 'Your vendor registration was rejected. Please contact support.',
     actionUrl: () => 'pending-approval',
-    dedupe: (d, role, id) => `vendor_rejected:${id}`
+    dedupe: (d, role, id) => `vendor_rejected:${id}`,
+    email: (d) => ({
+      subject: 'Update on your vendor application',
+      badge: 'Not approved',
+      tone: 'danger',
+      greeting: d.name ? `Hi ${d.name},` : undefined,
+      paragraphs: ['We reviewed your vendor registration and could not approve it at this time.'],
+      rows: [['Reason', d.reason || 'Not specified']],
+      note: 'You can correct the details mentioned above and contact support to request another review.',
+      ctaLabel: 'View application'
+    })
   },
   engineer_approved: {
     recipients: ['engineer'],
@@ -95,7 +130,14 @@ const EVENT_CATALOG = {
     title: () => 'Account approved',
     message: (d) => d.message || 'Your engineer account has been approved. You can now receive jobs.',
     actionUrl: () => '/engineer/dashboard',
-    dedupe: (d, role, id) => `engineer_approved:${id}`
+    dedupe: (d, role, id) => `engineer_approved:${id}`,
+    email: (d) => ({
+      subject: 'Your engineer account is approved',
+      badge: 'Approved',
+      tone: 'success',
+      greeting: d.name ? `Hi ${d.name},` : undefined,
+      ctaLabel: 'Open engineer app'
+    })
   },
   engineer_vendor_approved: {
     recipients: ['engineer'],
@@ -220,7 +262,8 @@ const EVENT_CATALOG = {
   },
   leave_updated: {
     recipients: ['engineer', 'vendor'],
-    channels: ['in_app', 'push'],
+    channels: ['in_app', 'push', 'email'],
+    emailRoles: ['engineer'],
     priority: PRIORITY.MEDIUM,
     category: 'jobs',
     title: (d) => d.title || 'Leave update',
@@ -256,7 +299,8 @@ const EVENT_CATALOG = {
   },
   support_ticket_updated: {
     recipients: ['vendor', 'user', 'b2b', 'admin'],
-    channels: ['in_app', 'push'],
+    channels: ['in_app', 'push', 'email'],
+    emailScope: 'company',
     priority: PRIORITY.MEDIUM,
     category: 'account',
     title: (d) => d.title || 'Support ticket update',
@@ -305,7 +349,7 @@ const jobLink = (d, role) => {
   if (!id) return null;
   if (role === 'admin') return `/admin/jobs/${id}`;
   if (role === 'vendor') return `/vendor/jobs?job=${id}`;
-  if (role === 'engineer') return `/jobs/${id}`;
+  if (role === 'engineer') return `/b2b-jobs/${id}`;
   return `/b2b/jobs?job=${id}`;
 };
 
@@ -313,6 +357,7 @@ const jobDedupe = (key) => (d, role, id) => `${key}:${d.jobId || d.entityId}:${r
 
 const B2B_LIFECYCLE_EVENTS = {
   B2B_UPLOAD_COMPLETED: {
+    emailScope: 'company',
     recipients: ['b2b'],
     channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.MEDIUM,
@@ -320,9 +365,24 @@ const B2B_LIFECYCLE_EVENTS = {
     title: () => 'Bulk upload processed',
     message: (d) => d.message || `${d.createdJobs || 0} job(s) created from ${d.fileName || 'your upload'}.`,
     actionUrl: () => '/b2b/bulk-jobs',
-    dedupe: jobDedupe('b2b_upload_completed')
+    dedupe: jobDedupe('b2b_upload_completed'),
+    email: (d) => ({
+      subject: `Bulk upload processed — ${d.createdJobs || 0} job(s) created`,
+      badge: 'Bulk upload',
+      tone: d.failedJobs ? 'warning' : 'success',
+      rows: [
+        ['Batch', d.batchCode],
+        ['File', d.fileName],
+        ['Jobs created', d.createdJobs],
+        ['Rows not created', d.failedJobs || undefined],
+        ['Total rows', d.totalRows]
+      ],
+      note: d.failedJobs ? 'Download the error report from the Bulk Jobs page to fix and re-upload the rows that failed.' : undefined,
+      ctaLabel: 'View bulk jobs'
+    })
   },
   B2B_VALIDATION_FAILED: {
+    emailScope: 'company',
     recipients: ['b2b'],
     channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.HIGH,
@@ -330,9 +390,24 @@ const B2B_LIFECYCLE_EVENTS = {
     title: () => 'Upload needs attention',
     message: (d) => d.message || `${d.invalidRows || 0} row(s) could not be accepted. Download the error report.`,
     actionUrl: () => '/b2b/bulk-jobs',
-    dedupe: jobDedupe('b2b_validation_failed')
+    dedupe: jobDedupe('b2b_validation_failed'),
+    email: (d) => ({
+      subject: d.invalidRows ? `Bulk upload needs attention — ${d.invalidRows} row(s) rejected` : 'Bulk upload could not be processed',
+      badge: 'Needs attention',
+      tone: 'danger',
+      rows: [
+        ['Batch', d.batchCode],
+        ['File', d.fileName],
+        ['Valid rows', d.validRows],
+        ['Rejected rows', d.invalidRows || undefined],
+        ['Reason', d.reason]
+      ],
+      note: 'Download the error report from the Bulk Jobs page, correct the highlighted rows and upload again.',
+      ctaLabel: 'Open bulk jobs'
+    })
   },
   PAYMENT_SUCCESS: {
+    emailScope: 'company',
     recipients: ['b2b'],
     channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.MEDIUM,
@@ -340,9 +415,25 @@ const B2B_LIFECYCLE_EVENTS = {
     title: () => 'Payment received',
     message: (d) => d.message || `₹${Number(d.amount || 0).toLocaleString('en-IN')} credited to your wallet.`,
     actionUrl: () => '/b2b/wallet',
-    dedupe: (d, role, id) => `payment_success:${d.transactionId || d.entityId}:${id}`
+    dedupe: (d, role, id) => `payment_success:${d.transactionId || d.entityId}:${id}`,
+    email: (d) => ({
+      subject: `Payment received — ₹${Number(d.amount || 0).toLocaleString('en-IN')} added to your wallet`,
+      badge: d.simulated ? 'Test payment' : 'Payment received',
+      tone: 'success',
+      rowsTitle: 'Receipt',
+      rows: [
+        ['Amount', `₹${Number(d.amount || 0).toLocaleString('en-IN')}`],
+        ['Wallet balance', d.balance !== undefined ? `₹${Number(d.balance).toLocaleString('en-IN')}` : undefined],
+        ['Payment ID', d.paymentId],
+        ['Transaction', d.transactionId],
+        ['Date', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })]
+      ],
+      note: d.simulated ? 'This was a test-mode payment; no real money was charged.' : undefined,
+      ctaLabel: 'View wallet'
+    })
   },
   PAYMENT_FAILED: {
+    emailScope: 'company',
     recipients: ['b2b'],
     channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.HIGH,
@@ -350,7 +441,17 @@ const B2B_LIFECYCLE_EVENTS = {
     title: () => 'Payment failed',
     message: (d) => d.message || 'A wallet payment could not be completed.',
     actionUrl: () => '/b2b/wallet',
-    dedupe: (d, role, id) => `payment_failed:${d.transactionId || d.entityId}:${id}`
+    dedupe: (d, role, id) => `payment_failed:${d.transactionId || d.entityId}:${id}`,
+    email: (d) => ({
+      badge: 'Payment failed',
+      tone: 'danger',
+      rows: [
+        ['Amount', `₹${Number(d.amount || 0).toLocaleString('en-IN')}`],
+        ['Payment ID', d.paymentId],
+        ['Transaction', d.transactionId]
+      ],
+      ctaLabel: 'Try again'
+    })
   },
   JOB_CREATED: {
     recipients: ['b2b'],
@@ -384,7 +485,8 @@ const B2B_LIFECYCLE_EVENTS = {
   },
   ENGINEER_ASSIGNED: {
     recipients: ['b2b', 'engineer', 'vendor'],
-    channels: ['in_app', 'push'],
+    channels: ['in_app', 'push', 'email'],
+    emailRoles: ['engineer'],
     priority: PRIORITY.HIGH,
     category: 'job',
     title: () => 'Engineer assigned',
@@ -464,6 +566,7 @@ const B2B_LIFECYCLE_EVENTS = {
     dedupe: jobDedupe('work_started')
   },
   WORK_COMPLETED: {
+    emailScope: 'company',
     recipients: ['b2b'],
     channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.MEDIUM,
@@ -474,6 +577,7 @@ const B2B_LIFECYCLE_EVENTS = {
     dedupe: jobDedupe('work_completed')
   },
   JOB_CLOSED: {
+    emailScope: 'company',
     recipients: ['b2b'],
     channels: ['in_app', 'email'],
     priority: PRIORITY.LOW,
@@ -484,6 +588,7 @@ const B2B_LIFECYCLE_EVENTS = {
     dedupe: jobDedupe('job_closed')
   },
   SLA_BREACH: {
+    emailScope: 'company',
     recipients: ['b2b', 'admin', 'vendor'],
     channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.HIGH,
@@ -496,7 +601,7 @@ const B2B_LIFECYCLE_EVENTS = {
   },
   SETTLEMENT_CREATED: {
     recipients: ['vendor', 'engineer'],
-    channels: ['in_app', 'push'],
+    channels: ['in_app', 'push', 'email'],
     priority: PRIORITY.MEDIUM,
     category: 'payment',
     title: () => 'Settlement created',
@@ -519,6 +624,7 @@ const B2B_LIFECYCLE_EVENTS = {
 };
 
 Object.assign(EVENT_CATALOG, B2B_LIFECYCLE_EVENTS);
+Object.assign(EVENT_CATALOG, require('./accountEvents').ACCOUNT_EVENTS);
 
 function getEventDef(eventKey) {
   return EVENT_CATALOG[eventKey] || null;

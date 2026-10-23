@@ -74,6 +74,20 @@ const getOnboardingDetail = async (req, res) => {
   }
 };
 
+/** In-app notice to members + one email to the company contact. Never throws. */
+const notifyCompany = async (eventKey, companyId, extra = {}) => {
+  try {
+    const company = await B2BCompany.findById(companyId).select('companyName').lean();
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    emitAsync(eventKey, {
+      targets: { b2bCompanyId: companyId },
+      data: { companyId: String(companyId), companyName: company?.companyName, ...extra }
+    });
+  } catch (err) {
+    console.warn(`${eventKey} notify failed:`, err.message);
+  }
+};
+
 const reviewAction = async (req, res) => {
   try {
     const { companyId } = req.params;
@@ -84,6 +98,8 @@ const reviewAction = async (req, res) => {
       note,
       adminId: req.user?.id
     });
+    const decisionLabel = /_reject$/.test(action) ? 'rejected' : action === 'hold' ? 'put on hold' : action === 'admin_approve' ? 'approved' : null;
+    if (decisionLabel) notifyCompany('b2b_onboarding_reviewed', companyId, { action, decisionLabel, remarks: note || undefined });
     res.json({ success: true, data: onboarding });
   } catch (error) {
     res.status(error.statusCode || 400).json({
@@ -103,6 +119,7 @@ const verifyDocument = async (req, res) => {
       { new: true }
     );
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+    notifyCompany('b2b_verification_updated', companyId, { subject: String(doc.documentType || 'Document').replace(/_/g, ' '), status: 'verified' });
     res.json({ success: true, data: doc });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -118,6 +135,7 @@ const rejectDocument = async (req, res) => {
       { new: true }
     );
     if (!doc) return res.status(404).json({ success: false, message: 'Document not found' });
+    notifyCompany('b2b_verification_updated', companyId, { subject: String(doc.documentType || 'Document').replace(/_/g, ' '), status: 'rejected', reason: doc.rejectionReason });
     res.json({ success: true, data: doc });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

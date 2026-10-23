@@ -13,6 +13,30 @@ const actorId = (req) => req.user?._id || req.user?.id || null;
 /**
  * Get all B2B Companies with filters and pagination
  */
+const DOC_LABELS = { gst: 'GST certificate', pan: 'PAN card', cin: 'Certificate of incorporation', tan: 'TAN', cancelled_cheque: 'Cancelled cheque' };
+const docLabel = (type) => DOC_LABELS[String(type || '').toLowerCase()] || String(type || 'Document').replace(/_/g, ' ');
+
+/**
+ * In-app notice to every member plus one email to the company contact.
+ * Never throws.
+ */
+const notifyCompany = (eventKey, company, extra = {}) => {
+  try {
+    const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+    emitAsync(eventKey, {
+      targets: { b2bCompanyId: company._id },
+      data: {
+        companyId: String(company._id),
+        companyName: company.companyName,
+        gstNumber: company.gstNumber,
+        ...extra
+      }
+    });
+  } catch (err) {
+    console.warn(`${eventKey} notify failed:`, err.message);
+  }
+};
+
 const getAllCompanies = async (req, res) => {
   try {
     const {
@@ -139,6 +163,8 @@ const approveCompany = async (req, res) => {
       req
     });
 
+    notifyCompany('b2b_company_reviewed', company, { approved: true });
+
     return res.status(200).json({
       success: true,
       message: 'B2B company approved successfully',
@@ -237,6 +263,8 @@ const rejectCompany = async (req, res) => {
       req
     });
 
+    notifyCompany('b2b_company_reviewed', company, { approved: false, reason: rejectionReason, rejectedDocuments: rejectedDocuments || [] });
+
     return res.status(200).json({
       success: true,
       message: 'B2B company rejected successfully',
@@ -334,6 +362,8 @@ const verifyCompany = async (req, res) => {
       }
     );
 
+    notifyCompany('b2b_company_reviewed', company, { approved: true });
+
     return res.status(200).json({
       success: true,
       message: 'B2B Company verified successfully',
@@ -373,6 +403,8 @@ const verifyCompanyDocument = async (req, res) => {
         await company.save();
       }
     }
+
+    if (company) notifyCompany('b2b_verification_updated', company, { subject: docLabel(doc.documentType), status: 'verified' });
 
     return res.status(200).json({
       success: true,
@@ -417,6 +449,8 @@ const rejectCompanyDocument = async (req, res) => {
       }
     }
 
+    if (company) notifyCompany('b2b_verification_updated', company, { subject: docLabel(doc.documentType), status: 'rejected', reason: rejectionReason });
+
     return res.status(200).json({
       success: true,
       message: 'Document rejected successfully',
@@ -443,6 +477,9 @@ const verifyCompanyBank = async (req, res) => {
     bankAccount.verificationStatus = 'verified';
     bankAccount.verifiedAt = new Date();
     await bankAccount.save();
+    B2BCompany.findById(companyId).select('companyName email').lean()
+      .then((c) => c && notifyCompany('b2b_verification_updated', c, { subject: 'Bank account', status: 'verified' }))
+      .catch(() => {});
 
     return res.status(200).json({
       success: true,
@@ -488,6 +525,25 @@ const updateCompanyUserStatus = async (req, res) => {
     const from = user.status;
     user.status = status;
     await user.save();
+    if (from !== status) {
+      try {
+        const company = await B2BCompany.findById(companyId).select('companyName').lean();
+        const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+        emitAsync('b2b_member_updated', {
+          targets: { b2bUserId: user._id },
+          data: {
+            change: `status:${status}`,
+            name: user.fullName,
+            companyName: company?.companyName,
+            role: user.role,
+            status,
+            changedBy: 'WBI admin team',
+            title: status === 'active' ? 'Your access was restored' : 'Your access was ' + (status === 'blocked' ? 'blocked' : 'deactivated'),
+            message: `WBI changed your ${company?.companyName || 'company'} workspace access to ${status}.`
+          }
+        });
+      } catch (e) { console.warn('b2b user status notify failed:', e.message); }
+    }
 
     await logAudit({
       actionType: 'B2B_USER_STATUS_CHANGED',
@@ -560,6 +616,10 @@ const setCompanyStatus = async (req, res) => {
       reason: reason || '',
       req
     });
+
+    if (from !== next) {
+      notifyCompany('b2b_company_status_changed', company, { status: next, previousStatus: from, reason: company.statusReason || undefined });
+    }
 
     return res.status(200).json({
       success: true,

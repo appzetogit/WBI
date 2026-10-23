@@ -371,6 +371,22 @@ const register = async (req, res) => {
     delete workerRes.__v;
     workerRes.id = worker._id;
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('worker_registered', {
+        targets: { notifyAllAdmins: true },
+        data: { workerId: worker._id, name: worker.name, phone: worker.phone, email: worker.email, city: worker.address?.city }
+      });
+      if (worker.email) {
+        emitAsync('account_welcome', {
+          targets: { workerId: worker._id },
+          data: { variant: 'worker', name: worker.name, email: worker.email, phone: worker.phone }
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('[Worker Register] notifications failed:', notifyErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Registration successful. Account pending approval.',

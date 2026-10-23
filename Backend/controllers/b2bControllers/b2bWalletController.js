@@ -376,6 +376,18 @@ const verifyTopupPayment = async (req, res) => {
         transactionId,
         message: 'Payment verification signature mismatches'
       });
+      try {
+        require('../../services/notification/notificationOrchestrator.service').emitAsync('PAYMENT_FAILED', {
+          targets: { b2bCompanyId: txn.companyId },
+          data: {
+            b2bCompanyId: String(txn.companyId),
+            transactionId: String(txn._id),
+            amount: txn.amount,
+            paymentId: razorpayPaymentId,
+            message: `A wallet top-up of ₹${Number(txn.amount || 0).toLocaleString('en-IN')} could not be verified. If money was debited, it will be refunded by your bank.`
+          }
+        });
+      } catch (_) { /* non-blocking */ }
 
       return res.status(400).json({ success: false, message: 'Payment verification failed' });
     }
@@ -476,6 +488,19 @@ const verifyTopupPayment = async (req, res) => {
       transactionId,
       amount: txn.amount
     });
+    try {
+      require('../../services/notification/notificationOrchestrator.service').emitAsync('PAYMENT_SUCCESS', {
+        targets: { b2bCompanyId: txn.companyId },
+        data: {
+          b2bCompanyId: String(txn.companyId),
+          transactionId: String(txn._id),
+          amount: txn.amount,
+          balance: wallet.balance,
+          paymentId: razorpayPaymentId,
+          simulated
+        }
+      });
+    } catch (_) { /* non-blocking */ }
     emitWalletEvent(req, 'admin:b2bWalletUpdated', 'admin', {
       companyId: txn.companyId,
       balance: wallet.balance

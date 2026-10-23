@@ -308,6 +308,21 @@ const requestWithdrawal = async (req, res) => {
       });
     }
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      emitAsync('withdrawal_status_updated', {
+        targets: { workerId: worker._id },
+        data: {
+          withdrawalId: String(withdrawal._id),
+          status: 'requested',
+          statusLabel: 'requested',
+          amount: withdrawal.amount,
+          netAmount: withdrawal.netAmount || undefined,
+          accountMasked: withdrawal.bankDetails?.accountNumberMasked || undefined
+        }
+      });
+    } catch (_) { /* non-blocking */ }
+
     res.status(200).json({ success: true, message: 'Withdrawal request submitted', data: withdrawal });
   } catch (error) {
     console.error('Request withdrawal error:', error);

@@ -67,7 +67,7 @@ class CgpeService {
               'x-api-secret': this.clientSecret || ''
             };
 
-      const response = await axios.post(`${this.baseUrl}${endpoint}`, { ...data }, { headers, httpsAgent });
+      const response = await axios.post(`${this.baseUrl}${endpoint}`, { ...data }, { headers, httpsAgent, timeout: 20000 });
       
       if (response.data && (response.data.status === 'FAILED' || response.data.success === false)) {
         const errorMsg = response.data.message || response.data.error || 'Verification failed at provider end';

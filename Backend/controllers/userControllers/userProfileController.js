@@ -147,6 +147,20 @@ const updateProfile = async (req, res) => {
 
     console.log('[Profile Update] Updated user:', updatedUser?.name, updatedUser?.email);
 
+    {
+      const changes = [];
+      if (updateData.name !== undefined && updateData.name !== user.name) changes.push('Name');
+      const emailChanged = 'email' in updateData && (updateData.email || null) !== (user.email || null);
+      if (emailChanged) changes.push(updateData.email ? `Email address (now ${updateData.email})` : 'Email address removed');
+      if (updateData.profilePhoto !== undefined && updateData.profilePhoto !== user.profilePhoto) changes.push('Profile photo');
+      const notice = require('../../services/notification/profileChangeNotice');
+      if (updatedUser?.email) notice.notifyProfileChange({ role: 'user', id: updatedUser._id, name: updatedUser.name, changes });
+      // The previous address is told too when the email itself changed.
+      if (emailChanged && user.email) {
+        notice.notifyProfileChange({ role: 'user', id: user._id, name: user.name, changes, email: user.email });
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',

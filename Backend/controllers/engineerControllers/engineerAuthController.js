@@ -545,7 +545,55 @@ const register = async (req, res) => {
     // Enqueue Heavy Operations to BullMQ (Scaling)
     const { enqueueRegistrationTask } = require('../../queues/registrationQueue');
     await enqueueRegistrationTask('KYC_VERIFICATION', { engineerId: engineer._id });
-    await enqueueRegistrationTask('WELCOME_NOTIFICATION', { phone: engineer.phone, email: engineer.email });
+
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      const isVendorEngineer = engineer.engineerType === 'vendor_engineer';
+      const linkedVendor = vendorId
+        ? await Vendor.findById(vendorId).select('businessName name').lean()
+        : null;
+      const vendorName = linkedVendor ? (linkedVendor.businessName || linkedVendor.name) : undefined;
+      emitAsync('account_welcome', {
+        targets: { engineerId: engineer._id },
+        data: {
+          variant: isVendorEngineer ? 'vendor_engineer' : 'engineer',
+          accountLabel: isVendorEngineer ? 'Vendor engineer' : 'Freelance engineer',
+          name: engineer.name,
+          email: engineer.email,
+          phone: engineer.phone,
+          vendorName,
+          statusLabel: isVendorEngineer ? 'Waiting for vendor approval and WBI verification' : 'Pending verification'
+        }
+      });
+      emitAsync('engineer_registered', {
+        targets: { notifyAllAdmins: true },
+        data: {
+          engineerId: engineer._id,
+          name: engineer.name,
+          phone: engineer.phone,
+          email: engineer.email,
+          city: engineer.address?.city,
+          engineerType: engineer.engineerType,
+          vendorName,
+          joiningFeePaid: engineer.joiningFeePaid,
+          joiningFeeAmount: engineer.joiningFeeFinalAmount
+        }
+      });
+      if (isVendorEngineer && vendorId && vendorApprovalStatus === 'pending_approval') {
+        emitAsync('engineer_join_request', {
+          targets: { vendorId },
+          data: {
+            engineerId: engineer._id,
+            name: engineer.name,
+            phone: engineer.phone,
+            email: engineer.email,
+            code: linkedViaCode
+          }
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('[Engineer Register] email notifications failed:', notifyErr.message);
+    }
 
     res.status(201).json({
       success: true,

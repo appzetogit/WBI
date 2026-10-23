@@ -200,7 +200,16 @@ const updateProfile = async (req, res) => {
       };
     }
 
+    const profileChangeList = require('../../services/notification/profileChangeNotice').profileChanges(engineer);
     await engineer.save();
+    {
+      const notice = require('../../services/notification/profileChangeNotice');
+      if (profileChangeList.includes('Bank details')) {
+        const b = engineer.bankDetails || {};
+        notice.notifyBankChange({ role: 'engineer', id: engineer._id, name: engineer.name, holderName: b.accountHolder || b.accountHolderName || b.holderName, bankName: b.bankName, account: b.accountNumber, ifsc: b.ifscCode || b.ifsc });
+      }
+      notice.notifyProfileChange({ role: 'engineer', id: engineer._id, name: engineer.name, changes: profileChangeList.filter((c) => c !== 'Bank details') });
+    }
 
     res.status(200).json({
       success: true,
@@ -390,6 +399,10 @@ const updateBankDetails = async (req, res) => {
   try {
     const engineerId = req.user.id;
     const engineer = await Engineer.findByIdAndUpdate(engineerId, { bankDetails: req.body }, { new: true });
+    if (engineer) {
+      const b = req.body || {};
+      require('../../services/notification/profileChangeNotice').notifyBankChange({ role: 'engineer', id: engineer._id, name: engineer.name, holderName: b.accountHolder || b.accountHolderName || b.holderName, bankName: b.bankName, account: b.accountNumber, ifsc: b.ifscCode || b.ifsc });
+    }
     res.status(200).json({ success: true, message: 'Bank details updated', engineer });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -419,6 +432,7 @@ const updateDocuments = async (req, res) => {
     
     engineer.documents = { ...engineer.documents, ...req.body, status: 'Pending' };
     await engineer.save();
+    require('../../services/notification/profileChangeNotice').notifyProfileChange({ role: 'engineer', id: engineer._id, name: engineer.name, changes: ['Documents (sent for re-verification)'] });
     
     res.status(200).json({ success: true, message: 'Documents updated', engineer });
   } catch (error) {

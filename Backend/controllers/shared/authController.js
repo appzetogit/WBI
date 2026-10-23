@@ -355,6 +355,23 @@ exports.resetPassword = async (req, res) => {
 
     await logAuthActivity({ userId: user._id, role, roleModel: roleConfig.name, action: 'PASSWORD_RESET', identifier, status: 'SUCCESS', ipAddress: req.ip });
 
+    try {
+      const { emitAsync } = require('../../services/notification/notificationOrchestrator.service');
+      const roleKey = role.toLowerCase();
+      emitAsync('password_changed', {
+        targets: { [`${roleKey === 'b2b' ? 'b2bUser' : roleKey}Id`]: user._id },
+        data: {
+          method: 'reset',
+          at: new Date().toISOString(),
+          name: user.name || user.fullName,
+          ip: req.ip,
+          device: String(req.headers['user-agent'] || '').slice(0, 120) || undefined
+        }
+      });
+    } catch (notifyErr) {
+      console.warn('password_changed notify failed:', notifyErr.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Password reset successfully. You can now login.'

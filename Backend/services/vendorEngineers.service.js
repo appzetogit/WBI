@@ -321,7 +321,7 @@ const audit = (actionType, { vid, actor, eng, message, changes }) => {
   }).catch(() => {});
 };
 
-const tellEngineer = async (eng, { type, title, message }) => {
+const tellEngineer = async (eng, { type, title, message, reason }, vid = null) => {
   try {
     const { getIO } = require('../sockets');
     getIO()?.to([`engineer:${eng._id}`, `worker:${eng._id}`]).emit('engineer:teamStatus', { type, title, message });
@@ -329,6 +329,21 @@ const tellEngineer = async (eng, { type, title, message }) => {
   try {
     const { notifyEngineer } = require('./engineerNotify.service');
     await notifyEngineer(eng._id, { type, category: 'account', title, message, priority: 'high' });
+  } catch (_) { /* non-blocking */ }
+  try {
+    const vendor = vid ? await Vendor.findById(vid).select('businessName name').lean() : null;
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('engineer_team_update', {
+      targets: { engineerId: eng._id },
+      data: {
+        type,
+        title,
+        message,
+        reason: reason || undefined,
+        name: eng.name,
+        vendorName: vendor ? (vendor.businessName || vendor.name) : undefined
+      }
+    });
   } catch (_) { /* non-blocking */ }
 };
 
@@ -371,7 +386,12 @@ const setTeamActive = async ({ vid, engineerId, active, reason, actor, mode = 'd
   });
   await tellEngineer(eng, active
     ? { type: 'engineer_team_reactivated', title: 'You are active again', message: 'Your vendor reactivated you. You can receive jobs again.' }
-    : { type: 'engineer_team_deactivated', title: 'Deactivated by your vendor', message: why || 'You will not receive new jobs from your vendor.' });
+    : {
+      type: 'engineer_team_deactivated',
+      title: mode === 'suspended' ? 'Suspended by your vendor' : 'Deactivated by your vendor',
+      message: 'You will not receive new jobs from your vendor until you are reactivated.',
+      reason: why
+    }, vid);
 
   const [after] = await vendorTeam(vid, { engineerIds: [engineerId] });
   return after;
@@ -417,7 +437,12 @@ const decideJoinRequest = async ({ vid, engineerId, approve, reason, actor }) =>
         ? 'Your vendor approved your join request. You can now receive assigned jobs.'
         : 'Your vendor approved your join request. You can receive jobs once WBI verifies your documents.'
     }
-    : { type: 'engineer_vendor_rejected', title: 'Join request declined', message: eng.vendorRejectedReason });
+    : {
+      type: 'engineer_vendor_rejected',
+      title: 'Join request declined',
+      message: 'Your vendor declined your request to join their team.',
+      reason: eng.vendorRejectedReason
+    }, vid);
 
   if (!approve) return { id: String(eng._id), name: eng.name, status: 'REMOVED' };
   const [after] = await vendorTeam(vid, { engineerIds: [String(eng._id)] });

@@ -280,7 +280,7 @@ const registerCompany = async (req, res) => {
 
     // Seed default roles and create main Company Admin B2BUser profile
     await ensureDefaultRoles(company._id);
-    await B2BUser.create({
+    const companyAdmin = await B2BUser.create({
       companyId: company._id,
       fullName: company.authorizedPerson.name,
       email: company.email,
@@ -327,6 +327,19 @@ const registerCompany = async (req, res) => {
         targets: { notifyAllAdmins: true },
         data: {
           companyId: company._id,
+          companyName: company.companyName,
+          gstNumber: company.gstNumber,
+          contactName: company.authorizedPerson?.name,
+          email: company.email,
+          phone: company.phone
+        }
+      });
+      emitAsync('account_welcome', {
+        targets: { b2bUserId: companyAdmin._id },
+        data: {
+          variant: 'b2b',
+          accountLabel: 'Business — Company Admin',
+          name: company.authorizedPerson?.name,
           companyName: company.companyName,
           email: company.email,
           phone: company.phone

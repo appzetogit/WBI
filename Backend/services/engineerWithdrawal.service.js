@@ -10,6 +10,36 @@ const Transaction = require('../models/Transaction');
 const { getPayoutConfig, calculatePayoutFees } = require('./vendorPayoutConfig.service');
 const { initiatePayout } = require('./payoutProvider.service');
 
+const WITHDRAWAL_STATUS_LABEL = {
+  requested: 'requested',
+  paid: 'completed',
+  rejected: 'rejected',
+  failed: 'failed'
+};
+
+/** Payout email to the account holder. Never throws. */
+function mailWithdrawal(withdrawal, status, reason) {
+  try {
+    const { emitAsync } = require('./notification/notificationOrchestrator.service');
+    emitAsync('withdrawal_status_updated', {
+      targets: { engineerId: withdrawal.engineerId },
+      data: {
+        withdrawalId: String(withdrawal._id),
+        status,
+        statusLabel: WITHDRAWAL_STATUS_LABEL[status] || status,
+        amount: withdrawal.amount,
+        fee: withdrawal.feeAmount || withdrawal.platformFeeAmount || undefined,
+        netAmount: withdrawal.netAmount || undefined,
+        accountMasked: withdrawal.bankDetails?.accountNumberMasked || undefined,
+        utr: status === 'paid' ? withdrawal.transactionReference || undefined : undefined,
+        reason
+      }
+    });
+  } catch (err) {
+    console.warn('[withdraw] email notify failed:', err.message);
+  }
+}
+
 function emitEngineer(engineerId, event, payload = {}) {
   try {
     if (global.io) {
@@ -138,6 +168,7 @@ async function processApprovedWithdrawal(withdrawalId, { adminId = null, actorTy
     withdrawal.pushEvent('failed', error.message, { actorType: 'gateway' });
     await withdrawal.save();
     await refundPendingHold(withdrawal, error.message);
+    mailWithdrawal(withdrawal, 'failed', "The bank transfer could not be completed. The amount has been returned to your wallet; please check your bank details or try again.");
     emitEngineer(withdrawal.engineerId, 'wallet:withdrawalFailed', {
       withdrawalId: withdrawal._id,
       reason: error.message
@@ -193,6 +224,7 @@ async function markWithdrawalPaid(withdrawalId, { utr, adminId = null, notes = '
     pendingWithdrawal: engineer.wallet.pendingBalance,
     message: `Withdrawal of ₹${withdrawal.amount} completed`
   });
+  mailWithdrawal(withdrawal, 'paid');
   emitEngineer(withdrawal.engineerId, 'wallet:withdrawalPaid', {
     withdrawalId: withdrawal._id,
     utr: withdrawal.transactionReference
@@ -234,6 +266,7 @@ async function rejectWithdrawal(withdrawalId, { adminId, reason } = {}) {
     pendingWithdrawal: engineer?.wallet?.pendingBalance || 0,
     message: `Withdrawal of ₹${withdrawal.amount} rejected — refunded`
   });
+  mailWithdrawal(withdrawal, 'rejected', withdrawal.rejectionReason);
   emitEngineer(withdrawal.engineerId, 'wallet:withdrawalRejected', { withdrawalId });
 
   return withdrawal;
