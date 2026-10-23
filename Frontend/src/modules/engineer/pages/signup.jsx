@@ -241,6 +241,24 @@ export default function EngineerSignup() {
     });
   }, [formData, currentStep, isPhoneVerified, otpSent, isAadhaarVerified, isPanVerified, isPaymentSuccess, scheduleSave]);
 
+  const handleKycComplete = useCallback((newVerifications) => {
+    if (!newVerifications || typeof newVerifications !== 'object') return;
+    setFormData((prev) => {
+      const currentVerifsStr = JSON.stringify(prev.verifications || {});
+      const newVerifsStr = JSON.stringify(newVerifications || {});
+      if (currentVerifsStr === newVerifsStr) {
+        return prev; // Prevents unnecessary re-renders and flicker loop
+      }
+      const selfieKyc = newVerifications?.selfie?.fileUrl || newVerifications?.selfie?.frontUrl;
+      const nextSelfie = prev.selfieUrl || selfieKyc || prev.selfieUrl;
+      return {
+        ...prev,
+        verifications: newVerifications,
+        selfieUrl: nextSelfie
+      };
+    });
+  }, []);
+
   const completeDigiLockerVerification = async (payload, stepStr) => {
     setVerifyingAadhaar(true);
     if (stepStr) {
@@ -1218,7 +1236,7 @@ export default function EngineerSignup() {
                   entityId={formData.tempEntityId}
                   draftId={draftKey}
                   redirectUrl={`${window.location.origin}${window.location.pathname}?step=${additionalDetailsStep}`}
-                  initialVerifications={formData.verifications || {}}
+                  initialVerifications={formData.verifications}
                   onBeforeDigiLockerInitiate={() => {
                     sessionStorage.setItem('engineerSignupDraft', JSON.stringify({
                       formData,
@@ -1226,16 +1244,7 @@ export default function EngineerSignup() {
                       otpSent
                     }));
                   }}
-                  onComplete={(verifications) => {
-                    setFormData(prev => {
-                      const selfieKyc = verifications?.selfie?.fileUrl || verifications?.selfie?.frontUrl;
-                      return {
-                        ...prev,
-                        verifications,
-                        selfieUrl: prev.selfieUrl || selfieKyc || prev.selfieUrl
-                      };
-                    });
-                  }}
+                  onComplete={handleKycComplete}
                 />
 
                 <div className="border-t border-gray-200"></div>
