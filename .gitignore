@@ -9,3 +9,5 @@ temp_interactive_push.bat
 *.tok
 serviceAccount*.json
 firebase-service-account.json
+config.bat
+node_modules
