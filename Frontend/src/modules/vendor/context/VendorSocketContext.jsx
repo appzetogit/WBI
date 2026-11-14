@@ -3,6 +3,15 @@ import { io } from 'socket.io-client';
 
 const VendorSocketContext = createContext(null);
 
+const isLocalHost =
+  typeof window !== 'undefined' &&
+  (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname) ||
+    /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(window.location.hostname));
+
+const SOCKET_URL = isLocalHost
+  ? window.location.origin
+  : (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_API_BASE_URL?.replace(/\/api$/, '') || 'https://app.wbinfs.com');
+
 const getVendorId = () => {
   try {
     const raw = localStorage.getItem('vendorData') || sessionStorage.getItem('vendorData');
@@ -19,11 +28,10 @@ export const VendorSocketProvider = ({ children }) => {
   const [liveUpdates, setLiveUpdates] = useState([]);
 
   useEffect(() => {
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
     const token = localStorage.getItem('vendorAccessToken') || sessionStorage.getItem('vendorAccessToken');
     const vendorId = getVendorId();
 
-    const newSocket = io(backendUrl, {
+    const newSocket = io(SOCKET_URL, {
       path: '/socket.io',
       transports: ['websocket'],
       reconnectionAttempts: 5,
