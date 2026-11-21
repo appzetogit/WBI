@@ -101,7 +101,9 @@ const allowedOrigins = [
   'https://www.app.wbinfs.com',
   'https://www.wbinfs.com',
   'https://wbinfs.com',
-  'https://api.wbinfs.com'
+  'https://api.wbinfs.com',
+  'https://tazky.in',
+  'https://www.tazky.in'
 ];
 
 if (process.env.FRONTEND_URL) {
