@@ -4,8 +4,8 @@
   "description": "Backend API for Appzeto platform",
   "main": "server.js",
   "scripts": {
-    "start": "node init && node scripts/start-production.js",
-    "dev": "node init && nodemon server.js",
+    "start": "node scripts/start-production.js",
+    "dev": "nodemon server.js",
     "test": "node tests",
     "check:deps": "node -e \"const reqs=['xlsx','multer','cloudinary','sharp','firebase-admin','bullmq','ioredis','razorpay','socket.io','compression','rate-limit-redis','@socket.io/redis-adapter']; reqs.forEach(r => require(r)); console.log('All critical dependencies loaded successfully.');\"",
     "verify:routes": "node scripts/verifyServerRequires.js",
