@@ -538,7 +538,8 @@ exports.socialLogin = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid or expired authentication token' });
     }
 
-    const { email, name, uid, firebase_sign_in_provider } = decodedToken;
+    const { email, name, uid } = decodedToken;
+    const firebase_sign_in_provider = decodedToken.firebase?.sign_in_provider || decodedToken.firebase_sign_in_provider;
     const providerId = uid;
     
     // Determine target model
@@ -575,7 +576,7 @@ exports.socialLogin = async (req, res) => {
     // Check if user exists
     let user = await Model.findOne({
       $or: [
-        { email },
+        ...(email ? [{ email }] : []),
         { googleId: providerId },
         { appleId: providerId }
       ]

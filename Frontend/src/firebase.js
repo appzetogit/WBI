@@ -27,6 +27,7 @@ export { app };
 let messaging = null;
 let db = null;
 let auth = null;
+let authModule = null;
 
 export const getFirebaseMessaging = async () => {
   if (!messaging && app) {
@@ -53,11 +54,20 @@ export const getFirebaseDb = async () => {
 };
 
 export const getFirebaseAuth = async () => {
-  if (!auth && app) {
+  if (app) {
     try {
-      const { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup } = await import('firebase/auth');
-      auth = getAuth(app);
-      return { auth, GoogleAuthProvider, OAuthProvider, signInWithPopup };
+      if (!authModule) {
+        authModule = await import('firebase/auth');
+      }
+      if (!auth) {
+        auth = authModule.getAuth(app);
+      }
+      return {
+        auth,
+        GoogleAuthProvider: authModule.GoogleAuthProvider,
+        OAuthProvider: authModule.OAuthProvider,
+        signInWithPopup: authModule.signInWithPopup
+      };
     } catch (error) {
       console.error('Failed to initialize Firebase Auth:', error);
     }
