@@ -15,6 +15,7 @@ const Vendor = require('../../models/Vendor');
 const Admin = require('../../models/Admin');
 const B2BUser = require('../../models/B2BUser');
 const Token = require('../../models/Token'); // Assuming tokens might be stored here for refresh invalidation
+const Settings = require('../../models/Settings');
 
 const ROLE_MODELS = {
   user: { model: User, name: 'User' },
@@ -541,6 +542,16 @@ exports.socialLogin = async (req, res) => {
     const { email, name, uid } = decodedToken;
     const firebase_sign_in_provider = decodedToken.firebase?.sign_in_provider || decodedToken.firebase_sign_in_provider;
     const providerId = uid;
+
+    if (firebase_sign_in_provider === 'apple.com') {
+      const globalSettings = await Settings.findOne({ type: 'global' }).select('isAppleLoginEnabled').lean();
+      if (!globalSettings?.isAppleLoginEnabled) {
+        return res.status(403).json({
+          success: false,
+          message: 'Apple Sign-In is currently disabled by administrator.'
+        });
+      }
+    }
     
     // Determine target model
     const collectionsToSearch = [
@@ -584,6 +595,21 @@ exports.socialLogin = async (req, res) => {
 
     let isNewUser = false;
     if (!user) {
+      if (targetRoleInfo.role === 'vendor') {
+        return res.status(200).json({
+          success: true,
+          requiresSignup: true,
+          isNewUser: true,
+          role: 'vendor',
+          prefill: {
+            ownerName: name || '',
+            email: email || ''
+          },
+          redirectTo: '/vendor/signup',
+          message: 'Please complete your partner registration to continue.'
+        });
+      }
+
       const newUserData = {
         name: name || 'User',
         email,
@@ -614,6 +640,29 @@ exports.socialLogin = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Account is deactivated' });
     }
 
+    if (targetRoleInfo.role === 'vendor') {
+      const approvalStatus = user.approvalStatus || 'pending';
+      if (approvalStatus === 'rejected') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been rejected. Please contact support.'
+        });
+      }
+      if (approvalStatus === 'suspended') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been suspended. Please contact support.'
+        });
+      }
+    }
+
+    if (targetRoleInfo.role === 'vendor' && user.approvalStatus === 'rejected') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your vendor account has been rejected. Please contact support.'
+      });
+    }
+
     const loginSessionId = Date.now().toString();
     const updateQuery = { 
       loginSessionId,
@@ -641,14 +690,21 @@ exports.socialLogin = async (req, res) => {
     userResponse.role = targetRoleInfo.role;
     userResponse.status = user.status || user.approvalStatus || undefined;
 
+    const isPendingVendor =
+      targetRoleInfo.role === 'vendor' && user.approvalStatus !== 'approved';
+
     res.status(200).json({
       success: true,
-      message: 'Social Login successful',
+      message: isPendingVendor
+        ? 'Account pending approval'
+        : 'Social Login successful',
       isNewUser,
       token: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       user: userResponse,
-      redirectTo: targetRoleInfo.redirect
+      vendor: targetRoleInfo.role === 'vendor' ? userResponse : undefined,
+      role: targetRoleInfo.role,
+      redirectTo: isPendingVendor ? '/vendor/pending-approval' : targetRoleInfo.redirect
     });
 
   } catch (error) {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { FiChevronRight, FiChevronLeft, FiCheck, FiBriefcase, FiTrendingUp, FiShield } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { themeColors } from '../../../theme';
@@ -50,6 +50,8 @@ const FINAL_STEPS = [
 
 const VendorSignup = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const socialPrefill = location.state?.socialPrefill;
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [vendorModels, setVendorModels] = useState([]); 
@@ -64,7 +66,10 @@ const VendorSignup = () => {
   } = useRegistrationDraft('vendor');
   
   const [formData, setFormData] = useState({
-    ownerName: '', mobile: '', email: '', password: '',
+    ownerName: socialPrefill?.ownerName || '',
+    mobile: '',
+    email: socialPrefill?.email || '',
+    password: '',
     isPhoneVerified: false,
     verificationToken: null,
     companyName: '', gstin: '', panNumber: '',
@@ -284,7 +289,7 @@ const VendorSignup = () => {
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-16">
             <Logo onDark className="h-9 w-9 min-h-[2.25rem] min-w-[2.25rem]" />
-            <span className="text-2xl font-bold tracking-wide">WBI Partners</span>
+            <span className="text-2xl font-bold tracking-wide">WBI Partner</span>
           </div>
           
           <h1 className="text-4xl font-extrabold mb-6 leading-tight">
@@ -336,7 +341,7 @@ const VendorSignup = () => {
         <div className="lg:hidden bg-white border-b border-gray-200 sticky top-0 z-50 p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Logo className="h-8 w-auto" />
-            <span className="text-sm font-bold text-[#0D8A72]">WBI Partners</span>
+            <span className="text-sm font-bold text-[#0D8A72]">WBI Partner</span>
           </div>
         </div>
 

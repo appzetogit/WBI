@@ -198,6 +198,10 @@ api.interceptors.response.use(
     const { role } = getTokenKeys(originalRequest.url);
 
     // Global Error Handling via Sonner Toasts
+    if (originalRequest?.skipErrorToast) {
+      return Promise.reject(error);
+    }
+
     if (error.response) {
       const status = error.response.status;
       const message = error.response.data?.message?.toLowerCase() || '';

@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'; // Updated index to .jsx
 import { BrowserRouter } from 'react-router-dom';
-import { Toaster, toast } from 'react-hot-toast';
-import { Toaster as SonnerToaster } from 'sonner';
+import { Toaster, toast, useToasterStore } from 'react-hot-toast';
+import { Toaster as SonnerToaster, toast as sonnerToast } from 'sonner';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from './routes';
 import { SocketProvider } from './context/SocketContext';
@@ -41,6 +41,20 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+function SingleToastEnforcer() {
+  const { toasts } = useToasterStore();
+
+  useEffect(() => {
+    const visible = toasts.filter((t) => t.visible);
+    if (visible.length > 0) {
+      sonnerToast.dismiss();
+    }
+    visible.slice(1).forEach((t) => toast.dismiss(t.id));
+  }, [toasts]);
+
+  return null;
+}
 
 function App() {
   // Initialize push notifications on app load
@@ -97,8 +111,10 @@ function App() {
                 <div className="App">
                   <ErrorBoundary>
                     <AppRoutes />
+                    <SingleToastEnforcer />
                     <SonnerToaster
                       position="top-center"
+                      visibleToasts={1}
                       closeButton
                       theme="dark"
                       toastOptions={{

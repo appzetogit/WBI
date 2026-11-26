@@ -64,6 +64,8 @@ exports.updateSettings = async (req, res, next) => {
       maxSearchTime, waveDuration, searchRadius,
       // Payment Control
       isOnlinePaymentEnabled,
+      // Social Auth Control
+      isAppleLoginEnabled,
       // Vendor payout policy
       payoutProvider,
       withdrawalEnabled,
@@ -145,6 +147,7 @@ exports.updateSettings = async (req, res, next) => {
       if (waveDuration !== undefined) settings.waveDuration = waveDuration;
       if (searchRadius !== undefined) settings.searchRadius = searchRadius;
       if (isOnlinePaymentEnabled !== undefined) settings.isOnlinePaymentEnabled = isOnlinePaymentEnabled;
+      if (isAppleLoginEnabled !== undefined) settings.isAppleLoginEnabled = Boolean(isAppleLoginEnabled);
 
       if (payoutProvider !== undefined) settings.payoutProvider = payoutProvider;
       if (withdrawalEnabled !== undefined) settings.withdrawalEnabled = withdrawalEnabled;
@@ -201,11 +204,11 @@ exports.updateSettings = async (req, res, next) => {
 // Get Public Settings (Visited Charges, GST)
 exports.getPublicSettings = async (req, res, next) => {
   try {
-    let settings = await Settings.findOne({ type: 'global' }).select('visitedCharges serviceGstPercentage partsGstPercentage supportEmail supportPhone supportWhatsapp cancellationPenalty companyName companyAddress companyCity companyState companyPincode companyPhone companyEmail isOnlinePaymentEnabled');
+    let settings = await Settings.findOne({ type: 'global' }).select('visitedCharges serviceGstPercentage partsGstPercentage supportEmail supportPhone supportWhatsapp cancellationPenalty companyName companyAddress companyCity companyState companyPincode companyPhone companyEmail isOnlinePaymentEnabled isAppleLoginEnabled');
 
     // Default if not found (fallback values)
     if (!settings) {
-      settings = { visitedCharges: 29, serviceGstPercentage: 18, partsGstPercentage: 18 };
+      settings = { visitedCharges: 29, serviceGstPercentage: 18, partsGstPercentage: 18, isAppleLoginEnabled: false };
     }
 
     res.status(200).json({

@@ -4,6 +4,7 @@ import { FiPhone, FiLock, FiEye, FiEyeOff, FiArrowRight } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { themeColors } from '../../../theme';
 import { sharedAuthService } from '../../../services/authService';
+import { configService } from '../../../services/configService';
 import Logo from '../../../components/common/Logo';
 import LogoLoader from '../../../components/common/LogoLoader';
 import ForgotPasswordFlow from '../../../components/auth/ForgotPasswordFlow';
@@ -22,6 +23,15 @@ const WorkerLogin = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [isAppleLoginEnabled, setIsAppleLoginEnabled] = useState(false);
+
+  useEffect(() => {
+    configService.getSettings().then((res) => {
+      if (res?.settings) {
+        setIsAppleLoginEnabled(Boolean(res.settings.isAppleLoginEnabled));
+      }
+    });
+  }, []);
 
   const brandColor = themeColors.brand?.teal || '#347989';
 
@@ -238,7 +248,7 @@ const WorkerLogin = () => {
               </div>
             </div>
 
-            <div className="mt-3.5 grid grid-cols-2 gap-3">
+            <div className={`mt-3.5 grid gap-3 ${isAppleLoginEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
               <button
                 type="button"
                 onClick={() => handleSocialLogin('google')}
@@ -250,18 +260,20 @@ const WorkerLogin = () => {
                   <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
                   <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
                 </svg>
-                Google
+                {isAppleLoginEnabled ? 'Google' : 'Continue with Google'}
               </button>
-              <button
-                type="button"
-                onClick={() => handleSocialLogin('apple')}
-                className="w-full inline-flex justify-center items-center py-2 px-3 border border-gray-200 rounded-xl shadow-sm bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="black" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M17.05 20.28c-.98.68-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 13.25 4.51 5.96 9.05 5.68c1.3.07 2.45.81 3.05.81.65 0 2.06-.88 3.55-.74 1.3.06 2.5.64 3.3 1.68-2.8 1.67-2.3 5.48.51 6.6-1.07 2.4-2.14 4.58-2.41 6.25zM12.03 5.09c-.06-1.74 1.34-3.32 3.1-3.4 1.14 1.94-.96 3.84-3.1 3.4z" />
-                </svg>
-                Apple
-              </button>
+              {isAppleLoginEnabled && (
+                <button
+                  type="button"
+                  onClick={() => handleSocialLogin('apple')}
+                  className="w-full inline-flex justify-center items-center py-2 px-3 border border-gray-200 rounded-xl shadow-sm bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <svg className="h-4 w-4 mr-2" viewBox="0 0 24 24" fill="black" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M17.05 20.28c-.98.68-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 13.25 4.51 5.96 9.05 5.68c1.3.07 2.45.81 3.05.81.65 0 2.06-.88 3.55-.74 1.3.06 2.5.64 3.3 1.68-2.8 1.67-2.3 5.48.51 6.6-1.07 2.4-2.14 4.58-2.41 6.25zM12.03 5.09c-.06-1.74 1.34-3.32 3.1-3.4 1.14 1.94-.96 3.84-3.1 3.4z" />
+                  </svg>
+                  Apple
+                </button>
+              )}
             </div>
           </div>
         </div>

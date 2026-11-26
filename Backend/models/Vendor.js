@@ -664,7 +664,7 @@ vendorSchema.index(
 vendorSchema.pre('save', async function (next) {
   // Never persist empty unique optional fields as null (E11000 on unique indexes).
   // Sparse unique indexes still index explicit null — omit the field instead.
-  ['inviteLinkToken', 'uniqueCompanyCode', 'inviteLinkExpiresAt', 'googleId', 'appleId'].forEach((key) => {
+  ['inviteLinkToken', 'uniqueCompanyCode', 'inviteLinkExpiresAt', 'googleId', 'appleId', 'phone', 'email'].forEach((key) => {
     if (this[key] == null || this[key] === '') {
       this[key] = undefined;
       if (this._doc) delete this._doc[key];

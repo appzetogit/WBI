@@ -27,6 +27,7 @@ const AdminSettings = () => {
     waveDuration: 60,
     searchRadius: 10,
     isOnlinePaymentEnabled: true,
+    isAppleLoginEnabled: false,
     payoutProvider: 'manual',
     withdrawalEnabled: true,
     oneTimePlatformFee: 30,
@@ -140,6 +141,7 @@ const AdminSettings = () => {
             maxSearchTime: res.settings.maxSearchTime || 5,
             waveDuration: res.settings.waveDuration || 60,
             isOnlinePaymentEnabled: res.settings.isOnlinePaymentEnabled !== undefined ? res.settings.isOnlinePaymentEnabled : true,
+            isAppleLoginEnabled: Boolean(res.settings.isAppleLoginEnabled),
             payoutProvider: res.settings.payoutProvider || 'manual',
             withdrawalEnabled: res.settings.withdrawalEnabled !== false,
             oneTimePlatformFee: res.settings.oneTimePlatformFee ?? 30,
@@ -928,6 +930,44 @@ const AdminSettings = () => {
                       className={`relative w-12 h-7 rounded-full transition-all duration-300 ${financialSettings.isOnlinePaymentEnabled ? 'bg-green-600' : 'bg-gray-200'}`}>
                       <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-300 ${financialSettings.isOnlinePaymentEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-800">Apple Login (Web & App)</p>
+                        <p className="text-xs text-gray-500 mt-1">Show Sign in with Apple on Partner, Worker & Engineer login pages</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const newValue = !financialSettings.isAppleLoginEnabled;
+                          setFinancialSettings(prev => ({ ...prev, isAppleLoginEnabled: newValue }));
+                          try {
+                            await updateSettings({ isAppleLoginEnabled: newValue });
+                            if (newValue) {
+                              toast.success('Apple Login enabled. Ensure Services ID, Team ID, Key ID & Private Key are configured in Firebase.');
+                            } else {
+                              toast.success('Apple Login disabled.');
+                            }
+                          } catch {
+                            setFinancialSettings(prev => ({ ...prev, isAppleLoginEnabled: !newValue }));
+                            toast.error('Failed to update Apple Login setting');
+                          }
+                        }}
+                        className={`relative w-12 h-7 rounded-full transition-all duration-300 shrink-0 ${financialSettings.isAppleLoginEnabled ? 'bg-green-600' : 'bg-gray-200'}`}
+                      >
+                        <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-300 ${financialSettings.isAppleLoginEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+                    <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-lg text-xs text-amber-900 space-y-1">
+                      <p className="font-semibold">Required in Firebase Console before enabling Apple Login:</p>
+                      <ul className="list-disc pl-4 space-y-0.5 text-amber-800">
+                        <li>Active <strong>Apple Developer Program</strong> membership</li>
+                        <li><strong>Services ID</strong> with Return URL: <code className="bg-amber-100 px-1 rounded">https://wbi-service-2074b.firebaseapp.com/__/auth/handler</code></li>
+                        <li><strong>OAuth code flow</strong> in Firebase (Authentication → Sign-in method → Apple): <strong>Apple Team ID</strong>, <strong>Key ID</strong>, and <strong>Private Key (.p8)</strong></li>
+                      </ul>
+                    </div>
                   </div>
 
                 </div>

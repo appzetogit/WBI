@@ -173,6 +173,10 @@ const settingsSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  isAppleLoginEnabled: {
+    type: Boolean,
+    default: false
+  },
 
   // Vendor payout / withdrawal policy (admin-configurable)
   payoutProvider: {
