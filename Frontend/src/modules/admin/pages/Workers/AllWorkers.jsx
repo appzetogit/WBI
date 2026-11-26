@@ -47,7 +47,9 @@ const AllWorkers = () => {
             other: worker.otherDocuments?.[0]
           },
           createdAt: worker.createdAt,
-          isActive: worker.isActive
+          isActive: worker.isActive,
+          googleId: worker.googleId,
+          appleId: worker.appleId
         }));
         setWorkers(transformedWorkers);
       } else {
@@ -377,7 +379,15 @@ const AllWorkers = () => {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Email</label>
-                <div className="text-gray-900">{selectedWorker.email}</div>
+                <div className="text-gray-900 inline-flex items-center gap-1.5 flex-wrap">
+                  <span>{selectedWorker.email}</span>
+                  {selectedWorker.googleId && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200">Google</span>
+                  )}
+                  {selectedWorker.appleId && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-800 border border-gray-300">Apple</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Phone</label>

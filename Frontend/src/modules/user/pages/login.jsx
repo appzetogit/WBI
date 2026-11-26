@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { FiPhone, FiArrowRight, FiCheckCircle, FiChevronLeft } from 'react-icons/fi';
+import { FcGoogle } from 'react-icons/fc';
 import { toast } from 'react-hot-toast';
 import { themeColors } from '../../../theme';
-import { userAuthService } from '../../../services/authService';
+import { userAuthService, sharedAuthService } from '../../../services/authService';
+import { configService } from '../../../services/configService';
+import { getFirebaseAuth } from '../../../firebase';
 import LogoLoader from '../../../components/common/LogoLoader';
 import DebugConsole from '../components/common/DebugConsole';
 import Onboarding from '../components/Onboarding';
@@ -31,6 +34,15 @@ const Login = () => {
   const [otpToken, setOtpToken] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+  const [isAppleLoginEnabled, setIsAppleLoginEnabled] = useState(false);
+
+  useEffect(() => {
+    configService.getSettings().then((res) => {
+      if (res?.settings) {
+        setIsAppleLoginEnabled(Boolean(res.settings.isAppleLoginEnabled));
+      }
+    });
+  }, []);
 
   // Timer countdown effect
   useEffect(() => {
@@ -186,6 +198,37 @@ const Login = () => {
     }
   };
 
+  const handleSocialLogin = async (providerName) => {
+    try {
+      setIsLoading(true);
+      const credentials = await getFirebaseAuth();
+      if (!credentials || !credentials.auth) {
+        throw new Error('Firebase Auth is not available');
+      }
+      const { auth, GoogleAuthProvider, OAuthProvider, signInWithPopup } = credentials;
+      const provider =
+        providerName === 'apple'
+          ? new OAuthProvider('apple.com')
+          : new GoogleAuthProvider();
+
+      const result = await signInWithPopup(auth, provider);
+      const token = await result.user.getIdToken();
+
+      const response = await sharedAuthService.socialLogin({ token, role: 'user' });
+      if (response.success) {
+        toast.success('Welcome Back!');
+        navigate(response.redirectTo || '/user', { replace: true });
+      } else {
+        toast.error(response.message || 'Login failed');
+      }
+    } catch (error) {
+      console.error('User social login error:', error);
+      toast.error(error?.response?.data?.message || 'Authentication failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Brand Colors from theme
   const brandColor = themeColors.brand?.orange || '#FF8A00';
 
@@ -198,7 +241,7 @@ const Login = () => {
     <div className="min-h-[100dvh] bg-transparent flex flex-col pt-[max(env(safe-area-inset-top),32px)] pb-[max(env(safe-area-inset-bottom),20px)] px-6 relative overflow-x-hidden">
       
       {/* Top Logo Area */}
-      <div className="w-full flex justify-center mb-10 h-16 items-center mt-2 shrink-0">
+      <div className="w-full flex justify-center mb-6 h-14 items-center mt-2 shrink-0">
           <img fetchPriority="low" loading="lazy" 
             src="/logo/logo.webp" 
             alt="WBI Logo" 
@@ -214,11 +257,11 @@ const Login = () => {
       </div>
 
       {/* Heading Area */}
-      <div className="w-full text-center mb-10 shrink-0">
+      <div className="w-full text-center mb-7 shrink-0">
         <h2 className="text-2xl sm:text-3xl font-extrabold text-[#1a2b3c] tracking-tight">
           {step === 'phone' ? 'Sign in to account' : 'Verify your phone'}
         </h2>
-        <p className="mt-3 text-sm text-gray-500 font-medium">
+        <p className="mt-2 text-sm text-gray-500 font-medium">
           {step === 'phone'
             ? 'Enter your mobile number to get started'
             : `We've sent a code to +91 ${phoneNumber}`
@@ -227,11 +270,11 @@ const Login = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="w-full max-w-md mx-auto flex-1 flex flex-col">
+      <div className="w-full max-w-md mx-auto flex-1 flex flex-col justify-start">
           {step === 'phone' ? (
-            <form className="flex flex-col flex-1" onSubmit={handlePhoneSubmit}>
-              <div className="mb-6">
-                <label htmlFor="phone" className="block text-sm font-semibold text-[#1a2b3c] mb-3 ml-1">
+            <form className="flex flex-col" onSubmit={handlePhoneSubmit}>
+              <div className="mb-5">
+                <label htmlFor="phone" className="block text-sm font-semibold text-[#1a2b3c] mb-2 ml-1">
                   Mobile Number
                 </label>
                 <div className="relative rounded-2xl group border border-gray-200 focus-within:border-[#FF8A00] focus-within:ring-1 focus-within:ring-[#FF8A00] transition-all bg-white shadow-sm">
@@ -247,7 +290,7 @@ const Login = () => {
                     inputMode="numeric"
                     autoComplete="tel"
                     id="phone"
-                    className="block w-full pl-[100px] pr-4 py-4 bg-transparent border-transparent focus:border-transparent focus:ring-0 sm:text-lg font-bold text-[#1a2b3c] placeholder-gray-300 rounded-2xl"
+                    className="block w-full pl-[100px] pr-4 py-3.5 bg-transparent border-transparent focus:border-transparent focus:ring-0 sm:text-lg font-bold text-[#1a2b3c] placeholder-gray-300 rounded-2xl"
                     placeholder="98765 43210"
                     value={phoneNumber}
                     onChange={(e) => {
@@ -258,12 +301,12 @@ const Login = () => {
                 </div>
               </div>
 
-              {/* Action Area pushed to bottom if space available */}
-              <div className="mt-auto pt-8 pb-4 flex flex-col gap-6">
+              {/* Action Area */}
+              <div className="flex flex-col gap-4">
                 <button
                   type="submit"
                   disabled={isLoading || phoneNumber.length < 10}
-                  className="w-full flex justify-center py-4 px-4 rounded-2xl text-base font-bold text-white transition-all duration-300 ease-in-out disabled:opacity-50 disabled:bg-[#8ebac3] disabled:cursor-not-allowed active:scale-[0.98] shadow-md hover:shadow-lg"
+                  className="w-full flex justify-center py-3.5 px-4 rounded-2xl text-base font-bold text-white transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] shadow-md hover:shadow-lg cursor-pointer"
                   style={{ backgroundColor: brandColor }}
                 >
                   {isLoading ? (
@@ -273,23 +316,56 @@ const Login = () => {
                   )}
                 </button>
 
-                <p className="text-sm text-gray-500 font-medium text-center">
-                  New to WBI?{' '}
-                  <Link
-                    to="/user/signup"
-                    className="text-[#FF8A00] hover:text-[#e65100] font-bold transition-colors"
+                <div className="flex items-center gap-3 py-0.5">
+                  <div className="flex-1 border-t border-gray-200" />
+                  <span className="text-xs text-gray-400 font-medium">or continue with</span>
+                  <div className="flex-1 border-t border-gray-200" />
+                </div>
+
+                <div className={`grid gap-3 ${isAppleLoginEnabled ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => handleSocialLogin('google')}
+                    className="w-full inline-flex justify-center items-center py-3.5 px-4 border border-gray-200 rounded-2xl shadow-sm bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-60"
                   >
-                    Create an account
-                  </Link>
-                </p>
-                <p className="text-sm text-gray-500 font-medium text-center mt-2">
-                  <Link
-                    to="/user/forgot-password"
-                    className="text-[#FF8A00] hover:text-[#e65100] font-bold transition-colors"
-                  >
-                    Forgot Password?
-                  </Link>
-                </p>
+                    <FcGoogle className="w-5 h-5 mr-2 shrink-0" />
+                    {isAppleLoginEnabled ? 'Google' : 'Continue with Google'}
+                  </button>
+                  {isAppleLoginEnabled && (
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => handleSocialLogin('apple')}
+                      className="w-full inline-flex justify-center items-center py-3.5 px-4 border border-gray-200 rounded-2xl shadow-sm bg-white text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-60"
+                    >
+                      <svg className="h-5 w-5 mr-2 shrink-0" viewBox="0 0 24 24" fill="black" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M17.05 20.28c-.98.68-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 13.25 4.51 5.96 9.05 5.68c1.3.07 2.45.81 3.05.81.65 0 2.06-.88 3.55-.74 1.3.06 2.5.64 3.3 1.68-2.8 1.67-2.3 5.48.51 6.6-1.07 2.4-2.14 4.58-2.41 6.25zM12.03 5.09c-.06-1.74 1.34-3.32 3.1-3.4 1.14 1.94-.96 3.84-3.1 3.4z" />
+                      </svg>
+                      Apple
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-2 pt-2 text-center">
+                  <p className="text-sm text-gray-500 font-medium">
+                    New to WBI?{' '}
+                    <Link
+                      to="/user/signup"
+                      className="text-[#FF8A00] hover:text-[#e65100] font-bold transition-colors"
+                    >
+                      Create an account
+                    </Link>
+                  </p>
+                  <p className="text-sm text-gray-500 font-medium">
+                    <Link
+                      to="/user/forgot-password"
+                      className="text-[#FF8A00] hover:text-[#e65100] font-bold transition-colors"
+                    >
+                      Forgot Password?
+                    </Link>
+                  </p>
+                </div>
               </div>
             </form>
           ) : (
@@ -339,7 +415,7 @@ const Login = () => {
                         setResendTimer(120);
                         toast.success('OTP resent!');
                       }
-                    } catch (err) {
+                    } catch {
                       toast.error('Error sending OTP');
                     } finally {
                       setIsLoading(false);
@@ -354,11 +430,11 @@ const Login = () => {
                 </button>
               </div>
 
-              <div className="mt-auto pt-8 pb-4">
+              <div className="pt-2">
                 <button
                   type="submit"
                   disabled={isLoading || otp.join('').length !== 6}
-                  className="w-full flex justify-center py-4 px-4 rounded-2xl text-base font-bold text-white transition-all duration-300 ease-in-out disabled:opacity-50 disabled:bg-[#8ebac3] disabled:cursor-not-allowed active:scale-[0.98] shadow-md hover:shadow-lg"
+                  className="w-full flex justify-center py-3.5 px-4 rounded-2xl text-base font-bold text-white transition-all duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] shadow-md hover:shadow-lg cursor-pointer"
                   style={{ backgroundColor: brandColor }}
                 >
                   {isLoading ? (

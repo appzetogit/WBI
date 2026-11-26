@@ -6,6 +6,7 @@ import {
 } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { adminBookingService } from '../../../../services/adminBookingService';
+import Pagination from '../../components/common/Pagination';
 import { getDashboardStats } from '../../../../services/adminDashboardService';
 import adminWorkerService from '../../../../services/adminWorkerService';
 import { useSocket } from '../../../../context/SocketContext';
@@ -36,7 +37,9 @@ const Bookings = () => {
 
   // Pagination
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   // Stats
   const [stats, setStats] = useState({
@@ -121,7 +124,7 @@ const Bookings = () => {
       // Fetch Bookings immediately
       const params = {
         page,
-        limit: 10,
+        limit,
         search: debouncedSearch,
         startDate,
         endDate
@@ -133,7 +136,8 @@ const Bookings = () => {
       const res = await adminBookingService.getAllBookings(params);
       if (res.success) {
         setBookings(res.data);
-        setTotalPages(res.pagination.pages);
+        setTotalPages(Math.max(1, res.pagination?.pages || 1));
+        setTotalItems(res.pagination?.total ?? res.data.length);
       }
     } catch (error) {
       console.error('Error loading bookings:', error);
@@ -150,8 +154,8 @@ const Bookings = () => {
         const s = statsRes.data.stats;
         setStats({
           pending: s.pendingBookings || 0,
-          confirmed: 0,
-          inProgress: 0,
+          confirmed: s.confirmedBookings || 0,
+          inProgress: s.inProgressBookings || 0,
           completed: s.completedBookings || 0,
           cancelled: s.cancelledBookings || 0,
           total: s.totalBookings || 0
@@ -189,7 +193,7 @@ const Bookings = () => {
 
   useEffect(() => {
     fetchData();
-  }, [page, debouncedSearch, statusFilter, startDate, endDate]);
+  }, [page, limit, debouncedSearch, statusFilter, startDate, endDate]);
 
   useEffect(() => {
     fetchStats();
@@ -222,14 +226,28 @@ const Bookings = () => {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <BookingStatsCard title="Awaiting" count={stats.pending} icon={FiClock} bgClass="bg-yellow-50" colorClass="text-yellow-600" />
-        <BookingStatsCard title="Confirmed" count={stats.pending} icon={FiCheckCircle} bgClass="bg-blue-50" colorClass="text-blue-600" />
-        <BookingStatsCard title="In Progress" count={stats.inProgress} icon={FiBox} bgClass="bg-purple-50" colorClass="text-purple-600" />
-        <BookingStatsCard title="Completed" count={stats.completed} icon={FiTruck} bgClass="bg-green-50" colorClass="text-green-600" />
-        <BookingStatsCard title="Delivered" count={stats.completed} icon={FiCheckCircle} bgClass="bg-emerald-50" colorClass="text-emerald-600" />
-        <BookingStatsCard title="Cancelled" count={stats.cancelled} icon={FiXCircle} bgClass="bg-red-50" colorClass="text-red-600" />
+        <div onClick={() => { setStatusFilter('pending'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="Awaiting" count={stats.pending} icon={FiClock} bgClass="bg-yellow-50" colorClass="text-yellow-600" />
+        </div>
+        <div onClick={() => { setStatusFilter('confirmed'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="Confirmed" count={stats.confirmed} icon={FiCheckCircle} bgClass="bg-blue-50" colorClass="text-blue-600" />
+        </div>
+        <div onClick={() => { setStatusFilter('in_progress'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="In Progress" count={stats.inProgress} icon={FiBox} bgClass="bg-purple-50" colorClass="text-purple-600" />
+        </div>
+        <div onClick={() => { setStatusFilter('completed'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="Completed" count={stats.completed} icon={FiTruck} bgClass="bg-green-50" colorClass="text-green-600" />
+        </div>
+        <div onClick={() => { setStatusFilter('completed'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="Delivered" count={stats.completed} icon={FiCheckCircle} bgClass="bg-emerald-50" colorClass="text-emerald-600" />
+        </div>
+        <div onClick={() => { setStatusFilter('cancelled'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="Cancelled" count={stats.cancelled} icon={FiXCircle} bgClass="bg-red-50" colorClass="text-red-600" />
+        </div>
         <BookingStatsCard title="Returned" count={0} icon={FiRefreshCw} bgClass="bg-orange-50" colorClass="text-orange-600" />
-        <BookingStatsCard title="Total Orders" count={stats.total} icon={FiShoppingBag} bgClass="bg-gray-50" colorClass="text-gray-600" />
+        <div onClick={() => { setStatusFilter('All Status'); setPage(1); }} className="cursor-pointer">
+          <BookingStatsCard title="Total Orders" count={stats.total} icon={FiShoppingBag} bgClass="bg-gray-50" colorClass="text-gray-600" />
+        </div>
       </div>
 
       {/* Filter Bar */}
@@ -483,25 +501,18 @@ const Bookings = () => {
 
         {/* Pagination Footer */}
         {!loading && bookings.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/30">
-            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight">Showing {bookings.length} of {stats.total} entries</p>
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 disabled:opacity-50 hover:bg-white transition-all"
-              >
-                Prev
-              </button>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 disabled:opacity-50 hover:bg-white transition-all"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            limit={limit}
+            currentCount={bookings.length}
+            onPageChange={setPage}
+            onLimitChange={(nextLimit) => {
+              setLimit(nextLimit);
+              setPage(1);
+            }}
+          />
         )}
         {/* Cancel Modal */}
         {showCancelModal && (

@@ -4,6 +4,7 @@ import { FiSearch, FiDollarSign, FiArrowUpRight, FiArrowDownLeft, FiFilter, FiCa
 import { toast } from 'react-hot-toast';
 import { adminTransactionService } from '../../../../services/adminTransactionService';
 import { formatCurrency } from '../../utils/adminHelpers';
+import Pagination from '../../components/common/Pagination';
 
 const Transactions = () => {
   const [transactions, setTransactions] = useState([]);
@@ -16,6 +17,7 @@ const Transactions = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
@@ -31,7 +33,7 @@ const Transactions = () => {
       setLoading(true);
       const params = {
         page,
-        limit: 10,
+        limit,
         search: debouncedSearch,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         entity: 'user'
@@ -61,7 +63,7 @@ const Transactions = () => {
 
   useEffect(() => {
     fetchData();
-  }, [page, debouncedSearch, statusFilter]);
+  }, [page, limit, debouncedSearch, statusFilter]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -270,27 +272,19 @@ const Transactions = () => {
 
         {/* Pagination */}
         {!loading && transactions.length > 0 && (
-          <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50">
-            <p className="text-sm text-gray-500 font-medium">
-              Showing {transactions.length} of {totalCount} transactions
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalCount}
+            limit={limit}
+            currentCount={transactions.length}
+            label="transactions"
+            onPageChange={setPage}
+            onLimitChange={(nextLimit) => {
+              setLimit(nextLimit);
+              setPage(1);
+            }}
+          />
         )}
       </div>
     </div>

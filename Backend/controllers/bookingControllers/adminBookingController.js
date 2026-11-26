@@ -1,6 +1,6 @@
 const Booking = require('../../models/Booking');
 const { validationResult } = require('express-validator');
-const { BOOKING_STATUS } = require('../../utils/constants');
+const { BOOKING_STATUS, BOOKING_STATUS_GROUPS } = require('../../utils/constants');
 
 /**
  * Get all bookings with filters and search
@@ -23,7 +23,14 @@ const getAllBookings = async (req, res) => {
     // Build query
     const query = {};
 
-    if (status) query.status = status;
+    if (status) {
+      const normalized = String(status).trim().toLowerCase();
+      if (BOOKING_STATUS_GROUPS[normalized]) {
+        query.status = { $in: BOOKING_STATUS_GROUPS[normalized] };
+      } else {
+        query.status = { $regex: `^${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' };
+      }
+    }
     if (paymentStatus) query.paymentStatus = paymentStatus;
     if (userId) query.userId = userId;
     if (vendorId) query.vendorId = vendorId;

@@ -64,8 +64,12 @@ const SettlementManagement = () => {
       }
 
       if (activeTab === 'pending') {
-        const res = await adminSettlementService.getPendingSettlements();
+        const [res, wRes] = await Promise.all([
+          adminSettlementService.getPendingSettlements(),
+          adminSettlementService.getWithdrawalRequests()
+        ]);
         if (res.success) setPendingSettlements(res.data || []);
+        if (wRes.success) setWithdrawals(wRes.data || []);
       } else if (activeTab === 'vendors') {
         const res = await adminSettlementService.getVendorBalances({ filterDue: 'true' });
         if (res.success) setVendors(res.data || []);
@@ -715,29 +719,42 @@ const SettlementManagement = () => {
         <p className="text-gray-500 text-sm font-medium">No pending withdrawal requests. All settled!</p>
       </div>
     ) : (
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {withdrawals.map(request => (
-          <div key={request._id} className="bg-white rounded-xl p-5 shadow-sm border border-gray-200 hover:border-green-200 transition-all group">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-green-50 text-green-600 flex items-center justify-center font-bold text-lg">
-                  {request.vendorId?.name?.charAt(0)}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {withdrawals.map((request) => {
+          const vendorName = request.vendorId?.name || request.vendorId?.businessName || request.vendorName || 'Vendor';
+          const businessName = request.vendorId?.businessName && request.vendorId?.businessName !== vendorName ? request.vendorId.businessName : '';
+          const statusLabel = (request.status || 'pending').replace(/_/g, ' ');
+          const formatBankKey = (k) => k
+            .replace(/([A-Z])/g, ' $1')
+            .replace(/^./, (s) => s.toUpperCase())
+            .replace(/\bUpi Id\b/i, 'UPI ID');
+
+          return (
+          <div key={request._id} className="bg-white rounded-xl p-4 shadow-sm border border-gray-200 hover:border-green-200 transition-all flex flex-col justify-between gap-3">
+            <div className="flex justify-between items-start gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-full bg-green-50 text-green-700 flex items-center justify-center font-bold text-sm shrink-0">
+                  {vendorName.charAt(0).toUpperCase()}
                 </div>
-                <div>
-                  <h3 className="font-bold text-gray-900">{request.vendorId?.name}</h3>
-                  <p className="text-xs text-gray-500">{request.vendorId?.businessName}</p>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-sm text-gray-900 truncate">{vendorName}</h3>
+                  {businessName && <p className="text-xs text-gray-500 truncate">{businessName}</p>}
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-3xl font-bold text-green-600">₹{request.amount?.toLocaleString()}</p>
-                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mt-1">{request.status || 'pending'}</p>
-                {request.source === 'finance_wallet' && (
-                  <p className="text-[10px] text-blue-600 font-semibold">Finance wallet</p>
-                )}
+              <div className="text-right shrink-0">
+                <p className="text-2xl font-bold text-green-600 leading-tight">₹{request.amount?.toLocaleString()}</p>
+                <div className="flex items-center justify-end gap-1.5 mt-1">
+                  <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] uppercase tracking-wide font-semibold">
+                    {statusLabel}
+                  </span>
+                  {request.source === 'finance_wallet' && (
+                    <span className="text-[10px] text-blue-600 font-semibold">Finance wallet</span>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-lg p-3 mb-4 space-y-2">
+            <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 flex-1">
               <div className="flex justify-between text-xs">
                 <span className="text-gray-500">Available Earnings</span>
                 <span className="font-bold text-gray-700">₹{request.vendorId?.wallet?.earnings?.toLocaleString() || 0}</span>
@@ -747,12 +764,13 @@ const SettlementManagement = () => {
                 <span className="font-medium text-gray-700">{formatDate(request.requestDate)}</span>
               </div>
               {request.bankDetails && (
-                <div className="pt-2 border-t border-gray-200 mt-2">
-                  <p className="text-xs font-bold text-gray-400 uppercase mb-1">Bank Details</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <div className="pt-2 border-t border-gray-200 mt-1.5">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Bank Details</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs">
                     {Object.entries(request.bankDetails).map(([key, val]) => (
-                      <div key={key}>
-                        <span className="text-gray-500 capitalize">{key}:</span> <span className="text-gray-800 font-medium">{val}</span>
+                      <div key={key} className="truncate">
+                        <span className="text-gray-500">{formatBankKey(key)}:</span>{' '}
+                        <span className="text-gray-800 font-medium">{val}</span>
                       </div>
                     ))}
                   </div>
@@ -760,45 +778,48 @@ const SettlementManagement = () => {
               )}
             </div>
 
-            <div className="flex gap-2">
-              {request.status === 'failed' ? (
+            <div>
+              <div className="flex gap-2">
+                {request.status === 'failed' ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        setActionLoading(true);
+                        await adminSettlementService.retryWithdrawal(request._id);
+                        toast.success('Retry queued');
+                        loadData();
+                      } catch {
+                        toast.error('Retry failed');
+                      } finally {
+                        setActionLoading(false);
+                      }
+                    }}
+                    className="flex-1 py-2 bg-amber-600 text-white rounded-lg font-bold text-xs sm:text-sm cursor-pointer"
+                  >
+                    Retry Payout
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => openApproveWithdrawal(request)}
+                    className="flex-1 py-2 bg-green-600 text-white rounded-lg font-bold text-xs sm:text-sm shadow-sm hover:bg-green-700 active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    {request.status === 'awaiting_manual_transfer' ? 'Enter UTR & Settle' : 'Approve & Pay'}
+                  </button>
+                )}
                 <button
-                  onClick={async () => {
-                    try {
-                      setActionLoading(true);
-                      await adminSettlementService.retryWithdrawal(request._id);
-                      toast.success('Retry queued');
-                      loadData();
-                    } catch {
-                      toast.error('Retry failed');
-                    } finally {
-                      setActionLoading(false);
-                    }
-                  }}
-                  className="flex-1 py-2.5 bg-amber-600 text-white rounded-lg font-bold text-sm"
+                  onClick={() => openRejectWithdrawal(request)}
+                  className="flex-1 py-2 bg-white border border-red-200 text-red-600 rounded-lg font-bold text-xs sm:text-sm hover:bg-red-50 active:scale-[0.98] transition-all cursor-pointer"
                 >
-                  Retry Payout
+                  Reject
                 </button>
-              ) : (
-                <button
-                  onClick={() => openApproveWithdrawal(request)}
-                  className="flex-1 py-2.5 bg-green-600 text-white rounded-lg font-bold text-sm shadow-sm hover:bg-green-700 hover:shadow transform active:scale-95 transition-all"
-                >
-                  {request.status === 'awaiting_manual_transfer' ? 'Enter UTR & Settle' : 'Approve & Pay'}
-                </button>
+              </div>
+              {request.adminNotes && (
+                <p className="mt-2 text-xs text-gray-500 italic text-center">"{request.adminNotes}"</p>
               )}
-              <button
-                onClick={() => openRejectWithdrawal(request)}
-                className="flex-1 py-2.5 bg-white border border-red-200 text-red-600 rounded-lg font-bold text-sm hover:bg-red-50 active:scale-95 transition-all"
-              >
-                Reject
-              </button>
             </div>
-            {request.adminNotes && (
-              <p className="mt-3 text-xs text-gray-500 italic text-center">"{request.adminNotes}"</p>
-            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     )
   );
@@ -806,20 +827,35 @@ const SettlementManagement = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2 border-b border-gray-100 pb-3">
-        {settlementTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => navigate(tab.path)}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              activeTab === tab.id
-                ? 'bg-blue-600 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {settlementTabs.map((tab) => {
+          const badgeCount =
+            tab.id === 'pending'
+              ? pendingSettlements.length
+              : tab.id === 'withdrawals'
+                ? withdrawals.length
+                : 0;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => navigate(tab.path)}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all inline-flex items-center gap-2 ${
+                activeTab === tab.id
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              <span>{tab.label}</span>
+              {badgeCount > 0 && (
+                <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
+                  activeTab === tab.id ? 'bg-white text-blue-600' : 'bg-orange-500 text-white'
+                }`}>
+                  {badgeCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Dynamic Dashboard Cards */}

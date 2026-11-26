@@ -4,6 +4,7 @@ import { FiSearch, FiUser, FiPhone, FiMail, FiCheckCircle, FiSlash, FiCheck, FiT
 import { toast } from 'react-hot-toast';
 import { adminUserService } from '../../../../services/adminUserService';
 import UserDetailModal from './UserDetailModal';
+import Pagination from '../../components/common/Pagination';
 
 const AllUsers = () => {
   const [users, setUsers] = useState([]);
@@ -11,6 +12,7 @@ const AllUsers = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // all, active, inactive
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [totalUsers, setTotalUsers] = useState(0);
 
@@ -27,7 +29,7 @@ const AllUsers = () => {
       setLoading(true);
       const params = {
         page,
-        limit: 10,
+        limit,
         search: debouncedSearch
       };
 
@@ -51,7 +53,7 @@ const AllUsers = () => {
 
   useEffect(() => {
     fetchUsers();
-  }, [page, debouncedSearch, statusFilter]);
+  }, [page, limit, debouncedSearch, statusFilter]);
 
   const handleStatusToggle = async (userId, currentStatus) => {
     // The reason is stored in the audit log with the old/new status
@@ -157,9 +159,15 @@ const AllUsers = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5 text-gray-600 text-[11px]">
-                          <FiMail className="w-3 h-3" />
+                        <div className="flex items-center gap-1.5 text-gray-600 text-[11px] flex-wrap">
+                          <FiMail className="w-3 h-3 shrink-0" />
                           <span>{user.email}</span>
+                          {user.googleId && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200">Google</span>
+                          )}
+                          {user.appleId && (
+                            <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-gray-100 text-gray-800 border border-gray-300">Apple</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-1.5 text-gray-600 text-[11px]">
                           <FiPhone className="w-3 h-3" />
@@ -219,27 +227,19 @@ const AllUsers = () => {
 
         {/* Pagination */}
         {!loading && users.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/30">
-            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tight">
-              Showing {users.length} of {totalUsers} users
-            </p>
-            <div className="flex gap-1.5">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 disabled:opacity-50 hover:bg-white transition-all"
-              >
-                Prev
-              </button>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-gray-600 disabled:opacity-50 hover:bg-white transition-all"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalUsers}
+            limit={limit}
+            currentCount={users.length}
+            label="users"
+            onPageChange={setPage}
+            onLimitChange={(nextLimit) => {
+              setLimit(nextLimit);
+              setPage(1);
+            }}
+          />
         )}
       </div>
       {viewUserId && <UserDetailModal userId={viewUserId} onClose={() => setViewUserId(null)} onChanged={() => setPage((p) => p)} />}

@@ -109,7 +109,13 @@ const WorkerLogin = () => {
       const token = await result.user.getIdToken();
       
       const response = await sharedAuthService.socialLogin({ token, role: 'worker' });
-      if (response.success) {
+      if (response.success && response.requiresSignup) {
+        toast('Please complete your registration to continue.');
+        navigate(response.redirectTo || '/worker/signup', {
+          replace: true,
+          state: { socialPrefill: response.prefill }
+        });
+      } else if (response.success) {
         toast.success(`Welcome Back! Logged in as ${response.user.role}`);
         navigate(response.redirectTo, { replace: true });
       } else {

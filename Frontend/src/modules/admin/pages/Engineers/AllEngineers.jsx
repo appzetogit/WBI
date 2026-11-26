@@ -153,6 +153,8 @@ const AllEngineers = () => {
           },
           createdAt: engineer.createdAt,
           isActive: engineer.isActive,
+          googleId: engineer.googleId,
+          appleId: engineer.appleId,
           engineerType: engineer.engineerType || 'freelancer',
           online: String(engineer.status || '').toUpperCase() === 'ONLINE' || String(engineer.status || '').toUpperCase() === 'BUSY'
         }));
@@ -619,7 +621,17 @@ const AllEngineers = () => {
               <SectionTitle>Personal Information</SectionTitle>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <DetailField label="Name">{display(selectedEngineer.name)}</DetailField>
-                <DetailField label="Email">{display(selectedEngineer.email)}</DetailField>
+                <DetailField label="Email">
+                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                    <span>{display(selectedEngineer.email)}</span>
+                    {selectedEngineer.googleId && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200">Google</span>
+                    )}
+                    {selectedEngineer.appleId && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-800 border border-gray-300">Apple</span>
+                    )}
+                  </span>
+                </DetailField>
                 <DetailField label="Phone">{display(selectedEngineer.phone)}</DetailField>
                 <DetailField label="WhatsApp">{display(selectedEngineer.whatsappNumber)}</DetailField>
                 <DetailField label="Emergency Contact">{display(selectedEngineer.emergencyContactNumber)}</DetailField>

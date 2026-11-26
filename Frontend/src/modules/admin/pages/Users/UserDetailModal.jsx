@@ -18,7 +18,12 @@ const ProfileTab = ({ id, onChanged }) => {
         <Field label="Name"><input value={f.name} onChange={(e) => setForm({ ...f, name: e.target.value })} className={inputCls} /></Field>
         <Field label="Email"><input value={f.email} onChange={(e) => setForm({ ...f, email: e.target.value })} className={inputCls} /></Field>
       </div>
-      <p className="text-gray-500">Phone {u.phone} · Joined {when(u.createdAt)} · <Badge tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'active' : 'blocked'}</Badge></p>
+      <p className="text-gray-500 flex items-center gap-1.5 flex-wrap">
+        <span>Phone {u.phone} · Joined {when(u.createdAt)} ·</span>
+        <Badge tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'active' : 'blocked'}</Badge>
+        {u.googleId && <Badge tone="blue">Google</Badge>}
+        {u.appleId && <Badge tone="gray">Apple</Badge>}
+      </p>
       {d.data?.stats && <p className="text-gray-500">Bookings {d.data.stats.totalBookings ?? '—'} · Spent {inr(d.data.stats.totalSpent)}</p>}
       <Button disabled={!form} onClick={async () => { if (await act(() => api.put(`/admin/users/${id}`, form), 'Saved')) { setForm(null); d.reload(); onChanged(); } }}>Save changes</Button>
     </div>

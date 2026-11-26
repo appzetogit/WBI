@@ -595,18 +595,19 @@ exports.socialLogin = async (req, res) => {
 
     let isNewUser = false;
     if (!user) {
-      if (targetRoleInfo.role === 'vendor') {
+      if (['vendor', 'worker', 'engineer'].includes(targetRoleInfo.role)) {
         return res.status(200).json({
           success: true,
           requiresSignup: true,
           isNewUser: true,
-          role: 'vendor',
+          role: targetRoleInfo.role,
           prefill: {
+            name: name || '',
             ownerName: name || '',
             email: email || ''
           },
-          redirectTo: '/vendor/signup',
-          message: 'Please complete your partner registration to continue.'
+          redirectTo: `/${targetRoleInfo.role}/signup`,
+          message: 'Please complete your registration to continue.'
         });
       }
 

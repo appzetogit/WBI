@@ -131,7 +131,9 @@ const AllVendors = () => {
           service: vendor.service,
           approvalStatus: vendor.approvalStatus,
           createdAt: vendor.createdAt,
-          isActive: vendor.isActive
+          isActive: vendor.isActive,
+          googleId: vendor.googleId,
+          appleId: vendor.appleId
         }));
         setVendors(transformedVendors);
       } else {
@@ -512,7 +514,17 @@ const AllVendors = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <DetailField label="Business Name">{display(selectedVendor.businessName)}</DetailField>
                 <DetailField label="Owner Name">{display(selectedVendor.name)}</DetailField>
-                <DetailField label="Email">{display(selectedVendor.email)}</DetailField>
+                <DetailField label="Email">
+                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                    <span>{display(selectedVendor.email)}</span>
+                    {selectedVendor.googleId && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-700 border border-blue-200">Google</span>
+                    )}
+                    {selectedVendor.appleId && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-gray-100 text-gray-800 border border-gray-300">Apple</span>
+                    )}
+                  </span>
+                </DetailField>
                 <DetailField label="Phone">{display(selectedVendor.phone)}</DetailField>
                 <DetailField label="GSTIN">{display(selectedVendor.gstin)}</DetailField>
                 <DetailField label="PAN Number">{display(selectedVendor.pan?.number)}</DetailField>

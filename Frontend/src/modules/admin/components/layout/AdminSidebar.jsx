@@ -22,6 +22,7 @@ import {
 } from "react-icons/fi";
 import adminMenu from "../../config/adminMenu.json";
 import { hasAdminPermission } from "../../utils/adminPermissions";
+import Logo from "../../../../components/common/Logo";
 
 const CONTROL_CENTER_PERMS = {
   "All Jobs": "jobs.read", "Disputes": "disputes.read", "Refunds": "payments.read",
@@ -227,6 +228,10 @@ const AdminSidebar = ({ isOpen, onClose }) => {
   const [counts, setCounts] = useState({
     bookings: 0,
     vendors: 0,
+    workers: 0,
+    engineers: 0,
+    b2b: 0,
+    disputes: 0,
     withdrawals: 0,
     pendingSettlements: 0,
     scraps: 0
@@ -268,6 +273,10 @@ const AdminSidebar = ({ isOpen, onClose }) => {
           setCounts({
             bookings: stats.pendingBookings || 0,
             vendors: stats.pendingVendors || 0,
+            workers: stats.pendingWorkers || 0,
+            engineers: stats.pendingEngineers || 0,
+            b2b: stats.pendingB2B || 0,
+            disputes: stats.openDisputes || 0,
             withdrawals: stats.pendingWithdrawals || 0,
             pendingSettlements: stats.pendingSettlements || 0,
             scraps: stats.pendingScraps || 0
@@ -375,6 +384,56 @@ const AdminSidebar = ({ isOpen, onClose }) => {
     }
   };
 
+  const renderBadges = (badges, compact = false) => {
+    const visible = badges.filter((b) => b.value > 0);
+    if (visible.length === 0) return null;
+    return (
+      <div className="flex items-center gap-1 shrink-0">
+        {visible.map((b, idx) => (
+          <span
+            key={idx}
+            className={`${b.tone === 'orange' ? 'bg-orange-500' : 'bg-red-500'} text-white text-[10px] font-bold ${compact ? 'h-4 min-w-[18px]' : 'min-w-[20px] py-0.5'} px-1.5 flex items-center justify-center rounded-full`}
+          >
+            {b.value > 99 ? '99+' : b.value}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  const getParentBadges = (title) => {
+    const map = {
+      Bookings: [{ value: counts.bookings, tone: 'red' }],
+      Vendors: [
+        { value: counts.vendors, tone: 'red' },
+        { value: counts.withdrawals + counts.pendingSettlements, tone: 'orange' }
+      ],
+      Workers: [{ value: counts.workers, tone: 'red' }],
+      Engineers: [{ value: counts.engineers, tone: 'red' }],
+      B2B: [{ value: counts.b2b, tone: 'red' }],
+      'Control Center': [{ value: counts.disputes, tone: 'red' }],
+      'Scrap Items': [{ value: counts.scraps, tone: 'red' }]
+    };
+    return map[title] || [];
+  };
+
+  const getChildBadges = (parentTitle, childTitle) => {
+    const key = `${parentTitle}:${childTitle}`;
+    const map = {
+      'Bookings:All Bookings': [{ value: counts.bookings, tone: 'red' }],
+      'Vendors:All Vendors': [{ value: counts.vendors, tone: 'red' }],
+      'Vendors:Settlements & Withdrawals': [
+        { value: counts.pendingSettlements, tone: 'red' },
+        { value: counts.withdrawals, tone: 'orange' }
+      ],
+      'Workers:All Workers': [{ value: counts.workers, tone: 'red' }],
+      'Engineers:All Engineers': [{ value: counts.engineers, tone: 'red' }],
+      'B2B:Company Approvals': [{ value: counts.b2b, tone: 'red' }],
+      'Control Center:Disputes': [{ value: counts.disputes, tone: 'red' }]
+    };
+    return map[key] || [];
+  };
+
   // Render menu item
   const renderMenuItem = (item) => {
     const Icon = iconMap[item.title] || FiHome;
@@ -383,14 +442,14 @@ const AdminSidebar = ({ isOpen, onClose }) => {
     const active = isActive(item.route);
 
     return (
-      <div key={item.route} className="mb-1">
+      <div key={item.route} className="mb-0.5">
         {/* Main Menu Item */}
         <div
           className={`
-            flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 cursor-pointer
+            flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all duration-150 cursor-pointer
             ${active
               ? "bg-primary-600 text-white shadow-sm"
-              : "text-gray-300 hover:bg-slate-700"
+              : "text-slate-300 hover:bg-slate-700/60 hover:text-white"
             }
           `}
           onClick={() => {
@@ -401,40 +460,22 @@ const AdminSidebar = ({ isOpen, onClose }) => {
             }
           }}>
           <Icon
-            className={`text-xl flex-shrink-0 ${active ? "text-white" : "text-gray-400"
-              }`}
+            className={`text-[17px] flex-shrink-0 ${active ? "text-white" : "text-slate-400"}`}
           />
-          <span className="font-semibold flex-1 text-base">{item.title}</span>
+          <span className="font-medium flex-1 text-sm truncate">{item.title}</span>
 
           {/* Badge Display */}
-          {item.title === "Bookings" && counts.bookings > 0 && (
-            <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse mr-2">
-              {counts.bookings > 99 ? '99+' : counts.bookings}
-            </span>
-          )}
-          {item.title === "Vendors" && counts.vendors > 0 && (
-            <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse mr-2">
-              {counts.vendors > 99 ? '99+' : counts.vendors}
-            </span>
-          )}
-          {item.title === "Vendors" && (counts.withdrawals + counts.pendingSettlements) > 0 && (
-            <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm mr-2">
-              {(counts.withdrawals + counts.pendingSettlements) > 99 ? '99+' : (counts.withdrawals + counts.pendingSettlements)}
-            </span>
-          )}
-          {item.title === "Scrap Items" && counts.scraps > 0 && (
-            <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse mr-2">
-              {counts.scraps > 99 ? '99+' : counts.scraps}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {renderBadges(getParentBadges(item.title))}
 
-          {hasChildren && (
-            <motion.div
-              animate={{ rotate: isExpanded ? 180 : 0 }}
-              transition={{ duration: 0.2 }}>
-              <FiChevronDown className="text-gray-400 text-sm" />
-            </motion.div>
-          )}
+            {hasChildren && (
+              <motion.div
+                animate={{ rotate: isExpanded ? 180 : 0 }}
+                transition={{ duration: 0.2 }}>
+                <FiChevronDown className={`text-sm ${active ? "text-white/80" : "text-slate-400"}`} />
+              </motion.div>
+            )}
+          </div>
         </div>
 
         {/* Children Items */}
@@ -446,9 +487,15 @@ const AdminSidebar = ({ isOpen, onClose }) => {
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
               className="overflow-hidden">
-              <div className="ml-4 mt-1 pl-4 border-l-2 border-slate-600 space-y-1">
+              <div className="ml-4 mt-1 pl-3 border-l border-slate-700 space-y-0.5">
                 {item.children.map((child, index) => {
-                  const childRoute = getChildRoute(item.route, child);
+                  const childRoute =
+                    item.title === 'Vendors' &&
+                    child === 'Settlements & Withdrawals' &&
+                    counts.pendingSettlements === 0 &&
+                    counts.withdrawals > 0
+                      ? '/admin/vendors/settlements/withdrawals'
+                      : getChildRoute(item.route, child);
                   const isChildActive =
                     location.pathname === childRoute ||
                     (childRoute !== item.route &&
@@ -463,23 +510,14 @@ const AdminSidebar = ({ isOpen, onClose }) => {
                         handleMenuItemClick(childRoute, item.title)
                       }
                       className={`
-                        px-3 py-2.5 text-sm rounded-lg transition-colors cursor-pointer flex justify-between items-center
+                        px-3 py-2 text-[13px] leading-snug rounded-lg transition-colors cursor-pointer flex justify-between items-center gap-2
                         ${isChildActive
-                          ? "bg-slate-600 text-white font-semibold shadow-inner"
-                          : "text-slate-300 hover:bg-slate-700 hover:text-white font-medium"
+                          ? "bg-slate-700 text-white font-semibold"
+                          : "text-slate-400 hover:bg-slate-700/50 hover:text-white font-medium"
                         }
                       `}>
-                      <span>{child}</span>
-                      {item.title === "Vendors" && child === "Settlements & Withdrawals" && counts.pendingSettlements > 0 && (
-                        <span className="bg-red-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full">
-                          {counts.pendingSettlements}
-                        </span>
-                      )}
-                      {item.title === "Vendors" && child === "Settlements & Withdrawals" && counts.withdrawals > 0 && (
-                        <span className="bg-orange-500 text-white text-[10px] h-5 min-w-[20px] px-1.5 flex items-center justify-center rounded-full ml-1">
-                          {counts.withdrawals}
-                        </span>
-                      )}
+                      <span className="truncate">{child}</span>
+                      {renderBadges(getChildBadges(item.title, child), true)}
                     </div>
                   );
                 })}
@@ -495,25 +533,15 @@ const AdminSidebar = ({ isOpen, onClose }) => {
   const sidebarContent = (
     <div className="h-full w-full flex flex-col bg-slate-800">
       {/* Header Section */}
-      <div className="px-4 py-6 border-b border-slate-700 bg-slate-900">
+      <div className="px-4 py-4 border-b border-slate-700/80 bg-slate-900">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center shadow-md flex-shrink-0"
-              style={{
-                background: 'linear-gradient(135deg, #2874F0 0%, #4787F7 100%)',
-              }}
-            >
-              <FiUser className="text-white text-xl" />
-            </div>
+            <Logo onDark className="h-7 w-7" />
             <div className="flex-1 min-w-0">
-              <h2 className="font-bold text-white text-lg tracking-wider truncate">
-                WBI
-              </h2>
-              <p className="text-sm font-medium text-slate-200 truncate mt-0.5">
+              <h2 className="font-bold text-white text-base tracking-tight truncate">
                 WBI Admin
-              </p>
-              <p className="text-[10px] text-slate-400 truncate mt-0.5" title="Wetzel Barron Innovation">
+              </h2>
+              <p className="text-[11px] text-slate-400 truncate" title="Wetzel Barron Innovation">
                 Wetzel Barron Innovation
               </p>
             </div>
@@ -522,7 +550,7 @@ const AdminSidebar = ({ isOpen, onClose }) => {
           {/* Close Button - Mobile Only */}
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0 lg:hidden"
+            className="p-2 hover:bg-white/10 rounded-lg transition-colors flex-shrink-0 lg:hidden cursor-pointer"
             aria-label="Close sidebar">
             <FiX className="text-xl text-gray-300" />
           </button>

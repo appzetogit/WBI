@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { FiCheckCircle, FiArrowRight, FiArrowLeft, FiChevronLeft, FiUser, FiPhone, FiLock, FiMapPin, FiMail, FiBriefcase, FiClock, FiTool } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { workerAuthService } from '../../../services/authService';
@@ -34,6 +34,8 @@ const generateObjectId = () => {
 
 export default function WorkerSignup() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const socialPrefill = location.state?.socialPrefill;
   const [currentStep, setCurrentStep] = useState(1);
   const [config, setConfig] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,8 +53,9 @@ export default function WorkerSignup() {
 
   const [formData, setFormData] = useState({
     tempEntityId: generateObjectId(),
-    name: '',
+    name: socialPrefill?.name || '',
     phone: '',
+    email: socialPrefill?.email || '',
     password: '',
     serviceCategories: [],
     workerServices: [], // Array of { categoryId, serviceId, experienceYears, experienceMonths, specificSkills }

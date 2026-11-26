@@ -1,13 +1,16 @@
 const User = require('../../models/User');
 const Vendor = require('../../models/Vendor');
 const Worker = require('../../models/Worker');
+const Engineer = require('../../models/Engineer');
+const B2BCompany = require('../../models/B2BCompany');
+const Dispute = require('../../models/Dispute');
 const Booking = require('../../models/Booking');
 const Withdrawal = require('../../models/Withdrawal');
 const Settlement = require('../../models/Settlement');
 const Scrap = require('../../models/Scrap');
 const Service = require('../../models/Service');
 const UserService = require('../../models/UserService');
-const { BOOKING_STATUS, PAYMENT_STATUS, VENDOR_STATUS } = require('../../utils/constants');
+const { BOOKING_STATUS, BOOKING_STATUS_GROUPS, PAYMENT_STATUS, VENDOR_STATUS } = require('../../utils/constants');
 
 /**
  * Helper to build date range filter on createdAt or completedAt
@@ -54,22 +57,14 @@ const getDashboardStats = async (req, res) => {
     const totalWorkers = await Worker.countDocuments({ isActive: true, ...dateFilter });
     const totalBookings = await Booking.countDocuments(dateFilter);
 
-    // Booking stats (case-insensitive enum checks)
-    const completedStatuses = [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CLOSED, 'completed', 'closed'];
-    const cancelledStatuses = [BOOKING_STATUS.CANCELLED, BOOKING_STATUS.REJECTED, 'cancelled', 'rejected'];
-
-    const pendingBookings = await Booking.countDocuments({
-      ...dateFilter,
-      status: { $nin: [...completedStatuses, ...cancelledStatuses] }
-    });
-    const completedBookings = await Booking.countDocuments({
-      ...dateFilter,
-      status: { $in: completedStatuses }
-    });
-    const cancelledBookings = await Booking.countDocuments({
-      ...dateFilter,
-      status: { $in: cancelledStatuses }
-    });
+    // Booking stats using shared status groups
+    const [pendingBookings, confirmedBookings, inProgressBookings, completedBookings, cancelledBookings] = await Promise.all([
+      Booking.countDocuments({ ...dateFilter, status: { $in: BOOKING_STATUS_GROUPS.pending } }),
+      Booking.countDocuments({ ...dateFilter, status: { $in: BOOKING_STATUS_GROUPS.confirmed } }),
+      Booking.countDocuments({ ...dateFilter, status: { $in: BOOKING_STATUS_GROUPS.in_progress } }),
+      Booking.countDocuments({ ...dateFilter, status: { $in: BOOKING_STATUS_GROUPS.completed } }),
+      Booking.countDocuments({ ...dateFilter, status: { $in: BOOKING_STATUS_GROUPS.cancelled } })
+    ]);
 
     // Revenue stats: sum finalAmount or fallback to basePrice
     const validPaymentStatuses = [
@@ -86,7 +81,7 @@ const getDashboardStats = async (req, res) => {
       {
         $match: {
           $or: [
-            { status: { $in: completedStatuses } },
+            { status: { $in: BOOKING_STATUS_GROUPS.completed } },
             { paymentStatus: { $in: validPaymentStatuses } }
           ],
           ...revenueDateMatch
@@ -113,9 +108,16 @@ const getDashboardStats = async (req, res) => {
     const approvedVendors = await Vendor.countDocuments({ approvalStatus: VENDOR_STATUS.APPROVED, ...dateFilter });
 
     // Withdrawal & Settlement stats
-    const pendingWithdrawals = await Withdrawal.countDocuments({ status: 'pending', ...dateFilter }).catch(() => 0);
+    const pendingWithdrawals = await Withdrawal.countDocuments({
+      status: { $in: ['pending', 'awaiting_manual_transfer', 'processing'] },
+      ...dateFilter
+    }).catch(() => 0);
     const pendingSettlementsCount = await Settlement.countDocuments({ status: 'pending', ...dateFilter }).catch(() => 0);
     const pendingScraps = await Scrap.countDocuments({ status: 'pending', ...dateFilter }).catch(() => 0);
+    const pendingWorkers = await Worker.countDocuments({ approvalStatus: 'pending', ...dateFilter }).catch(() => 0);
+    const pendingEngineers = await Engineer.countDocuments({ approvalStatus: 'pending', ...dateFilter }).catch(() => 0);
+    const pendingB2B = await B2BCompany.countDocuments({ verificationStatus: { $in: ['pending', 'verified'] }, deletedAt: null }).catch(() => 0);
+    const openDisputes = await Dispute.countDocuments({ status: { $in: ['open', 'in_review', 'pending'] } }).catch(() => 0);
 
     // Recent activities (filtered by period)
     const recentActivityDocs = await Booking.find(dateFilter)
@@ -149,6 +151,8 @@ const getDashboardStats = async (req, res) => {
           totalWorkers,
           totalBookings,
           pendingBookings,
+          confirmedBookings,
+          inProgressBookings,
           completedBookings,
           cancelledBookings,
           totalRevenue: revenue.totalRevenue,
@@ -157,7 +161,11 @@ const getDashboardStats = async (req, res) => {
           approvedVendors,
           pendingWithdrawals,
           pendingSettlements: pendingSettlementsCount,
-          pendingScraps
+          pendingScraps,
+          pendingWorkers,
+          pendingEngineers,
+          pendingB2B,
+          openDisputes
         },
         recentBookings
       }
@@ -213,7 +221,7 @@ const getRevenueAnalytics = async (req, res) => {
       {
         $match: {
           $or: [
-            { status: { $in: completedStatuses } },
+            { status: { $in: BOOKING_STATUS_GROUPS.completed } },
             { paymentStatus: { $in: validPaymentStatuses } }
           ],
           ...revenueDateMatch

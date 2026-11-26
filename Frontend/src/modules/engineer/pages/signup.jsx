@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom';
 import { FiUser, FiMail, FiPhone, FiLock, FiCheckCircle, FiArrowRight, FiArrowLeft, FiChevronLeft, FiMapPin, FiBriefcase, FiUploadCloud, FiVideo, FiCamera, FiCheck, FiX, FiTag, FiLoader } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { useDebouncedCallback } from 'use-debounce';
@@ -57,6 +57,8 @@ const getSignupSessionId = () => {
 
 export default function EngineerSignup() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const socialPrefill = location.state?.socialPrefill;
   const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
   const [config, setConfig] = useState(null);
@@ -91,6 +93,8 @@ export default function EngineerSignup() {
   // Form State
   const [formData, setFormData] = useState({
     tempEntityId: generateObjectId(),
+    name: socialPrefill?.name || '',
+    email: socialPrefill?.email || '',
     engineerType: 'freelancer',
     vendorCode: '',
     vendorCompanyId: '',

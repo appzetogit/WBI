@@ -5,6 +5,7 @@ import {
 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import b2bAdminService from '../../services/b2bAdminService';
+import Pagination from '../../components/common/Pagination';
 import { getUserFacingError } from '../../../../utils/userFacingError';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
@@ -396,14 +397,15 @@ const UnassignedQueue = () => {
           </ul>
 
           {pg.totalPages > 1 && (
-            <div className="flex items-center justify-between text-xs text-gray-600">
-              <span>{pg.total} job(s)</span>
-              <span className="flex gap-2">
-                <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="px-3 py-1.5 border border-gray-200 rounded-lg disabled:opacity-40">Previous</button>
-                <span className="px-2 py-1.5">Page {pg.page} of {pg.totalPages}</span>
-                <button type="button" disabled={page >= pg.totalPages} onClick={() => setPage((p) => p + 1)} className="px-3 py-1.5 border border-gray-200 rounded-lg disabled:opacity-40">Next</button>
-              </span>
-            </div>
+            <Pagination
+              page={pg.page || page}
+              totalPages={pg.totalPages}
+              totalItems={pg.total}
+              limit={25}
+              currentCount={rows.length}
+              label="jobs"
+              onPageChange={setPage}
+            />
           )}
         </>
       )}
